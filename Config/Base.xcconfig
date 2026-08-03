@@ -1,0 +1,4 @@
+PRODUCT_BUNDLE_IDENTIFIER = com.fatihzxc.HealthTrackingApp
+ICLOUD_CONTAINER_IDENTIFIER = iCloud.com.fatihzxc.HealthTrackingApp
+IPHONEOS_DEPLOYMENT_TARGET = 17.0
+SWIFT_STRICT_CONCURRENCY = complete

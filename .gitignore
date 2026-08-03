@@ -1,3 +1,21 @@
 # Local agent workspaces
 /.worktrees/
 .superpowers/sdd/
+
+# Xcode/XcodeGen build products and user state
+*.xcodeproj/
+App/Resources/Info.plist
+DerivedData/
+xcuserdata/
+*.xcuserstate
+.build/
+*.xcresult/
+
+# Signing material and local secrets
+*.mobileprovision
+*.p12
+*.cer
+*.pem
+*.key
+.env
+.env.*

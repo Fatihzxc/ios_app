@@ -1,0 +1,16 @@
+{
+  "sourceLanguage" : "tr",
+  "strings" : {
+    "bootstrap.ready" : {
+      "localizations" : {
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kurulum hazır"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}
