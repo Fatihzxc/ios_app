@@ -57,8 +57,14 @@ jobs:
           fi
           printf '%s\n' "$version_output"
 
+      - name: Targeted PersistenceKit tests
+        run: scripts/test-ios.sh --only-testing PersistenceKitTests
+
       - name: Test iOS app
         run: scripts/test-ios.sh
+
+      - name: Cloud scheme compile-only
+        run: scripts/test-ios.sh --cloud-compile-only
 
       - name: Upload test results
         if: always()

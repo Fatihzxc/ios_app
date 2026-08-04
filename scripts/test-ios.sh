@@ -10,17 +10,45 @@ xcodebuild_test_arguments=(
     -project HealthTrackingApp.xcodeproj
     -scheme HealthTrackingApp-Local
 )
+cloud_compile_only=false
 
 if (( $# > 0 )); then
-    if (( $# != 2 )) || [[ "$1" != "--only-testing" ]] || [[ -z "$2" ]]; then
-        echo "Usage: $0 [--only-testing TestBundleName]" >&2
-        exit 2
-    fi
-    xcodebuild_test_arguments+=("-only-testing:$2")
+    case "$1" in
+        --only-testing)
+            if (( $# != 2 )) || [[ -z "$2" ]]; then
+                echo "Usage: $0 [--only-testing TestBundleName|--cloud-compile-only]" >&2
+                exit 2
+            fi
+            xcodebuild_test_arguments+=("-only-testing:$2")
+            ;;
+        --cloud-compile-only)
+            if (( $# != 1 )); then
+                echo "Usage: $0 [--only-testing TestBundleName|--cloud-compile-only]" >&2
+                exit 2
+            fi
+            cloud_compile_only=true
+            ;;
+        *)
+            echo "Usage: $0 [--only-testing TestBundleName|--cloud-compile-only]" >&2
+            exit 2
+            ;;
+    esac
 fi
 
 "$script_dir/bootstrap.sh"
 destination="$("$script_dir/select-simulator.sh")"
+
+if [[ "$cloud_compile_only" == true ]]; then
+    echo "Cloud scheme compile-only: signing disabled; this does not validate CloudKit sync."
+    xcodebuild build \
+        -project HealthTrackingApp.xcodeproj \
+        -scheme HealthTrackingApp-Cloud \
+        -configuration "Cloud Debug" \
+        -destination "$destination" \
+        CODE_SIGNING_ALLOWED=NO
+    exit 0
+fi
+
 result_bundle_path="$repo_root/.build/HealthTrackingApp.xcresult"
 
 mkdir -p "$(dirname "$result_bundle_path")"
