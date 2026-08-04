@@ -12,7 +12,8 @@ let package = Package(
     products: [
         .library(name: "CoreModels", targets: ["CoreModels"]),
         .library(name: "TrainingKit", targets: ["TrainingKit"]),
-        .library(name: "PersistenceKit", targets: ["PersistenceKit"])
+        .library(name: "PersistenceKit", targets: ["PersistenceKit"]),
+        .library(name: "DesignSystem", targets: ["DesignSystem"])
     ],
     targets: [
         .target(
@@ -29,6 +30,11 @@ let package = Package(
             dependencies: ["CoreModels", "TrainingKit"],
             swiftSettings: strictConcurrency
         ),
+        .target(
+            name: "DesignSystem",
+            resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
         .testTarget(
             name: "CoreModelsTests",
             dependencies: ["CoreModels"],
@@ -37,6 +43,11 @@ let package = Package(
         .testTarget(
             name: "PersistenceKitTests",
             dependencies: ["CoreModels", "TrainingKit", "PersistenceKit"],
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
+            name: "DesignSystemTests",
+            dependencies: ["DesignSystem"],
             swiftSettings: strictConcurrency
         )
     ]

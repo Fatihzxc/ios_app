@@ -57,11 +57,63 @@ jobs:
           fi
           printf '%s\n' "$version_output"
 
-      - name: Targeted PersistenceKit tests
-        run: scripts/test-ios.sh --only-testing PersistenceKitTests
+      - name: Targeted DesignSystem tests
+        run: scripts/test-ios.sh --only-testing DesignSystemTests
 
       - name: Test iOS app
         run: scripts/test-ios.sh
+
+      - name: Export gallery screenshot evidence
+        run: |
+          set -euo pipefail
+          result_bundle=".build/HealthTrackingApp.xcresult"
+          export_directory=".build/gallery-screenshots"
+
+          test -d "$result_bundle"
+          rm -rf "$export_directory"
+          mkdir -p "$export_directory"
+          xcrun xcresulttool help export attachments
+          xcrun xcresulttool export attachments --path "$result_bundle" --output-path "$export_directory"
+
+          python3 - "$export_directory" <<'PY'
+          import json
+          import shutil
+          import sys
+          from pathlib import Path
+
+          export_directory = Path(sys.argv[1])
+          manifest = json.loads((export_directory / "manifest.json").read_text())
+          gallery_record = next(
+              (record for record in manifest if "GalleryScreenshotTests/" in record["testIdentifier"]),
+              None,
+          )
+          if gallery_record is None:
+              raise SystemExit("Missing GalleryScreenshotTests attachment record.")
+
+          expected = {"light", "dark"}
+          exported = {}
+          for attachment in gallery_record["attachments"]:
+              suggested_name = attachment["suggestedHumanReadableName"].lower()
+              for appearance in expected:
+                  if suggested_name.startswith(f"gallery-{appearance}_"):
+                      source = export_directory / attachment["exportedFileName"]
+                      if not source.is_file() or source.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+                          raise SystemExit(f"Missing supported {appearance} gallery image: {source}")
+                      destination = export_directory / f"gallery-{appearance}{source.suffix.lower()}"
+                      shutil.copyfile(source, destination)
+                      exported[appearance] = (destination.name, source.name)
+
+          if set(exported) != expected:
+              raise SystemExit(f"Expected light and dark gallery attachments, found: {sorted(exported)}")
+
+          (export_directory / "manifest.tsv").write_text(
+              "".join(
+                  f"{appearance.title()} gallery\t{exported[appearance][0]}\tsource={exported[appearance][1]}\n"
+                  for appearance in sorted(expected)
+              )
+          )
+          PY
+          find "$export_directory" -maxdepth 1 -type f -print | sort
 
       - name: Cloud scheme compile-only
         run: scripts/test-ios.sh --cloud-compile-only
@@ -71,6 +123,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: HealthTrackingApp-xcresult
-          path: .build/**/*.xcresult
+          path: |
+            .build/**/*.xcresult
+            .build/gallery-screenshots/**
           include-hidden-files: true
           if-no-files-found: warn

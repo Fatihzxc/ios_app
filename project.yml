@@ -62,6 +62,7 @@ schemes:
         - HealthTrackingAppUITests
         - package: HealthTrackingModules/CoreModelsTests
         - package: HealthTrackingModules/PersistenceKitTests
+        - package: HealthTrackingModules/DesignSystemTests
     archive:
       config: Release
   HealthTrackingApp-Cloud:

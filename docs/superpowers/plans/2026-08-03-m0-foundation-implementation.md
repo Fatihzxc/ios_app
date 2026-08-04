@@ -714,7 +714,10 @@ public final class SwiftDataSeedLoader: SeedLoading {
 
 - [ ] Test exact approved hex values for all background, ink, accent, state and border tokens in light/dark.
 - [ ] Implement test-side WCAG formula first and assert at least these normal-text pairs ≥4.5: primary/base, primary/raised, secondary/base, tertiary/base, onAction/action in both schemes where semantically used.
-- [ ] Assert state/icon pairs and strong border against their intended surface ≥3.0.
+- [ ] Assert state/icon pairs against `bg.base` ≥3.0.
+- [ ] Assert `border.strong` ≥3.0 against each of `bg.base`, `bg.raised` and `bg.sunken`, in both schemes, after alpha compositing.
+- [ ] The contrast helper composites any non-opaque token over the surface using gamma-encoded sRGB source-over (`c = α·c_fg + (1−α)·c_bg`) before computing relative luminance. A helper that reads a non-opaque token's RGB directly is a test defect, not a passing gate.
+- [ ] `border.hairline` is decorative and deliberately excluded from the ≥3.0 gate; the exemption lapses if it is used as an interactive control's sole boundary.
 - [ ] Assert spacing set is exactly 2/4/8/12/16/24/32/40, horizontal padding 20 and radii 8/10/14/16.
 - [ ] Push test-only provisional commit and capture missing-symbol RED.
 - [ ] Add `package: HealthTrackingModules/DesignSystemTests` to the Local scheme test action before the RED push so CI actually executes this package test bundle.
@@ -728,7 +731,10 @@ public struct SRGBColor: Equatable, Sendable {
     public let blue: Double
     public let alpha: Double
     public init(hex: String) throws
+    public var isOpaque: Bool { get }
     public var relativeLuminance: Double { get }
+    public func composited(over background: SRGBColor) -> SRGBColor
+    /// Precondition: both operands are opaque. Composite alpha tokens first.
     public func contrastRatio(against other: SRGBColor) -> Double
     public var swiftUIColor: Color { get }
 }

@@ -413,8 +413,8 @@ Ham renk kodları feature view’larında kullanılmaz.
 | `state.warning` | `#8A5A00` | `#F5C462` | Deload ve tavan |
 | `state.danger` | `#B3261E` | `#FF8A80` | Aktif güvenlik durumu |
 | `state.info` | `#2A5AA8` | `#8CB6FF` | Nötr bilgi |
-| `border.hairline` | `#00000014` | `#FFFFFF1A` | İnce ayırıcı |
-| `border.strong` | `#0000002E` | `#FFFFFF33` | Input sınırı |
+| `border.hairline` | `#00000014` | `#FFFFFF1A` | İnce ayırıcı; dekoratif, kontrast kapısı dışında |
+| `border.strong` | `#00000070` | `#FFFFFF5C` | Input ve kontrol sınırı; bg.base/bg.raised/bg.sunken üzerinde ≥3:1 |
 
 Faz renkleri birbirinden ayrı ve etiketle birlikte kullanılır:
 
@@ -423,7 +423,7 @@ Faz renkleri birbirinden ayrı ve etiketle birlikte kullanılır:
 - Faz 3: amber
 - Faz 4: magenta
 
-Grafik serileri CVD güvenli Okabe–Ito paletini kullanır. Minimum hedefler: normal metin 4.5:1, büyük metin ve UI öğesi 3:1. M0 kontrast testi token çiftlerini otomatik doğrular.
+Grafik serileri CVD güvenli Okabe–Ito paletini kullanır. Minimum hedefler: normal metin 4.5:1, büyük metin ve UI öğesi 3:1. M0 kontrast testi token çiftlerini otomatik doğrular. `border.strong` alfa katmanlı bir token’dır ve kontrastı alfa yok sayılarak ölçülmez. M0 kapısı bu token’ı cihazdaki gerçek çizim davranışıyla aynı biçimde — gamma kodlanmış sRGB uzayında `source-over` — `bg.base`, `bg.raised` ve `bg.sunken` yüzeylerinin her birinin üzerine kompozit ettikten sonra ölçer ve üç yüzeyde de ≥3:1 arar (WCAG 1.4.11). `border.hairline` yalnız dekoratif ayırıcıdır; bir bileşeni veya durumu tanımlamak için gerekli değildir, WCAG 1.4.11 kapsamı dışındadır ve kontrast kapısına dahil edilmez. Bir etkileşimli kontrolün tek sınırı olarak kullanılırsa bu muafiyet geçersiz olur.
 
 ### 7.2 Tipografi
 
