@@ -12,6 +12,13 @@ public struct MealCategory: Codable, Hashable, Sendable {
     public let kind: Kind
     public let customName: String?
 
+    public static let defaultValue = MealCategory(uncheckedKind: .breakfast, customName: nil)
+
+    private init(uncheckedKind kind: Kind, customName: String?) {
+        self.kind = kind
+        self.customName = customName
+    }
+
     public init(kind: Kind, customName: String? = nil) throws {
         switch kind {
         case .custom:
