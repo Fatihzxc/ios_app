@@ -1,0 +1,9 @@
+{
+  "sourceLanguage" : "tr",
+  "strings" : {
+    "nutrition.foundation.heading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Beslenme kayıtları" } } } },
+    "nutrition.foundation.message" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Öğün ve günlük beslenme kayıtları sonraki aşamada burada yer alacak." } } } },
+    "nutrition.foundation.title" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Beslenme" } } } }
+  },
+  "version" : "1.0"
+}

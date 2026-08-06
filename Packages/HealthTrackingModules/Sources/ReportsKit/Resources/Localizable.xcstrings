@@ -1,0 +1,9 @@
+{
+  "sourceLanguage" : "tr",
+  "strings" : {
+    "reports.foundation.heading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "İlerleme görünümü" } } } },
+    "reports.foundation.message" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Ölçümler ve bunlardan üretilen grafikler sonraki aşamalarda burada yer alacak." } } } },
+    "reports.foundation.title" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "İlerleme" } } } }
+  },
+  "version" : "1.0"
+}

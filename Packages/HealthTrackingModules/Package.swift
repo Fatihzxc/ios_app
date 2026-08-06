@@ -13,7 +13,10 @@ let package = Package(
         .library(name: "CoreModels", targets: ["CoreModels"]),
         .library(name: "TrainingKit", targets: ["TrainingKit"]),
         .library(name: "PersistenceKit", targets: ["PersistenceKit"]),
-        .library(name: "DesignSystem", targets: ["DesignSystem"])
+        .library(name: "DesignSystem", targets: ["DesignSystem"]),
+        .library(name: "NutritionKit", targets: ["NutritionKit"]),
+        .library(name: "ReportsKit", targets: ["ReportsKit"]),
+        .library(name: "SettingsKit", targets: ["SettingsKit"])
     ],
     targets: [
         .target(
@@ -22,7 +25,8 @@ let package = Package(
         ),
         .target(
             name: "TrainingKit",
-            dependencies: ["CoreModels"],
+            dependencies: ["CoreModels", "DesignSystem"],
+            resources: [.process("Resources")],
             swiftSettings: strictConcurrency
         ),
         .target(
@@ -35,6 +39,24 @@ let package = Package(
             resources: [.process("Resources")],
             swiftSettings: strictConcurrency
         ),
+        .target(
+            name: "NutritionKit",
+            dependencies: ["DesignSystem"],
+            resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
+        .target(
+            name: "ReportsKit",
+            dependencies: ["DesignSystem"],
+            resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
+        .target(
+            name: "SettingsKit",
+            dependencies: ["DesignSystem"],
+            resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
         .testTarget(
             name: "CoreModelsTests",
             dependencies: ["CoreModels"],
@@ -43,6 +65,11 @@ let package = Package(
         .testTarget(
             name: "PersistenceKitTests",
             dependencies: ["CoreModels", "TrainingKit", "PersistenceKit"],
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
+            name: "TrainingKitTests",
+            dependencies: ["CoreModels", "TrainingKit"],
             swiftSettings: strictConcurrency
         ),
         .testTarget(

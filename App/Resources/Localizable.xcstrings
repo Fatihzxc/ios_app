@@ -1,15 +1,99 @@
 {
   "sourceLanguage" : "tr",
   "strings" : {
-    "bootstrap.ready" : {
+    "bootstrap.configurationError" : {
       "localizations" : {
         "tr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Kurulum hazır"
+            "value" : "Uygulama yapılandırması geçersiz."
           }
         }
       }
+    },
+    "bootstrap.error" : {
+      "localizations" : {
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kurulum tamamlanamadı."
+          }
+        }
+      }
+    },
+    "bootstrap.loading" : {
+      "localizations" : {
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hazırlanıyor…"
+          }
+        }
+      }
+    },
+    "bootstrap.retry" : {
+      "localizations" : {
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tekrar dene"
+          }
+        }
+      }
+    },
+    "foundation.empty.accessibility" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Programı yeniden yükle" } } }
+    },
+    "foundation.empty.action" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yeniden yükle" } } }
+    },
+    "foundation.empty.message" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Aktif program bulunamadı. Programı yeniden yükleyebilirsiniz." } } }
+    },
+    "foundation.error.accessibility" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yeniden dene" } } }
+    },
+    "foundation.error.message" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Program bilgileri yüklenemedi." } } }
+    },
+    "list.separator" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : ", " } } }
+    },
+    "tab.nutrition" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Beslenme" } } }
+    },
+    "tab.progress" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "İlerleme" } } }
+    },
+    "tab.settings" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Ayarlar" } } }
+    },
+    "tab.today" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Bugün" } } }
+    },
+    "tab.training" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Antrenman" } } }
+    },
+    "today.foundation.heading" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Program temeli" } } }
+    },
+    "today.inventory.format" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "%1$lld faz: %2$@\n%3$lld antrenman günü: %4$@" } } }
+    },
+    "today.profile.provenance.fallback" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Henüz bir profil adı girilmediği için varsayılan ad gösteriliyor." } } }
+    },
+    "today.profile.provenance.user" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Kullanıcının profil adı" } } }
+    },
+    "today.soon.heading" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Sıradaki adım" } } }
+    },
+    "today.soon.message" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Günlük antrenman önerileri ve seans eylemleri sonraki aşamada eklenecek." } } }
+    },
+    "today.soon.status" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yakında" } } }
     }
   },
   "version" : "1.0"

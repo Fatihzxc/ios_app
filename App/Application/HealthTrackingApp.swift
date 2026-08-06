@@ -4,7 +4,7 @@ import SwiftUI
 struct HealthTrackingApp: App {
     var body: some Scene {
         WindowGroup {
-            BootstrapView()
+            AppBootstrapView()
         }
     }
 }

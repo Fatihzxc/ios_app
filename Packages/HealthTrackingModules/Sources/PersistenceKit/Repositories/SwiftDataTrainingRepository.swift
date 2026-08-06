@@ -54,6 +54,23 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
         }
     }
 
+    public func fetchProgramPhases(programID: UUID) async throws -> [ProgramPhase] {
+        let phases = try modelContext.fetch(
+            FetchDescriptor<ProgramPhase>(
+                sortBy: [SortDescriptor(\ProgramPhase.orderIndex, order: .forward)]
+            )
+        )
+
+        return phases
+            .filter { $0.program?.id == programID }
+            .sorted { lhs, rhs in
+                if lhs.orderIndex != rhs.orderIndex {
+                    return lhs.orderIndex < rhs.orderIndex
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+    }
+
     public func fetchWorkoutDays(programID: UUID) async throws -> [WorkoutDayTemplate] {
         let days = try modelContext.fetch(
             FetchDescriptor<WorkoutDayTemplate>(

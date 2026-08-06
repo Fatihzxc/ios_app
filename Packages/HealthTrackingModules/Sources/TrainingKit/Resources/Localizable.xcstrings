@@ -1,0 +1,36 @@
+{
+  "sourceLanguage" : "tr",
+  "strings" : {
+    "foundation.profile.fallback" : {
+      "localizations" : {
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Profilim"
+          }
+        }
+      }
+    },
+    "foundation.days.heading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Antrenman günleri" } } } },
+    "foundation.empty.accessibility" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Programı yeniden yükle" } } } },
+    "foundation.empty.action" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yeniden yükle" } } } },
+    "foundation.empty.message" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Aktif program bulunamadı. Programı yeniden yükleyebilirsiniz." } } } },
+    "foundation.error.accessibility" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yeniden dene" } } } },
+    "foundation.error.message" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Program bilgileri yüklenemedi." } } } },
+    "foundation.phase.accessibilityValue" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "%1$@. Antrenman odağı: %2$@. Beslenme odağı: %3$@. Hedef: %4$@." } } } },
+    "foundation.phase.monthRange" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "%1$lld–%2$lld. aylar" } } } },
+    "foundation.phases.heading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Program fazları" } } } },
+    "foundation.profile.heading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Profil" } } } },
+    "foundation.profile.height" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Boy" } } } },
+    "foundation.profile.protein" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Protein hedefi" } } } },
+    "foundation.profile.provenance.fallback" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Henüz bir profil adı girilmediği için varsayılan ad gösteriliyor." } } } },
+    "foundation.profile.provenance.user" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Kullanıcının profil adı" } } } },
+    "foundation.profile.startWeight" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Başlangıç ağırlığı" } } } },
+    "foundation.profile.targetWeight" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Hedef ağırlık" } } } },
+    "foundation.profile.weeklyTarget" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Haftalık hedef" } } } },
+    "foundation.profile.weeklyTarget.value" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "%lld gün" } } } },
+    "foundation.program.heading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Aktif program" } } } },
+    "foundation.training.title" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Antrenman" } } } }
+  },
+  "version" : "1.0"
+}

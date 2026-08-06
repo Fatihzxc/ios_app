@@ -24,15 +24,69 @@ final class TrainingRepositoryContractTests: XCTestCase {
         )
     }
 
-    func testEmptyStoreReturnsNoProfileProgramOrWorkoutDays() async throws {
+    func testEmptyStoreReturnsNoProfileProgramPhasesOrWorkoutDays() async throws {
         let repository = try makeRepository()
         let profile = try await repository.fetchUserProfile()
         let program = try await repository.fetchActiveProgram()
+        let phases = try await repository.fetchProgramPhases(programID: UUID())
         let days = try await repository.fetchWorkoutDays(programID: UUID())
 
         XCTAssertNil(profile)
         XCTAssertNil(program)
+        XCTAssertTrue(phases.isEmpty)
         XCTAssertEqual(days, [])
+    }
+
+    func testProgramPhasesFilterRequestedProgramThenUseOrderIndexAndUUIDForStableOrdering() async throws {
+        let container = try ModelContainerFactory.make(for: .inMemory)
+        let writeContext = ModelContext(container)
+        let requestedProgram = Program(isActive: false)
+        let activeDecoyProgram = Program(isActive: true)
+        let firstID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let secondID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let laterID = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
+        let decoyID = UUID(uuidString: "00000000-0000-0000-0000-000000000004")!
+        let unorderedPhases = [
+            ProgramPhase(id: laterID, name: "Later", orderIndex: 2, program: requestedProgram),
+            ProgramPhase(id: secondID, name: "Second", orderIndex: 1, program: requestedProgram),
+            ProgramPhase(id: firstID, name: "First", orderIndex: 1, program: requestedProgram),
+            ProgramPhase(id: decoyID, name: "Active decoy", orderIndex: 0, program: activeDecoyProgram)
+        ]
+        writeContext.insert(requestedProgram)
+        writeContext.insert(activeDecoyProgram)
+        unorderedPhases.forEach(writeContext.insert)
+        try writeContext.save()
+
+        let repository: any TrainingRepository = SwiftDataTrainingRepository(
+            modelContext: ModelContext(container)
+        )
+        let fetchedPhases = try await repository.fetchProgramPhases(programID: requestedProgram.id)
+
+        XCTAssertEqual(fetchedPhases.map(\.id), [firstID, secondID, laterID])
+    }
+
+    func testProgramPhasesReturnEmptyWithoutCrossProgramLeakage() async throws {
+        let container = try ModelContainerFactory.make(for: .inMemory)
+        let writeContext = ModelContext(container)
+        let requestedProgram = Program(isActive: true)
+        let otherProgram = Program()
+        let otherProgramPhase = ProgramPhase(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+            name: "Other program",
+            orderIndex: 0,
+            program: otherProgram
+        )
+        writeContext.insert(requestedProgram)
+        writeContext.insert(otherProgram)
+        writeContext.insert(otherProgramPhase)
+        try writeContext.save()
+
+        let repository: any TrainingRepository = SwiftDataTrainingRepository(
+            modelContext: ModelContext(container)
+        )
+        let fetchedPhases = try await repository.fetchProgramPhases(programID: requestedProgram.id)
+
+        XCTAssertTrue(fetchedPhases.isEmpty)
     }
 
     func testRepositoryFetchesInsertedTrainingRecordsFromANewContext() async throws {
@@ -116,7 +170,7 @@ final class TrainingRepositoryContractTests: XCTestCase {
         }
     }
 
-    private func makeRepository() throws -> SwiftDataTrainingRepository {
+    private func makeRepository() throws -> any TrainingRepository {
         let container = try ModelContainerFactory.make(for: .inMemory)
         return SwiftDataTrainingRepository(modelContext: ModelContext(container))
     }

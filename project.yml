@@ -27,6 +27,14 @@ targets:
         product: TrainingKit
       - package: HealthTrackingModules
         product: PersistenceKit
+      - package: HealthTrackingModules
+        product: DesignSystem
+      - package: HealthTrackingModules
+        product: NutritionKit
+      - package: HealthTrackingModules
+        product: ReportsKit
+      - package: HealthTrackingModules
+        product: SettingsKit
     configFiles:
       Debug: Config/Debug.xcconfig
       Release: Config/Release.xcconfig
@@ -49,6 +57,13 @@ targets:
       - HealthTrackingAppUITests
     dependencies:
       - target: HealthTrackingApp
+  HealthTrackingAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - HealthTrackingAppTests
+    dependencies:
+      - target: HealthTrackingApp
 schemes:
   HealthTrackingApp-Local:
     build:
@@ -59,9 +74,11 @@ schemes:
     test:
       config: Debug
       targets:
+        - HealthTrackingAppTests
         - HealthTrackingAppUITests
         - package: HealthTrackingModules/CoreModelsTests
         - package: HealthTrackingModules/PersistenceKitTests
+        - package: HealthTrackingModules/TrainingKitTests
         - package: HealthTrackingModules/DesignSystemTests
     archive:
       config: Release

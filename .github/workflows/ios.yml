@@ -57,13 +57,13 @@ jobs:
           fi
           printf '%s\n' "$version_output"
 
-      - name: Targeted DesignSystem tests
-        run: scripts/test-ios.sh --only-testing DesignSystemTests
+      - name: Targeted HealthTrackingApp tests
+        run: scripts/test-ios.sh --only-testing HealthTrackingAppTests
 
       - name: Test iOS app
         run: scripts/test-ios.sh
 
-      - name: Export gallery screenshot evidence
+      - name: Export screenshot evidence
         run: |
           set -euo pipefail
           result_bundle=".build/HealthTrackingApp.xcresult"
@@ -82,34 +82,146 @@ jobs:
           from pathlib import Path
 
           export_directory = Path(sys.argv[1])
-          manifest = json.loads((export_directory / "manifest.json").read_text())
-          gallery_record = next(
-              (record for record in manifest if "GalleryScreenshotTests/" in record["testIdentifier"]),
-              None,
-          )
-          if gallery_record is None:
-              raise SystemExit("Missing GalleryScreenshotTests attachment record.")
+          manifest_path = export_directory / "manifest.json"
+          if not manifest_path.is_file():
+              raise SystemExit(f"Missing attachment manifest: {manifest_path}")
+          try:
+              manifest = json.loads(manifest_path.read_text())
+          except (OSError, UnicodeError, json.JSONDecodeError) as error:
+              raise SystemExit(f"Invalid attachment manifest {manifest_path}: {error}") from error
+          if not isinstance(manifest, list):
+              raise SystemExit("Attachment manifest root must be a list of test records.")
 
-          expected = {"light", "dark"}
+          shell_expected = {
+              "shell-today-light",
+              "shell-training-light",
+              "shell-nutrition-light",
+              "shell-progress-light",
+              "shell-settings-light",
+              "shell-today-dark",
+              "shell-training-dark",
+              "shell-nutrition-dark",
+              "shell-progress-dark",
+              "shell-settings-dark",
+              "shell-loading",
+              "shell-empty",
+              "shell-error",
+              "shell-fatal",
+              "shell-settings-gallery",
+              "shell-settings-path-isolation",
+          }
+          gallery_expected = {"gallery-light", "gallery-dark"}
+          expected = shell_expected | gallery_expected
+
+          owners = {
+              "AppShellUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": shell_expected,
+              },
+              "GalleryScreenshotTests": {
+                  "module": "DesignSystemTests",
+                  "expected": gallery_expected,
+              },
+          }
+
+          def identifier_matches_owner(test_identifier, module, test_case):
+              segments = test_identifier.split("/")
+              if any(not segment for segment in segments) or not segments[-1].startswith("test"):
+                  return False
+              if len(segments) == 2:
+                  class_segment = segments[0]
+                  return class_segment in {test_case, f"{module}.{test_case}"}
+              if len(segments) == 3:
+                  return segments[0] == module and segments[1] == test_case
+              return False
+
+          def records_by_owner():
+              records = {test_case: [] for test_case in owners}
+              for record in manifest:
+                  if not isinstance(record, dict):
+                      raise SystemExit("Every attachment manifest record must be an object.")
+                  test_identifier = record.get("testIdentifier")
+                  if not isinstance(test_identifier, str):
+                      raise SystemExit("Every attachment manifest record must have a string testIdentifier.")
+                  matching_owners = [
+                      test_case
+                      for test_case, owner in owners.items()
+                      if identifier_matches_owner(test_identifier, owner["module"], test_case)
+                  ]
+                  if len(matching_owners) > 1:
+                      raise SystemExit(
+                          f"Ambiguous attachment owner for {test_identifier}: {matching_owners}"
+                      )
+                  if matching_owners:
+                      attachments = record.get("attachments")
+                      if not isinstance(attachments, list):
+                          raise SystemExit(f"Invalid attachments list for {test_identifier}.")
+                      records[matching_owners[0]].append(record)
+              for test_case, test_records in records.items():
+                  if not test_records:
+                      raise SystemExit(f"Missing {test_case} attachment record.")
+              return records
+
+          owned_records = records_by_owner()
           exported = {}
-          for attachment in gallery_record["attachments"]:
-              suggested_name = attachment["suggestedHumanReadableName"].lower()
-              for appearance in expected:
-                  if suggested_name.startswith(f"gallery-{appearance}_"):
-                      source = export_directory / attachment["exportedFileName"]
-                      if not source.is_file() or source.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
-                          raise SystemExit(f"Missing supported {appearance} gallery image: {source}")
-                      destination = export_directory / f"gallery-{appearance}{source.suffix.lower()}"
-                      shutil.copyfile(source, destination)
-                      exported[appearance] = (destination.name, source.name)
+          supported_extensions = {".png", ".jpg", ".jpeg"}
 
-          if set(exported) != expected:
-              raise SystemExit(f"Expected light and dark gallery attachments, found: {sorted(exported)}")
+          for test_case, test_records in owned_records.items():
+              owner_expected = owners[test_case]["expected"]
+              for record in test_records:
+                  test_identifier = record["testIdentifier"]
+                  for attachment in record["attachments"]:
+                      if not isinstance(attachment, dict):
+                          raise SystemExit(f"Invalid attachment entry for {test_identifier}.")
+                      suggested_name = attachment.get("suggestedHumanReadableName")
+                      exported_file_name = attachment.get("exportedFileName")
+                      if not isinstance(suggested_name, str) or not isinstance(exported_file_name, str):
+                          raise SystemExit(f"Invalid attachment metadata for {test_identifier}.")
+
+                      normalized_name = suggested_name.lower()
+                      matches = sorted(
+                          canonical
+                          for canonical in expected
+                          if normalized_name == canonical or normalized_name.startswith(f"{canonical}_")
+                      )
+                      if len(matches) > 1:
+                          raise SystemExit(
+                              f"Ambiguous canonical attachment mapping for {suggested_name!r}: {matches}"
+                          )
+                      if not matches:
+                          continue
+
+                      canonical = matches[0]
+                      if canonical not in owner_expected:
+                          raise SystemExit(
+                              f"Canonical attachment {canonical} belongs to a different test owner, "
+                              f"not {test_case}."
+                          )
+                      if canonical in exported:
+                          raise SystemExit(
+                              f"Duplicate canonical attachment mapping for {canonical}: "
+                              f"{exported[canonical][1]} and {exported_file_name}"
+                          )
+
+                      source = export_directory / exported_file_name
+                      extension = source.suffix.lower()
+                      if not source.is_file():
+                          raise SystemExit(f"Missing source image for {canonical}: {source}")
+                      if extension not in supported_extensions:
+                          raise SystemExit(f"Unsupported image extension for {canonical}: {source}")
+
+                      destination = export_directory / f"{canonical}{extension}"
+                      shutil.copyfile(source, destination)
+                      exported[canonical] = (destination.name, source.name)
+
+          missing = sorted(expected - set(exported))
+          if missing:
+              raise SystemExit(f"Missing canonical screenshot attachments: {missing}")
 
           (export_directory / "manifest.tsv").write_text(
               "".join(
-                  f"{appearance.title()} gallery\t{exported[appearance][0]}\tsource={exported[appearance][1]}\n"
-                  for appearance in sorted(expected)
+                  f"{canonical}\t{exported[canonical][0]}\tsource={exported[canonical][1]}\n"
+                  for canonical in sorted(expected)
               )
           )
           PY

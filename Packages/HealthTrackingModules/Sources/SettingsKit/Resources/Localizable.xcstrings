@@ -1,0 +1,12 @@
+{
+  "sourceLanguage" : "tr",
+  "strings" : {
+    "settings.foundation.title" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Ayarlar" } } } },
+    "settings.gallery.title" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Tasarım sistemi galerisi" } } } },
+    "settings.persistence.heading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Veri saklama" } } } },
+    "settings.persistence.iCloudConfigured" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Uygulama iCloud özel veritabanını kullanacak şekilde yapılandırıldı. Bu durum eşitlemenin tamamlandığını veya verilerin bulutta güvende olduğunu doğrulamaz." } } } },
+    "settings.persistence.local" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Veriler bu cihazdaki yerel uygulama deposunda tutulur." } } } },
+    "settings.persistence.uiTesting" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Arayüz testleri yalnız bellekte çalışan geçici bir depo kullanır. Uygulama kapanınca bu veriler silinir." } } } }
+  },
+  "version" : "1.0"
+}
