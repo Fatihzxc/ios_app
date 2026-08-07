@@ -8,7 +8,7 @@ on:
 jobs:
   test:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
 
@@ -57,13 +57,27 @@ jobs:
           fi
           printf '%s\n' "$version_output"
 
+      - name: M0 acceptance gates
+        run: |
+          scripts/verify-localization.sh --self-test
+          scripts/verify-localization.sh
+          scripts/verify-requirements.sh --self-test
+          scripts/verify-requirements.sh
+
+      - name: Fresh-clone bootstrap idempotence
+        timeout-minutes: 15
+        run: scripts/test-ios.sh --verify-bootstrap-idempotence
+
       - name: Targeted HealthTrackingApp tests
+        timeout-minutes: 20
         run: scripts/test-ios.sh --only-testing HealthTrackingAppTests
 
       - name: Test iOS app
+        timeout-minutes: 50
         run: scripts/test-ios.sh
 
       - name: Export screenshot evidence
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           result_bundle=".build/HealthTrackingApp.xcresult"
@@ -111,7 +125,8 @@ jobs:
               "shell-settings-path-isolation",
           }
           gallery_expected = {"gallery-light", "gallery-dark"}
-          expected = shell_expected | gallery_expected
+          accessibility_expected = {"accessibility-xxxl-light", "accessibility-xxxl-dark"}
+          expected = shell_expected | gallery_expected | accessibility_expected
 
           owners = {
               "AppShellUITests": {
@@ -121,6 +136,10 @@ jobs:
               "GalleryScreenshotTests": {
                   "module": "DesignSystemTests",
                   "expected": gallery_expected,
+              },
+              "AccessibilitySmokeUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": accessibility_expected,
               },
           }
 
@@ -228,7 +247,51 @@ jobs:
           find "$export_directory" -maxdepth 1 -type f -print | sort
 
       - name: Cloud scheme compile-only
+        timeout-minutes: 20
         run: scripts/test-ios.sh --cloud-compile-only
+
+      - name: Repository hygiene
+        run: |
+          set -euo pipefail
+          git show --check --format= HEAD
+          git diff --check
+          tracked_changes="$(git status --short --untracked-files=no)"
+          if [[ -n "$tracked_changes" ]]; then
+            echo "Tracked files changed during acceptance:" >&2
+            printf '%s\n' "$tracked_changes" >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          import re
+          import subprocess
+          from pathlib import Path
+
+          patterns = {
+              "private key": re.compile(r"BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY"),
+              "AWS access key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+              "assigned secret": re.compile(
+                  r"(?i)\b(?:api[_-]?key|client[_-]?secret|access[_-]?token)\b\s*[:=]\s*[\"'][^\"'${}\s][^\"']*[\"']"
+              ),
+          }
+          files = subprocess.run(
+              ["git", "ls-files", "-z"], check=True, stdout=subprocess.PIPE
+          ).stdout.split(b"\0")
+          findings = []
+          for encoded_path in files:
+              if not encoded_path:
+                  continue
+              path = Path(encoded_path.decode("utf-8"))
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except (OSError, UnicodeError):
+                  continue
+              for label, pattern in patterns.items():
+                  if pattern.search(text):
+                      findings.append(f"{path}: possible {label}")
+          if findings:
+              raise SystemExit("\n".join(findings))
+          print("Tracked secret-pattern scan passed.")
+          PY
 
       - name: Upload test results
         if: always()

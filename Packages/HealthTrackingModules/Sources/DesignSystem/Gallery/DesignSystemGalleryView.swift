@@ -86,6 +86,7 @@ private struct GallerySchemeView: View {
                         isEnabled: false,
                         action: {}
                     )
+                    .accessibilityHint(String(localized: "designSystem.gallery.actionHint", bundle: .module))
                 }
             }
             FeatureStateView(state: .loading)
@@ -99,6 +100,7 @@ private struct GallerySchemeView: View {
                     }
                 )
             )
+            .accessibilityHint(String(localized: "designSystem.gallery.emptyActionHint", bundle: .module))
             FeatureStateView(state: .error(message: String(localized: "designSystem.gallery.errorMessage", bundle: .module)))
             FeatureStateView(
                 state: .error(message: String(localized: "designSystem.gallery.errorMessage", bundle: .module)),
@@ -106,6 +108,7 @@ private struct GallerySchemeView: View {
                     actionFeedback = String(localized: "designSystem.gallery.retryConfirmation", bundle: .module)
                 }
             )
+            .accessibilityHint(String(localized: "designSystem.gallery.retryHint", bundle: .module))
         }
         .padding(AppSpacing.comfortable)
         .background(AppColors.color(.backgroundSunken, scheme: scheme))

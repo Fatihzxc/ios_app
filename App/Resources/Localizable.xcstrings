@@ -47,11 +47,17 @@
     "foundation.empty.action" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yeniden yükle" } } }
     },
+    "foundation.empty.hint" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Program bilgilerini yeniden yükler." } } }
+    },
     "foundation.empty.message" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Aktif program bulunamadı. Programı yeniden yükleyebilirsiniz." } } }
     },
     "foundation.error.accessibility" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yeniden dene" } } }
+    },
+    "foundation.error.hint" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Program bilgilerini yeniden yüklemeyi dener." } } }
     },
     "foundation.error.message" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Program bilgileri yüklenemedi." } } }
@@ -62,17 +68,32 @@
     "tab.nutrition" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Beslenme" } } }
     },
+    "tab.nutrition.hint" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Beslenme bölümünü açar." } } }
+    },
     "tab.progress" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "İlerleme" } } }
+    },
+    "tab.progress.hint" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "İlerleme bölümünü açar." } } }
     },
     "tab.settings" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Ayarlar" } } }
     },
+    "tab.settings.hint" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Ayarlar bölümünü açar." } } }
+    },
     "tab.today" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Bugün" } } }
     },
+    "tab.today.hint" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Bugün bölümünü açar." } } }
+    },
     "tab.training" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Antrenman" } } }
+    },
+    "tab.training.hint" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Antrenman bölümünü açar." } } }
     },
     "today.foundation.heading" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Program temeli" } } }

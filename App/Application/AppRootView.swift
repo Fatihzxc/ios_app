@@ -45,6 +45,7 @@ struct AppRootView: View {
                     tabLabel(for: tab)
                 }
                 .accessibilityIdentifier(tab.tabIdentifier)
+                .accessibilityHint(tab.hint)
             }
         }
     }
@@ -82,5 +83,6 @@ struct AppRootView: View {
     private func legacyTabLabel(for tab: AppTab) -> some View {
         Label(tab.title, systemImage: tab.systemImage)
             .accessibilityIdentifier(tab.tabIdentifier)
+            .accessibilityHint(tab.hint)
     }
 }

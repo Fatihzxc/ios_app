@@ -46,6 +46,7 @@ struct FoundationTodayView: View {
             .accessibilityRepresentation {
                 Button(String(localized: "foundation.empty.accessibility"), action: reload)
                     .accessibilityIdentifier("foundation.state.empty")
+                    .accessibilityHint(String(localized: "foundation.empty.hint"))
             }
         case .error:
             FeatureStateView(
@@ -55,6 +56,7 @@ struct FoundationTodayView: View {
             .accessibilityRepresentation {
                 Button(String(localized: "foundation.error.accessibility"), action: reload)
                     .accessibilityIdentifier("foundation.state.error")
+                    .accessibilityHint(String(localized: "foundation.error.hint"))
             }
         }
     }

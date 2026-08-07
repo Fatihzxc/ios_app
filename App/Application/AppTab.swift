@@ -19,6 +19,16 @@ enum AppTab: String, CaseIterable, Identifiable {
         }
     }
 
+    var hint: String {
+        switch self {
+        case .today: String(localized: "tab.today.hint")
+        case .training: String(localized: "tab.training.hint")
+        case .nutrition: String(localized: "tab.nutrition.hint")
+        case .progress: String(localized: "tab.progress.hint")
+        case .settings: String(localized: "tab.settings.hint")
+        }
+    }
+
     var systemImage: String {
         switch self {
         case .today: "sun.max"

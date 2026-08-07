@@ -49,6 +49,7 @@ public struct SettingsFoundationView: View {
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         }
                         .accessibilityIdentifier("settings.gallery-link")
+                        .accessibilityHint(String(localized: "settings.gallery.hint", bundle: .module))
                     }
                 }
                 .padding(.horizontal, AppSpacing.screenHorizontal)
