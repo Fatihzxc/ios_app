@@ -26,10 +26,26 @@ if package.is_file():
     package_text = package.read_text(encoding="utf-8")
     products_block = re.search(r'^    products:\s*\[\n(.*?)(?=^    targets:\s*\[)', package_text, re.M | re.S)
     products = re.findall(r'\.([A-Za-z][A-Za-z0-9_]*)\s*\(\s*name:\s*"([^"]+)"', products_block.group(1) if products_block else "")
-    expected_products = ["CoreModels", "TrainingKit", "PersistenceKit", "DesignSystem", "NutritionKit", "ReportsKit", "SettingsKit"]
+    expected_products = ["CoreModels", "TrainingKit", "GuidanceKit", "PersistenceKit", "DesignSystem", "NutritionKit", "ReportsKit", "SettingsKit"]
     expected_product_declarations = [("library", name) for name in expected_products]
     if products != expected_product_declarations:
         errors.append(f"Package products must be exactly {expected_product_declarations}; found {products}")
+
+    target_declarations = re.findall(
+        r'\.(target|testTarget)\s*\(\s*name:\s*"([^"]+)"',
+        package_text,
+        re.S,
+    )
+    required_guidance_targets = [("target", "GuidanceKit"), ("testTarget", "GuidanceKitTests")]
+    missing_guidance_targets = [
+        declaration
+        for declaration in required_guidance_targets
+        if declaration not in target_declarations
+    ]
+    if missing_guidance_targets:
+        errors.append(
+            f"Package must declare GuidanceKit library/test targets; missing {missing_guidance_targets}"
+        )
 
 model_directory = root / "Packages/HealthTrackingModules/Sources/CoreModels/Models"
 expected_models = [
@@ -47,6 +63,22 @@ else:
     errors.append("Missing CoreModels model directory.")
 if sorted(models) != expected_models:
     errors.append(f"SwiftData model names must be exactly {expected_models}; found {sorted(models)}")
+
+guidance_directory = root / "Packages/HealthTrackingModules/Sources/GuidanceKit"
+forbidden_guidance_imports = {"SwiftUI", "SwiftData", "CloudKit", "UIKit"}
+if guidance_directory.is_dir():
+    for source in guidance_directory.rglob("*.swift"):
+        imported_modules = set(
+            re.findall(r'^\s*import\s+([A-Za-z][A-Za-z0-9_]*)\s*$', source.read_text(encoding="utf-8"), re.M)
+        )
+        forbidden = sorted(imported_modules & forbidden_guidance_imports)
+        if forbidden:
+            errors.append(
+                f"GuidanceKit must remain platform/persistence independent; "
+                f"{source.relative_to(root)} imports {forbidden}"
+            )
+else:
+    errors.append("Missing GuidanceKit source directory.")
 
 if project.is_file():
     project_text = project.read_text(encoding="utf-8")
@@ -108,6 +140,20 @@ if project.is_file():
         errors.append(f"Cloud scheme actions must be exactly {expected_cloud_actions}; found {cloud_action_names}")
     local_actions = {name: lines for name, lines in local_action_entries}
     cloud_actions = {name: lines for name, lines in cloud_action_entries}
+    local_package_test_targets = [
+        match.group(1)
+        for line in local_actions.get("test", [])
+        if (match := re.match(r'^        - package:\s*HealthTrackingModules/([^\s]+)\s*$', line))
+    ]
+    expected_package_test_targets = [
+        "CoreModelsTests", "GuidanceKitTests", "PersistenceKitTests", "TrainingKitTests",
+        "DesignSystemTests",
+    ]
+    if local_package_test_targets != expected_package_test_targets:
+        errors.append(
+            f"Local scheme package tests must be exactly {expected_package_test_targets}; "
+            f"found {local_package_test_targets}"
+        )
     local_configs = [direct_config(local_actions.get(section, [])) for section in ["run", "test", "archive"]]
     cloud_configs = [direct_config(cloud_actions.get(section, [])) for section in ["run", "archive"]]
     if local_configs != ["Debug", "Debug", "Release"]:
@@ -149,7 +195,7 @@ self_test() {
     self_test_fixture="$(mktemp -d)"
     trap 'rm -rf -- "$self_test_fixture"' EXIT
     local fixture="$self_test_fixture"
-    mkdir -p "$fixture/Packages/HealthTrackingModules/Sources/CoreModels/Models" "$fixture/App" "$fixture/docs/evidence/M0"
+    mkdir -p "$fixture/Packages/HealthTrackingModules/Sources/CoreModels/Models" "$fixture/Packages/HealthTrackingModules/Sources/GuidanceKit" "$fixture/App" "$fixture/docs/evidence/M0"
     cp "$repo_root/Packages/HealthTrackingModules/Package.swift" "$fixture/Packages/HealthTrackingModules/Package.swift"
     cp "$repo_root/project.yml" "$fixture/project.yml"
     cp "$repo_root/.gitignore" "$fixture/.gitignore"
@@ -213,6 +259,17 @@ PY
     python3 - "$fixture/project.yml" <<'PY'
 from pathlib import Path
 path = Path(__import__('sys').argv[1])
+path.write_text(path.read_text().replace('        - package: HealthTrackingModules/GuidanceKitTests\n', '', 1))
+PY
+    if verify_repo "$fixture" >"$fixture/guidance-test-target.out" 2>&1; then
+        echo "Requirements self-test expected a missing GuidanceKit scheme test target failure." >&2
+        return 1
+    fi
+    grep -Fq 'Local scheme package tests must be exactly' "$fixture/guidance-test-target.out"
+    cp "$repo_root/project.yml" "$fixture/project.yml"
+    python3 - "$fixture/project.yml" <<'PY'
+from pathlib import Path
+path = Path(__import__('sys').argv[1])
 path.write_text(path.read_text().replace('    archive:\n      config: Release', '    profile:\n      config: Release\n    archive:\n      config: Release', 1))
 PY
     if verify_repo "$fixture" >"$fixture/extra-action.out" 2>&1; then
@@ -240,6 +297,13 @@ PY
     fi
     grep -Fq 'SwiftData model names must be exactly' "$fixture/model.out"
     rm "$fixture/Packages/HealthTrackingModules/Sources/CoreModels/Models/Nested/ExtraModels.swift"
+    printf '%s\n' 'import Foundation' 'import SwiftUI' > "$fixture/Packages/HealthTrackingModules/Sources/GuidanceKit/ForbiddenImport.swift"
+    if verify_repo "$fixture" >"$fixture/guidance-import.out" 2>&1; then
+        echo "Requirements self-test expected a forbidden GuidanceKit import failure." >&2
+        return 1
+    fi
+    grep -Fq 'GuidanceKit must remain platform/persistence independent' "$fixture/guidance-import.out"
+    rm "$fixture/Packages/HealthTrackingModules/Sources/GuidanceKit/ForbiddenImport.swift"
     sed 's|^\(\*\.xcodeproj/\)$|# \1|' "$repo_root/.gitignore" > "$fixture/.gitignore"
     if verify_repo "$fixture" >"$fixture/commented-ignore.out" 2>&1; then
         echo "Requirements self-test expected a commented-only xcodeproj ignore rule failure." >&2
