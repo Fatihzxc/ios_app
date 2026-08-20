@@ -7,6 +7,16 @@ public enum TrainingRepositoryIntegrityError: Error, Equatable, Sendable {
     case duplicateUserProfiles(count: Int)
     case duplicateActivePrograms(count: Int)
     case duplicateProgramStates(programID: UUID, count: Int)
+    case missingWorkoutSession(id: UUID)
+    case duplicateWorkoutSessions(id: UUID, count: Int)
+    case missingExerciseTemplate(id: UUID)
+    case duplicateExerciseTemplates(id: UUID, count: Int)
+    case duplicateSetIndex(
+        workoutSessionID: UUID,
+        exerciseTemplateID: UUID,
+        setIndex: Int
+    )
+    case transactionDidNotProduceSetSnapshot
 }
 
 @MainActor
@@ -150,5 +160,101 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
             )
         }
         return states.first
+    }
+
+    public func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot {
+        var savedSnapshot: SetLogSnapshot?
+
+        try modelContext.transaction {
+            let matchingSessions = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
+                .filter { $0.id == request.workoutSessionID }
+            guard !matchingSessions.isEmpty else {
+                throw TrainingRepositoryIntegrityError.missingWorkoutSession(
+                    id: request.workoutSessionID
+                )
+            }
+            guard matchingSessions.count == 1, let session = matchingSessions.first else {
+                throw TrainingRepositoryIntegrityError.duplicateWorkoutSessions(
+                    id: request.workoutSessionID,
+                    count: matchingSessions.count
+                )
+            }
+
+            let matchingExercises = try modelContext.fetch(FetchDescriptor<ExerciseTemplate>())
+                .filter { $0.id == request.exerciseTemplateID }
+            guard !matchingExercises.isEmpty else {
+                throw TrainingRepositoryIntegrityError.missingExerciseTemplate(
+                    id: request.exerciseTemplateID
+                )
+            }
+            guard matchingExercises.count == 1, let exercise = matchingExercises.first else {
+                throw TrainingRepositoryIntegrityError.duplicateExerciseTemplates(
+                    id: request.exerciseTemplateID,
+                    count: matchingExercises.count
+                )
+            }
+
+            try SetMeasurementValidator.validate(
+                request.measurement,
+                for: exercise.measurementKind
+            )
+
+            let duplicateCount = try modelContext.fetch(FetchDescriptor<SetLog>())
+                .filter {
+                    $0.workoutSession?.id == request.workoutSessionID &&
+                        $0.exerciseTemplateId == request.exerciseTemplateID &&
+                        $0.setIndex == request.setIndex
+                }
+                .count
+            guard duplicateCount == 0 else {
+                throw TrainingRepositoryIntegrityError.duplicateSetIndex(
+                    workoutSessionID: request.workoutSessionID,
+                    exerciseTemplateID: request.exerciseTemplateID,
+                    setIndex: request.setIndex
+                )
+            }
+
+            let setLog = SetLog(
+                id: request.id,
+                createdAt: request.completedAt,
+                updatedAt: request.completedAt,
+                exerciseTemplateId: request.exerciseTemplateID,
+                setIndex: request.setIndex,
+                weightKg: request.measurement.weightKg,
+                reps: request.measurement.reps,
+                durationSec: request.measurement.durationSec,
+                distanceSteps: request.measurement.distanceSteps,
+                performedVariant: request.measurement.performedVariant,
+                rir: request.measurement.rir,
+                isWarmupSet: request.isWarmupSet,
+                completedAt: request.completedAt,
+                workoutSession: session
+            )
+            modelContext.insert(setLog)
+            try modelContext.save()
+            savedSnapshot = Self.snapshot(setLog, workoutSessionID: request.workoutSessionID)
+        }
+
+        guard let savedSnapshot else {
+            throw TrainingRepositoryIntegrityError.transactionDidNotProduceSetSnapshot
+        }
+        return savedSnapshot
+    }
+
+    private static func snapshot(
+        _ setLog: SetLog,
+        workoutSessionID: UUID
+    ) -> SetLogSnapshot {
+        SetLogSnapshot(
+            id: setLog.id,
+            createdAt: setLog.createdAt,
+            updatedAt: setLog.updatedAt,
+            workoutSessionID: workoutSessionID,
+            exerciseTemplateID: setLog.exerciseTemplateId,
+            setIndex: setLog.setIndex,
+            measurement: setLog.measurementInput,
+            isWarmupSet: setLog.isWarmupSet,
+            completedAt: setLog.completedAt
+        )
     }
 }

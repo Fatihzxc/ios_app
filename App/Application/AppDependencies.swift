@@ -144,6 +144,10 @@ private final class UITestFoundationRepository: TrainingRepository {
     func fetchProgramState(programID: UUID) async throws -> ProgramState? {
         try await repository.fetchProgramState(programID: programID)
     }
+
+    func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot {
+        try await repository.saveSet(request)
+    }
 }
 
 private enum UITestFoundationRepositoryError: Error {

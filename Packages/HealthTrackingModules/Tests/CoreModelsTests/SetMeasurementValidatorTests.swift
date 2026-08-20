@@ -46,6 +46,8 @@ final class SetMeasurementValidatorTests: XCTestCase {
     }
 
     func testValidatorRejectsInvalidOptionalWeightAndRIR() {
+        XCTAssertThrowsError(try SetMeasurementValidator.validate(.init(weightKg: .nan, reps: 1), for: .weightReps))
+        XCTAssertThrowsError(try SetMeasurementValidator.validate(.init(weightKg: .infinity, reps: 1), for: .weightReps))
         XCTAssertThrowsError(try SetMeasurementValidator.validate(.init(weightKg: -.infinity, reps: 1), for: .reps))
         XCTAssertThrowsError(try SetMeasurementValidator.validate(.init(weightKg: -0.1, distanceSteps: 1), for: .steps))
         XCTAssertThrowsError(try SetMeasurementValidator.validate(.init(rir: -1), for: .quality))
@@ -72,8 +74,21 @@ final class SetMeasurementValidatorTests: XCTestCase {
     }
 
     func testRIRBoundariesAreValid() {
+        XCTAssertNoThrow(try SetMeasurementValidator.validate(.init(), for: .quality))
         XCTAssertNoThrow(try SetMeasurementValidator.validate(.init(rir: 0), for: .quality))
         XCTAssertNoThrow(try SetMeasurementValidator.validate(.init(rir: 10), for: .quality))
+    }
+
+    func testValidationFailuresExposeStableTypedReasons() {
+        assertValidationError(.requiredMeasurementMissing, input: .init(), kind: .reps)
+        assertValidationError(.invalidMeasurement, input: .init(durationSec: 0), kind: .duration)
+        assertValidationError(.invalidWeight, input: .init(weightKg: .nan, reps: 1), kind: .weightReps)
+        assertValidationError(.invalidRIR, input: .init(rir: 11), kind: .quality)
+        assertValidationError(
+            .ambiguousMeasurement,
+            input: .init(reps: 1, durationSec: 1),
+            kind: .quality
+        )
     }
 
     func testValidatorRejectsConflictingMeasurementFields() {
@@ -112,5 +127,20 @@ final class SetMeasurementValidatorTests: XCTestCase {
         XCTAssertThrowsError(
             try decoder.decode(MealCategory.self, from: Data(#"{"kind":"breakfast","customName":"Kahvaltı"}"#.utf8))
         )
+    }
+
+    private func assertValidationError(
+        _ expected: SetMeasurementValidationError,
+        input: SetMeasurementInput,
+        kind: ExerciseMeasurementKind,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        do {
+            try SetMeasurementValidator.validate(input, for: kind)
+            XCTFail("Expected validation to fail", file: file, line: line)
+        } catch {
+            XCTAssertEqual(error as? SetMeasurementValidationError, expected, file: file, line: line)
+        }
     }
 }

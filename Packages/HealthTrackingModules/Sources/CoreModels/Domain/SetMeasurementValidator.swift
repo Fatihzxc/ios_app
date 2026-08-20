@@ -64,7 +64,7 @@ public enum SetMeasurementValidator {
     }
 }
 
-private enum SetMeasurementValidationError: Error {
+public enum SetMeasurementValidationError: Error, Equatable, Sendable {
     case requiredMeasurementMissing
     case invalidMeasurement
     case invalidWeight

@@ -12,4 +12,5 @@ public protocol TrainingRepository: AnyObject {
     func fetchCooldownItems(workoutDayID: UUID) async throws -> [CooldownItem]
     func fetchHealthCheckReminders() async throws -> [HealthCheckReminder]
     func fetchProgramState(programID: UUID) async throws -> ProgramState?
+    func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot
 }

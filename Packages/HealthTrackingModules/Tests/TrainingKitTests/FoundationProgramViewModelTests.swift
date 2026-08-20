@@ -529,6 +529,10 @@ private final class FakeTrainingRepository: TrainingRepository {
         throw FakeRepositoryError.unexpectedCall("fetchProgramState")
     }
 
+    func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot {
+        throw FakeRepositoryError.unexpectedCall("saveSet")
+    }
+
     private static func dequeue<Value>(
         _ responses: inout [QueuedResponse<Value>],
         method: String

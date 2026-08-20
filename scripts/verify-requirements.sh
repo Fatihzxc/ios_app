@@ -80,6 +80,20 @@ if guidance_directory.is_dir():
 else:
     errors.append("Missing GuidanceKit source directory.")
 
+training_directory = root / "Packages/HealthTrackingModules/Sources/TrainingKit"
+if training_directory.is_dir():
+    for source in training_directory.rglob("*.swift"):
+        source_text = source.read_text(encoding="utf-8")
+        if re.search(r'^\s*import\s+SwiftData\s*$', source_text, re.M) or re.search(
+            r'\bModelContext\b', source_text
+        ):
+            errors.append(
+                f"TrainingKit must not expose persistence implementation details; "
+                f"{source.relative_to(root)} references SwiftData/ModelContext"
+            )
+else:
+    errors.append("Missing TrainingKit source directory.")
+
 if project.is_file():
     project_text = project.read_text(encoding="utf-8")
     config_block = re.search(r'^configs:\n(.*?)(?=^packages:|\Z)', project_text, re.M | re.S)
@@ -195,7 +209,7 @@ self_test() {
     self_test_fixture="$(mktemp -d)"
     trap 'rm -rf -- "$self_test_fixture"' EXIT
     local fixture="$self_test_fixture"
-    mkdir -p "$fixture/Packages/HealthTrackingModules/Sources/CoreModels/Models" "$fixture/Packages/HealthTrackingModules/Sources/GuidanceKit" "$fixture/App" "$fixture/docs/evidence/M0"
+    mkdir -p "$fixture/Packages/HealthTrackingModules/Sources/CoreModels/Models" "$fixture/Packages/HealthTrackingModules/Sources/GuidanceKit" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit" "$fixture/App" "$fixture/docs/evidence/M0"
     cp "$repo_root/Packages/HealthTrackingModules/Package.swift" "$fixture/Packages/HealthTrackingModules/Package.swift"
     cp "$repo_root/project.yml" "$fixture/project.yml"
     cp "$repo_root/.gitignore" "$fixture/.gitignore"
@@ -304,6 +318,13 @@ PY
     fi
     grep -Fq 'GuidanceKit must remain platform/persistence independent' "$fixture/guidance-import.out"
     rm "$fixture/Packages/HealthTrackingModules/Sources/GuidanceKit/ForbiddenImport.swift"
+    printf '%s\n' 'import SwiftData' 'let context: ModelContext? = nil' > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/PersistenceLeak.swift"
+    if verify_repo "$fixture" >"$fixture/training-persistence.out" 2>&1; then
+        echo "Requirements self-test expected a TrainingKit persistence leak failure." >&2
+        return 1
+    fi
+    grep -Fq 'TrainingKit must not expose persistence implementation details' "$fixture/training-persistence.out"
+    rm "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/PersistenceLeak.swift"
     sed 's|^\(\*\.xcodeproj/\)$|# \1|' "$repo_root/.gitignore" > "$fixture/.gitignore"
     if verify_repo "$fixture" >"$fixture/commented-ignore.out" 2>&1; then
         echo "Requirements self-test expected a commented-only xcodeproj ignore rule failure." >&2

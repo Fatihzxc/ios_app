@@ -332,8 +332,175 @@ final class TrainingRepositoryContractTests: XCTestCase {
         }
     }
 
+    func testSaveSetRevalidatesAndReturnsAnImmutableSnapshot() async throws {
+        let fixture = try makeSetMutationFixture(kind: .weightReps)
+        let setID = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
+        let completedAt = Date(timeIntervalSinceReferenceDate: 4_000)
+        let request = SetLogSaveRequest(
+            id: setID,
+            workoutSessionID: fixture.session.id,
+            exerciseTemplateID: fixture.exercise.id,
+            setIndex: 1,
+            measurement: .init(weightKg: 12.5, reps: 8, performedVariant: "DB", rir: 2),
+            isWarmupSet: false,
+            completedAt: completedAt
+        )
+
+        let snapshot = try await fixture.repository.saveSet(request)
+
+        XCTAssertEqual(snapshot.id, setID)
+        XCTAssertEqual(snapshot.workoutSessionID, fixture.session.id)
+        XCTAssertEqual(snapshot.exerciseTemplateID, fixture.exercise.id)
+        XCTAssertEqual(snapshot.setIndex, 1)
+        XCTAssertEqual(snapshot.measurement, request.measurement)
+        XCTAssertFalse(snapshot.isWarmupSet)
+        XCTAssertEqual(snapshot.completedAt, completedAt)
+        assertEquatableSendable(snapshot)
+
+        let stored = try ModelContext(fixture.container).fetch(FetchDescriptor<SetLog>())
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored.first?.measurementInput, request.measurement)
+        XCTAssertEqual(stored.first?.workoutSession?.id, fixture.session.id)
+    }
+
+    func testInvalidAndAmbiguousSetInputsNeverMutatePersistentCount() async throws {
+        let fixture = try makeSetMutationFixture(kind: .duration)
+        let invalidInputs: [SetMeasurementInput] = [
+            .init(durationSec: 0),
+            .init(reps: 8, durationSec: 30)
+        ]
+
+        for (offset, input) in invalidInputs.enumerated() {
+            let request = SetLogSaveRequest(
+                workoutSessionID: fixture.session.id,
+                exerciseTemplateID: fixture.exercise.id,
+                setIndex: offset + 1,
+                measurement: input,
+                completedAt: Date(timeIntervalSinceReferenceDate: Double(5_000 + offset))
+            )
+
+            await XCTAssertThrowsErrorAsync(try await fixture.repository.saveSet(request))
+            XCTAssertEqual(
+                try ModelContext(fixture.container).fetchCount(FetchDescriptor<SetLog>()),
+                0
+            )
+        }
+    }
+
+    func testLogicalDuplicateSetIndexIsRejectedWithoutReplacingFirstValue() async throws {
+        let fixture = try makeSetMutationFixture(kind: .reps)
+        let first = SetLogSaveRequest(
+            workoutSessionID: fixture.session.id,
+            exerciseTemplateID: fixture.exercise.id,
+            setIndex: 1,
+            measurement: .init(reps: 8, rir: 3),
+            completedAt: Date(timeIntervalSinceReferenceDate: 6_000)
+        )
+        let duplicate = SetLogSaveRequest(
+            workoutSessionID: fixture.session.id,
+            exerciseTemplateID: fixture.exercise.id,
+            setIndex: 1,
+            measurement: .init(reps: 10, rir: 1),
+            completedAt: Date(timeIntervalSinceReferenceDate: 6_100)
+        )
+
+        _ = try await fixture.repository.saveSet(first)
+        do {
+            _ = try await fixture.repository.saveSet(duplicate)
+            XCTFail("Expected duplicate logical set index to fail")
+        } catch {
+            XCTAssertEqual(
+                error as? TrainingRepositoryIntegrityError,
+                .duplicateSetIndex(
+                    workoutSessionID: fixture.session.id,
+                    exerciseTemplateID: fixture.exercise.id,
+                    setIndex: 1
+                )
+            )
+        }
+
+        let stored = try ModelContext(fixture.container).fetch(FetchDescriptor<SetLog>())
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored.first?.measurementInput, first.measurement)
+    }
+
+    func testWarmupAndWorkingSetCannotShareALogicalIndex() async throws {
+        let fixture = try makeSetMutationFixture(kind: .reps)
+        let base = SetLogSaveRequest(
+            workoutSessionID: fixture.session.id,
+            exerciseTemplateID: fixture.exercise.id,
+            setIndex: 1,
+            measurement: .init(reps: 5),
+            isWarmupSet: true,
+            completedAt: Date(timeIntervalSinceReferenceDate: 7_000)
+        )
+        let working = SetLogSaveRequest(
+            workoutSessionID: fixture.session.id,
+            exerciseTemplateID: fixture.exercise.id,
+            setIndex: 1,
+            measurement: .init(reps: 8),
+            isWarmupSet: false,
+            completedAt: Date(timeIntervalSinceReferenceDate: 7_100)
+        )
+
+        _ = try await fixture.repository.saveSet(base)
+        do {
+            _ = try await fixture.repository.saveSet(working)
+            XCTFail("Expected duplicate logical set index to fail")
+        } catch {
+            XCTAssertEqual(
+                error as? TrainingRepositoryIntegrityError,
+                .duplicateSetIndex(
+                    workoutSessionID: fixture.session.id,
+                    exerciseTemplateID: fixture.exercise.id,
+                    setIndex: 1
+                )
+            )
+        }
+
+        let stored = try ModelContext(fixture.container).fetch(FetchDescriptor<SetLog>())
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertTrue(stored.first?.isWarmupSet == true)
+    }
+
     private func makeRepository() throws -> any TrainingRepository {
         let container = try ModelContainerFactory.make(for: .inMemory)
         return SwiftDataTrainingRepository(modelContext: ModelContext(container))
+    }
+
+    private func makeSetMutationFixture(
+        kind: ExerciseMeasurementKind
+    ) throws -> (
+        container: ModelContainer,
+        repository: SwiftDataTrainingRepository,
+        session: WorkoutSession,
+        exercise: ExerciseTemplate
+    ) {
+        let container = try ModelContainerFactory.make(for: .inMemory)
+        let context = ModelContext(container)
+        let session = WorkoutSession(status: .inProgress)
+        let exercise = ExerciseTemplate(measurementKind: kind)
+        context.insert(session)
+        context.insert(exercise)
+        try context.save()
+        return (
+            container,
+            SwiftDataTrainingRepository(modelContext: ModelContext(container)),
+            session,
+            exercise
+        )
+    }
+
+    private func assertEquatableSendable<Value: Equatable & Sendable>(_: Value) {}
+
+    private func XCTAssertThrowsErrorAsync<T>(
+        _ expression: @autoclosure () async throws -> T,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        do {
+            _ = try await expression()
+            XCTFail("Expected expression to throw", file: file, line: line)
+        } catch {}
     }
 }
