@@ -127,8 +127,8 @@ for scope_name, scope in tab_scopes:
         missing.append(f"AppRootView {scope_name} must apply AppTab localized hint metadata with .accessibilityHint(tab.hint).")
 
 hint_contracts = [
-    ("App/Application/FoundationTodayView.swift", "App/Resources", "foundation.empty.hint", '.accessibilityIdentifier("foundation.state.empty")', 160, False),
-    ("App/Application/FoundationTodayView.swift", "App/Resources", "foundation.error.hint", '.accessibilityIdentifier("foundation.state.error")', 160, False),
+    ("Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift", "Packages/HealthTrackingModules/Sources/TrainingKit/Resources", "today.empty.hint", '.accessibilityIdentifier("today.state.empty")', 220, True),
+    ("Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift", "Packages/HealthTrackingModules/Sources/TrainingKit/Resources", "today.error.hint", '.accessibilityIdentifier("today.state.error")', 220, True),
     ("Packages/HealthTrackingModules/Sources/SettingsKit/Foundation/SettingsFoundationView.swift", "Packages/HealthTrackingModules/Sources/SettingsKit/Resources", "settings.gallery.hint", '.accessibilityIdentifier("settings.gallery-link")', 200, True),
     ("Packages/HealthTrackingModules/Sources/TrainingKit/Foundation/FoundationProgramView.swift", "Packages/HealthTrackingModules/Sources/TrainingKit/Resources", "foundation.empty.hint", '.accessibilityIdentifier("foundation.state.empty")', 260, True),
     ("Packages/HealthTrackingModules/Sources/TrainingKit/Foundation/FoundationProgramView.swift", "Packages/HealthTrackingModules/Sources/TrainingKit/Resources", "foundation.error.hint", '.accessibilityIdentifier("foundation.state.error")', 260, True),
@@ -200,12 +200,6 @@ private func legacyTabLabel(for tab: AppTab) -> some View {
 ''')
 catalog = path / 'App/Resources/Localizable.xcstrings'
 catalog.write_text('{"sourceLanguage":"tr","strings":{' + ','.join(f'"{key}":{{"localizations":{{"tr":{{"stringUnit":{{"state":"translated","value":"İpucu"}}}}}}}}' for key in ['known.key', 'tab.today.hint', 'tab.training.hint', 'tab.nutrition.hint', 'tab.progress.hint', 'tab.settings.hint', 'foundation.empty.hint', 'foundation.error.hint']) + '}}')
-today_source = path / 'App/Application/FoundationTodayView.swift'
-today_source.write_text('''.accessibilityIdentifier("foundation.state.empty")
-.accessibilityHint(String(localized: "foundation.empty.hint"))
-.accessibilityIdentifier("foundation.state.error")
-.accessibilityHint(String(localized: "foundation.error.hint"))
-''')
 for module, source_name, keys in [
     ('SettingsKit', 'Foundation/SettingsFoundationView.swift', ['settings.gallery.hint']),
     ('TrainingKit', 'Foundation/FoundationProgramView.swift', ['foundation.empty.hint', 'foundation.error.hint']),
@@ -216,6 +210,8 @@ for module, source_name, keys in [
     catalog_keys = list(keys)
     if module == 'DesignSystem':
         catalog_keys += ['designSystem.gallery.emptyActionConfirmation', 'designSystem.gallery.retryConfirmation']
+    if module == 'TrainingKit':
+        catalog_keys += ['today.empty.hint', 'today.error.hint']
     (resources / 'Localizable.xcstrings').write_text('{"sourceLanguage":"tr","strings":{' + ','.join(f'"{key}":{{"localizations":{{"tr":{{"stringUnit":{{"state":"translated","value":"İpucu"}}}}}}}}' for key in catalog_keys) + '}}')
     source = path / f'Packages/HealthTrackingModules/Sources/{module}/{source_name}'
     source.parent.mkdir(parents=True, exist_ok=True)
@@ -228,6 +224,13 @@ for module, source_name, keys in [
         'designSystem.gallery.retryHint': 'actionFeedback = String(localized: "designSystem.gallery.retryConfirmation", bundle: .module)',
     }
     source.write_text(''.join(f'{anchors[key]}\n.accessibilityHint(String(localized: "{key}", bundle: .module))\n' for key in keys))
+today_source = path / 'Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift'
+today_source.parent.mkdir(parents=True, exist_ok=True)
+today_source.write_text('''.accessibilityIdentifier("today.state.empty")
+.accessibilityHint(String(localized: "today.empty.hint", bundle: .module))
+.accessibilityIdentifier("today.state.error")
+.accessibilityHint(String(localized: "today.error.hint", bundle: .module))
+''')
 PY
     verify_repo "$fixture"
 
@@ -289,15 +292,15 @@ PY
     grep -Fq 'AppRootView legacy tab label must apply AppTab localized hint metadata with .accessibilityHint(tab.hint).' "$fixture/legacy-hint.out"
     mv "$fixture/App/Application/AppRootView.valid.swift" "$fixture/App/Application/AppRootView.swift"
 
-    cp "$fixture/App/Application/FoundationTodayView.swift" "$fixture/App/Application/FoundationTodayView.valid.swift"
-    python3 - "$fixture/App/Application/FoundationTodayView.swift" <<'PY'
+    cp "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.valid.swift"
+    python3 - "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift" <<'PY'
 from pathlib import Path
 path = Path(__import__('sys').argv[1])
-path.write_text(path.read_text().replace('.accessibilityHint(String(localized: "foundation.empty.hint"))', '.accessibilityHint(unrelatedHint)', 1))
+path.write_text(path.read_text().replace('.accessibilityHint(String(localized: "today.empty.hint", bundle: .module))', '.accessibilityHint(unrelatedHint)', 1))
 PY
     if verify_repo "$fixture" >"$fixture/today-hint.out" 2>&1; then echo "Localization self-test expected a missing Today empty-state hint failure." >&2; return 1; fi
-    grep -Fq "Missing localized accessibilityHint for 'foundation.empty.hint' on its intended control in App/Application/FoundationTodayView.swift" "$fixture/today-hint.out"
-    mv "$fixture/App/Application/FoundationTodayView.valid.swift" "$fixture/App/Application/FoundationTodayView.swift"
+    grep -Fq "Missing localized accessibilityHint for 'today.empty.hint' on its intended control in Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift" "$fixture/today-hint.out"
+    mv "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.valid.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift"
 
     cp "$fixture/App/Application/AppTab.swift" "$fixture/App/Application/AppTab.valid.swift"
     python3 - "$fixture/App/Application/AppTab.swift" <<'PY'

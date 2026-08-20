@@ -51,6 +51,8 @@ fi
 "$script_dir/verify-localization.sh"
 "$script_dir/verify-requirements.sh" --self-test
 "$script_dir/verify-requirements.sh"
+"$script_dir/verify-today.sh" --self-test
+"$script_dir/verify-today.sh"
 
 if [[ "$bootstrap_idempotence_only" == true ]]; then
     "$script_dir/verify-bootstrap-idempotence.sh"

@@ -8,10 +8,17 @@ final class PhaseTransitionFlowUITests: XCTestCase {
     func testStayKeepsChecklistAccessibleThenExplicitAndManualSelectionsPersist() {
         let app = launch()
         let priorityCard = require(
-            identified("phase.transition.card", in: app),
+            identified("today.alert.phase", in: app),
             "A due calendar estimate must expose the phase decision on Today."
         )
         XCTAssertTrue(priorityCard.label.contains("Faz"))
+        attachScreenshot(named: "phase-transition-priority-light")
+
+        select(tab: "training", in: app)
+        require(
+            identified("phase.transition.card", in: app),
+            "The phase decision must remain accessible in phase detail."
+        )
         require(
             identified("phase.transition.checklist", in: app),
             "The phase card must label its source checklist."
@@ -25,18 +32,11 @@ final class PhaseTransitionFlowUITests: XCTestCase {
             identified("phase.transition.confirm", in: app),
             "The due review must provide explicit confirmation."
         )
-        attachScreenshot(named: "phase-transition-priority-light")
 
         tap("phase.transition.stay", in: app)
-        XCTAssertFalse(
-            identified("phase.transition.card", in: app).exists,
-            "Şimdilik kal must dismiss only the current Today priority."
-        )
-
-        select(tab: "training", in: app)
         require(
             identified("phase.transition.card", in: app),
-            "The dismissed review must remain accessible in phase detail."
+            "Şimdilik kal must preserve the review in phase detail."
         )
         attachScreenshot(named: "phase-transition-detail-light")
         tap("phase.transition.confirm", in: app)

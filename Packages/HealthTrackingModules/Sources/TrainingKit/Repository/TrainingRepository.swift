@@ -3,6 +3,7 @@ import Foundation
 
 @MainActor
 public protocol TrainingRepository: AnyObject {
+    func fetchTodaySnapshot() async throws -> TodayRepositorySnapshot?
     func fetchUserProfile() async throws -> UserProfile?
     func fetchActiveProgram() async throws -> Program?
     func fetchProgramPhases(programID: UUID) async throws -> [ProgramPhase]
@@ -72,12 +73,17 @@ public protocol TrainingRepository: AnyObject {
 }
 
 public enum TrainingRepositoryCapabilityError: Error, Equatable, Sendable {
+    case todaySnapshotUnavailable
     case programStateMutationUnavailable
     case trainingHistoryUnavailable
     case setMutationUnavailable
 }
 
 public extension TrainingRepository {
+    func fetchTodaySnapshot() async throws -> TodayRepositorySnapshot? {
+        throw TrainingRepositoryCapabilityError.todaySnapshotUnavailable
+    }
+
     func fetchTrainingHistory() async throws -> [TrainingHistorySessionSnapshot] {
         throw TrainingRepositoryCapabilityError.trainingHistoryUnavailable
     }

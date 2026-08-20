@@ -15,7 +15,7 @@ final class TrainingSessionFlowUITests: XCTestCase {
 
         requireFoundationContent("root.today.content", in: app)
         tapAction(
-            "today.session.open",
+            "today.action.primary",
             in: app,
             message: "Today must expose a real session action."
         )
@@ -146,7 +146,7 @@ final class TrainingSessionFlowUITests: XCTestCase {
             let app = launchApp(scenario: "session-families", appearance: appearance)
             requireFoundationContent("root.today.content", in: app)
             tapAction(
-                "today.session.open",
+                "today.action.primary",
                 in: app,
                 message: "The family fixture must use the real Today route."
             )
@@ -223,7 +223,7 @@ final class TrainingSessionFlowUITests: XCTestCase {
         let first = launchApp(scenario: "session-resume", appearance: .light)
         requireFoundationContent("root.today.content", in: first)
         tapAction(
-            "today.session.open",
+            "today.action.primary",
             in: first,
             message: "Resume needs a real Today action."
         )
@@ -234,7 +234,7 @@ final class TrainingSessionFlowUITests: XCTestCase {
         let second = launchApp(scenario: "session-resume", appearance: .light)
         requireFoundationContent("root.today.content", in: second)
         tapAction(
-            "today.session.open",
+            "today.action.primary",
             in: second,
             message: "Relaunch must expose resume."
         )
@@ -246,7 +246,7 @@ final class TrainingSessionFlowUITests: XCTestCase {
         let app = launchApp(scenario: "progression-missing-rir", appearance: .light)
         requireFoundationContent("root.today.content", in: app)
         tapAction(
-            "today.session.open",
+            "today.action.primary",
             in: app,
             message: "The progression fixture must use the real Today route."
         )
@@ -269,7 +269,7 @@ final class TrainingSessionFlowUITests: XCTestCase {
         let app = launchApp(scenario: "weekly-pallof", appearance: .light)
         requireFoundationContent("root.today.content", in: app)
         tapAction(
-            "today.session.open",
+            "today.action.primary",
             in: app,
             message: "The weekly Pallof fixture must use the real Today route."
         )

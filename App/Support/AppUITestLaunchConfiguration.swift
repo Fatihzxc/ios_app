@@ -18,6 +18,15 @@ enum AppUITestScenario: String {
     case deloadReactive = "deload-reactive"
     case phaseTransition = "phase-transition"
     case trainingHistory = "training-history"
+    case todayTrain = "today-train"
+    case todayRest = "today-rest"
+    case todayResume = "today-resume"
+    case todayDeload = "today-deload"
+    case todayPhase = "today-phase"
+    case todayReminder = "today-reminder"
+    case todayPriority = "today-priority"
+    case todayEmptyOnce = "today-empty-once"
+    case todayErrorOnce = "today-error-once"
 }
 
 struct AppUITestLaunchConfiguration {
@@ -35,6 +44,7 @@ struct AppUITestLaunchConfiguration {
 
     let scenario: AppUITestScenario
     let appearance: Appearance
+    let persistentStoreIdentifier: UUID?
 
     static func resolve(arguments: [String] = ProcessInfo.processInfo.arguments) -> Self? {
         guard arguments.filter({ $0 == "-ui-testing" }).count == 1,
@@ -45,7 +55,22 @@ struct AppUITestLaunchConfiguration {
             return nil
         }
 
-        return Self(scenario: scenario, appearance: appearance)
+        let persistentStoreIdentifier: UUID?
+        if arguments.contains("-ui-test-store-identifier") {
+            guard let value = uniqueValue(after: "-ui-test-store-identifier", in: arguments),
+                  let identifier = UUID(uuidString: value) else {
+                return nil
+            }
+            persistentStoreIdentifier = identifier
+        } else {
+            persistentStoreIdentifier = nil
+        }
+
+        return Self(
+            scenario: scenario,
+            appearance: appearance,
+            persistentStoreIdentifier: persistentStoreIdentifier
+        )
     }
 
     private static func uniqueValue(after flag: String, in arguments: [String]) -> String? {

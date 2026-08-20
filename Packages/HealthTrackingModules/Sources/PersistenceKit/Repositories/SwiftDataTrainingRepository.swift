@@ -6,6 +6,7 @@ import TrainingKit
 
 public enum TrainingRepositoryIntegrityError: Error, Equatable, Sendable {
     case duplicateUserProfiles(count: Int)
+    case missingUserProfile
     case duplicateActivePrograms(count: Int)
     case duplicateProgramStates(programID: UUID, count: Int)
     case missingWorkoutSession(id: UUID)
@@ -51,6 +52,159 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
     public init(modelContext: ModelContext, calendar: Calendar = .current) {
         self.modelContext = modelContext
         self.calendar = calendar
+    }
+
+    public func fetchTodaySnapshot() async throws -> TodayRepositorySnapshot? {
+        let profiles = try modelContext.fetch(
+            FetchDescriptor<UserProfile>(
+                sortBy: [SortDescriptor(\UserProfile.updatedAt, order: .reverse)]
+            )
+        )
+        guard profiles.count <= 1 else {
+            throw TrainingRepositoryIntegrityError.duplicateUserProfiles(count: profiles.count)
+        }
+
+        let programs = Self.sortActivePrograms(
+            try modelContext.fetch(
+                FetchDescriptor<Program>(
+                    predicate: #Predicate { $0.isActive },
+                    sortBy: [SortDescriptor(\Program.updatedAt, order: .reverse)]
+                )
+            )
+        )
+        guard programs.count <= 1 else {
+            throw TrainingRepositoryIntegrityError.duplicateActivePrograms(count: programs.count)
+        }
+        guard let program = programs.first else { return nil }
+        guard let profile = profiles.first else {
+            throw TrainingRepositoryIntegrityError.missingUserProfile
+        }
+
+        let phases = (program.programPhases ?? [])
+            .sorted(by: Self.phaseOrderedBefore)
+        let workoutDays = (program.workoutDayTemplates ?? [])
+            .sorted(by: Self.workoutDayOrderedBefore)
+        let workoutDayIDs = Set(workoutDays.map(\.id))
+
+        let programStates = try modelContext.fetch(FetchDescriptor<ProgramState>())
+            .filter { $0.programId == program.id }
+        guard programStates.count <= 1 else {
+            throw TrainingRepositoryIntegrityError.duplicateProgramStates(
+                programID: program.id,
+                count: programStates.count
+            )
+        }
+        guard let programState = programStates.first else {
+            throw TrainingRepositoryIntegrityError.missingProgramState(programID: program.id)
+        }
+
+        let exercises = workoutDays.flatMap { $0.exerciseTemplates ?? [] }
+        let ohpDayIDs = Set(
+            exercises.compactMap { exercise -> UUID? in
+                guard exercise.progressionRule == .gradedEntryOHP else { return nil }
+                return exercise.workoutDayTemplate?.id
+            }
+        )
+
+        let sessions = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
+            .filter {
+                workoutDayIDs.contains($0.workoutDayTemplateId)
+                    || $0.status == .inProgress
+            }
+            .sorted(by: Self.workoutSessionOrderedBefore)
+        let completedSessions = sessions.filter {
+            $0.status == .completed && workoutDayIDs.contains($0.workoutDayTemplateId)
+        }
+        let exerciseIDs = Set(exercises.map(\.id))
+        let setLogs = completedSessions
+            .flatMap { $0.setLogs ?? [] }
+            .filter { exerciseIDs.contains($0.exerciseTemplateId) }
+        let setLogsByExerciseID = Dictionary(grouping: setLogs, by: \.exerciseTemplateId)
+
+        let exerciseHistories = exercises
+            .sorted { $0.id.uuidString < $1.id.uuidString }
+            .compactMap { exercise -> TodayRepositorySnapshot.ExerciseHistory? in
+                let exerciseSets = setLogsByExerciseID[exercise.id, default: []]
+                var setsBySessionID: [UUID: [SetLog]] = [:]
+                for setLog in exerciseSets {
+                    guard let sessionID = setLog.workoutSession?.id else { continue }
+                    setsBySessionID[sessionID, default: []].append(setLog)
+                }
+                let history = completedSessions.compactMap {
+                    session -> CompletedExerciseHistorySnapshot? in
+                    guard let logs = setsBySessionID[session.id], !logs.isEmpty else {
+                        return nil
+                    }
+                    let snapshots = logs
+                        .sorted(by: Self.setLogOrderedBefore)
+                        .map { Self.snapshot($0, workoutSessionID: session.id) }
+                    return CompletedExerciseHistorySnapshot(
+                        session: Self.sessionSnapshot(session),
+                        setLogs: snapshots
+                    )
+                }
+                guard !history.isEmpty else { return nil }
+                return .init(exerciseID: exercise.id, sessions: history)
+            }
+
+        let healthChecks = try modelContext.fetch(FetchDescriptor<HealthCheckReminder>())
+            .filter { $0.status == .pending }
+            .sorted(by: Self.healthCheckOrderedBefore)
+            .map {
+                TodayRepositorySnapshot.Reminder(
+                    id: $0.id,
+                    title: $0.name,
+                    dueDate: $0.dueDate
+                )
+            }
+        let measurementReminders = try modelContext.fetch(FetchDescriptor<AppReminder>())
+            .filter { $0.isEnabled && $0.type == .measurement }
+            .sorted { $0.id.uuidString < $1.id.uuidString }
+            .map {
+                TodayRepositorySnapshot.MeasurementReminder(
+                    id: $0.id,
+                    message: $0.message
+                )
+            }
+
+        return TodayRepositorySnapshot(
+            profile: .init(
+                proteinTargetG: profile.proteinTargetG,
+                weeklyWorkoutTarget: profile.weeklyWorkoutTarget,
+                programStartDate: profile.programStartDate
+            ),
+            program: .init(id: program.id, name: program.name),
+            phases: phases.map {
+                .init(
+                    id: $0.id,
+                    name: $0.name,
+                    orderIndex: $0.orderIndex,
+                    monthStart: $0.monthStart,
+                    monthEnd: $0.monthEnd,
+                    entryCriteria: $0.entryCriteria,
+                    milestone: $0.milestone
+                )
+            },
+            workoutDays: workoutDays.map {
+                .init(
+                    id: $0.id,
+                    name: $0.name,
+                    orderIndex: $0.orderIndex,
+                    focus: $0.focus,
+                    containsOHP: ohpDayIDs.contains($0.id)
+                )
+            },
+            programState: .init(
+                currentPhaseID: programState.currentPhaseId,
+                trainingWeekIndex: programState.trainingWeekIndex,
+                deloadStatus: programState.deloadStatus,
+                deloadReason: programState.deloadReason
+            ),
+            sessions: sessions.map(Self.sessionSnapshot),
+            healthChecks: healthChecks,
+            measurementReminders: measurementReminders,
+            exerciseHistories: exerciseHistories
+        )
     }
 
     public func fetchUserProfile() async throws -> UserProfile? {
@@ -1137,6 +1291,53 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
     ) -> Bool {
         if lhs.orderIndex != rhs.orderIndex {
             return lhs.orderIndex < rhs.orderIndex
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private static func phaseOrderedBefore(_ lhs: ProgramPhase, _ rhs: ProgramPhase) -> Bool {
+        if lhs.orderIndex != rhs.orderIndex {
+            return lhs.orderIndex < rhs.orderIndex
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private static func workoutDayOrderedBefore(
+        _ lhs: WorkoutDayTemplate,
+        _ rhs: WorkoutDayTemplate
+    ) -> Bool {
+        if lhs.orderIndex != rhs.orderIndex {
+            return lhs.orderIndex < rhs.orderIndex
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private static func workoutSessionOrderedBefore(
+        _ lhs: WorkoutSession,
+        _ rhs: WorkoutSession
+    ) -> Bool {
+        if lhs.date != rhs.date {
+            return lhs.date > rhs.date
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private static func setLogOrderedBefore(_ lhs: SetLog, _ rhs: SetLog) -> Bool {
+        if lhs.setIndex != rhs.setIndex {
+            return lhs.setIndex < rhs.setIndex
+        }
+        if lhs.completedAt != rhs.completedAt {
+            return lhs.completedAt < rhs.completedAt
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private static func healthCheckOrderedBefore(
+        _ lhs: HealthCheckReminder,
+        _ rhs: HealthCheckReminder
+    ) -> Bool {
+        if lhs.dueDate != rhs.dueDate {
+            return lhs.dueDate < rhs.dueDate
         }
         return lhs.id.uuidString < rhs.id.uuidString
     }

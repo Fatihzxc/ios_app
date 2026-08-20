@@ -63,6 +63,8 @@ jobs:
           scripts/verify-localization.sh
           scripts/verify-requirements.sh --self-test
           scripts/verify-requirements.sh
+          scripts/verify-today.sh --self-test
+          scripts/verify-today.sh
 
       - name: Fresh-clone bootstrap idempotence
         timeout-minutes: 15
@@ -126,7 +128,13 @@ jobs:
           }
           gallery_expected = {"gallery-light", "gallery-dark"}
           accessibility_expected = {"accessibility-xxxl-light", "accessibility-xxxl-dark"}
-          expected = shell_expected | gallery_expected | accessibility_expected
+          today_expected = {
+              f"today-{variant}-{appearance}-{size}"
+              for variant in ["train", "rest", "resume", "deload", "phase", "reminder"]
+              for appearance in ["light", "dark"]
+              for size in ["standard", "accessibility"]
+          }
+          expected = shell_expected | gallery_expected | accessibility_expected | today_expected
 
           owners = {
               "AppShellUITests": {
@@ -140,6 +148,10 @@ jobs:
               "AccessibilitySmokeUITests": {
                   "module": "HealthTrackingAppUITests",
                   "expected": accessibility_expected,
+              },
+              "TodayGuidanceUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": today_expected,
               },
           }
 

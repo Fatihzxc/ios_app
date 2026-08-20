@@ -7,6 +7,7 @@ import TrainingKit
 
 @MainActor
 struct AppRootView: View {
+    let todayViewModel: TodayViewModel
     let foundationViewModel: FoundationProgramViewModel
     let phaseTransitionViewModel: PhaseTransitionViewModel
     let trainingHistoryViewModel: TrainingHistoryViewModel
@@ -36,6 +37,9 @@ struct AppRootView: View {
         .task {
             guard shouldLoadFoundation, !hasStartedFoundationLoad else { return }
             hasStartedFoundationLoad = true
+            if todayViewModel.state == .loading {
+                await todayViewModel.load()
+            }
             await foundationViewModel.load()
             await phaseTransitionViewModel.load()
         }
@@ -46,6 +50,7 @@ struct AppRootView: View {
                 onClose: {
                     sessionRoute = nil
                     Task {
+                        await todayViewModel.load()
                         await foundationViewModel.load()
                         await phaseTransitionViewModel.load()
                         await trainingHistoryViewModel.load()
@@ -84,10 +89,9 @@ struct AppRootView: View {
     private func tabContent(for tab: AppTab) -> some View {
         switch tab {
         case .today:
-            FoundationTodayView(
-                viewModel: foundationViewModel,
-                phaseTransitionViewModel: phaseTransitionViewModel,
-                onOpenSession: openSession
+            TodayView(
+                viewModel: todayViewModel,
+                onPerformAction: performTodayAction
             )
         case .training:
             FoundationProgramView(
@@ -123,6 +127,10 @@ struct AppRootView: View {
             workoutDayID: workoutDayID,
             viewModel: makeSessionViewModel()
         )
+    }
+
+    private func performTodayAction(_ action: TodayMainAction) {
+        openSession(workoutDayID: action.workoutDayID)
     }
 }
 

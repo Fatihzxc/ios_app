@@ -65,13 +65,19 @@ public final class SwiftDataSeedLoader: SeedLoading {
                     workoutDaysByID[day.id] = day
                 }
             } else {
-                let seededProfile = try profile(for: payload.profile)
-                let seededProgram = try program(for: payload.program)
+                let existingProfiles = try modelContext.fetch(FetchDescriptor<UserProfile>())
+                let existingPrograms = try modelContext.fetch(FetchDescriptor<Program>())
+                let existingPhases = try modelContext.fetch(FetchDescriptor<ProgramPhase>())
+                let existingWorkoutDays = try modelContext.fetch(
+                    FetchDescriptor<WorkoutDayTemplate>()
+                )
+                let seededProfile = profile(for: payload.profile, existing: existingProfiles)
+                let seededProgram = program(for: payload.program, existing: existingPrograms)
                 foundationProfile = seededProfile
                 foundationProgram = seededProgram
 
                 for phasePayload in payload.phases {
-                    let phase = try phase(for: phasePayload)
+                    let phase = phase(for: phasePayload, existing: existingPhases)
                     if phase.program?.id != seededProgram.id {
                         phase.program = seededProgram
                     }
@@ -79,7 +85,7 @@ public final class SwiftDataSeedLoader: SeedLoading {
                 }
 
                 for dayPayload in payload.workoutDays {
-                    let day = try workoutDay(for: dayPayload)
+                    let day = workoutDay(for: dayPayload, existing: existingWorkoutDays)
                     if day.program?.id != seededProgram.id {
                         day.program = seededProgram
                     }
@@ -172,9 +178,12 @@ public final class SwiftDataSeedLoader: SeedLoading {
         setting.key == markerKey && setting.value == markerValue
     }
 
-    private func profile(for payload: M0SeedPayload.Profile) throws -> UserProfile {
-        if let existing = try modelContext.fetch(FetchDescriptor<UserProfile>()).first(where: { $0.id == payload.id }) {
-            return existing
+    private func profile(
+        for payload: M0SeedPayload.Profile,
+        existing: [UserProfile]
+    ) -> UserProfile {
+        if let match = existing.first(where: { $0.id == payload.id }) {
+            return match
         }
 
         let profile = UserProfile(
@@ -197,9 +206,12 @@ public final class SwiftDataSeedLoader: SeedLoading {
         return profile
     }
 
-    private func program(for payload: M0SeedPayload.Program) throws -> Program {
-        if let existing = try modelContext.fetch(FetchDescriptor<Program>()).first(where: { $0.id == payload.id }) {
-            return existing
+    private func program(
+        for payload: M0SeedPayload.Program,
+        existing: [Program]
+    ) -> Program {
+        if let match = existing.first(where: { $0.id == payload.id }) {
+            return match
         }
 
         let program = Program(
@@ -214,9 +226,12 @@ public final class SwiftDataSeedLoader: SeedLoading {
         return program
     }
 
-    private func phase(for payload: M0SeedPayload.Phase) throws -> ProgramPhase {
-        if let existing = try modelContext.fetch(FetchDescriptor<ProgramPhase>()).first(where: { $0.id == payload.id }) {
-            return existing
+    private func phase(
+        for payload: M0SeedPayload.Phase,
+        existing: [ProgramPhase]
+    ) -> ProgramPhase {
+        if let match = existing.first(where: { $0.id == payload.id }) {
+            return match
         }
 
         let phase = ProgramPhase(
@@ -236,9 +251,12 @@ public final class SwiftDataSeedLoader: SeedLoading {
         return phase
     }
 
-    private func workoutDay(for payload: M0SeedPayload.WorkoutDay) throws -> WorkoutDayTemplate {
-        if let existing = try modelContext.fetch(FetchDescriptor<WorkoutDayTemplate>()).first(where: { $0.id == payload.id }) {
-            return existing
+    private func workoutDay(
+        for payload: M0SeedPayload.WorkoutDay,
+        existing: [WorkoutDayTemplate]
+    ) -> WorkoutDayTemplate {
+        if let match = existing.first(where: { $0.id == payload.id }) {
+            return match
         }
 
         let day = WorkoutDayTemplate(

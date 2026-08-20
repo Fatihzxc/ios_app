@@ -20,7 +20,7 @@ final class OHPSafetyFlowUITests: XCTestCase {
             app.descendants(matching: .any)["root.today.content"],
             "The OHP fixture must load through the real Today root."
         )
-        tap("today.session.open", in: app)
+        tap("today.action.primary", in: app)
 
         let question = require(
             app.staticTexts["session.ohp.question.body"],

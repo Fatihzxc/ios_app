@@ -8,10 +8,16 @@ final class DeloadFlowUITests: XCTestCase {
     func testScheduledWeekShowsVisibleWarningAndAcceptedDeloadLoad() {
         let app = launch(scenario: "deload-scheduled")
         let todayDirective = require(
-            identified("today.deload.message", in: app),
+            identified("today.alert.deload", in: app),
             "Today must explain the scheduled deload before the session opens."
         )
-        XCTAssertTrue(todayDirective.label.contains("5"))
+        XCTAssertFalse(todayDirective.label.isEmpty)
+        XCTAssertTrue(
+            require(
+                identified("today.alert.context", in: app),
+                "Today must explain the scheduled deload week."
+            ).label.contains("5")
+        )
         openSession(in: app)
 
         let recommendation = require(
@@ -54,10 +60,16 @@ final class DeloadFlowUITests: XCTestCase {
     func testReactiveTechniqueReviewSuppressesOnlyTheCurrentWeekWithoutMutation() {
         let app = launch(scenario: "deload-reactive")
         let todayDirective = require(
-            identified("today.deload.message", in: app),
+            identified("today.alert.deload", in: app),
             "Today must explain the reactive deload before the session opens."
         )
-        XCTAssertTrue(todayDirective.label.lowercased().contains("iki"))
+        XCTAssertFalse(todayDirective.label.isEmpty)
+        XCTAssertTrue(
+            require(
+                identified("today.alert.context", in: app),
+                "Today must explain why the reactive deload is recommended."
+            ).label.lowercased().contains("iki")
+        )
         openSession(in: app)
 
         let recommendation = require(
@@ -99,7 +111,7 @@ final class DeloadFlowUITests: XCTestCase {
             identified("root.today.content", in: app),
             "The deload fixture must load through the real Today root."
         )
-        tap("today.session.open", in: app)
+        tap("today.action.primary", in: app)
     }
 
     private func tap(_ identifier: String, in app: XCUIApplication) {

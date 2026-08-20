@@ -21,6 +21,7 @@ struct AppBootstrapView: View {
             }
             return AnyView(
                 AppRootView(
+                    todayViewModel: dependencies.todayViewModel,
                     foundationViewModel: dependencies.foundationViewModel,
                     phaseTransitionViewModel: dependencies.phaseTransitionViewModel,
                     trainingHistoryViewModel: dependencies.trainingHistoryViewModel,
@@ -31,11 +32,13 @@ struct AppBootstrapView: View {
             )
         }
     ) {
-        let runtime = AppBootstrapRuntime(
-            resolveEnvironment: resolveEnvironment,
-            makeDependencies: makeDependencies
+        _runtime = StateObject(
+            wrappedValue: AppBootstrapRuntime(
+                resolveEnvironment: resolveEnvironment,
+                makeDependencies: makeDependencies,
+                startsInitialLoad: true
+            )
         )
-        _runtime = StateObject(wrappedValue: runtime)
         self.makeContent = makeContent
     }
 
@@ -139,10 +142,12 @@ final class AppBootstrapRuntime: ObservableObject {
     let hasFatalConfigurationError: Bool
     let preferredColorScheme: ColorScheme?
     private let bootstrapAttempt: AppBootstrapAttempt?
+    private var initialLoadTask: Task<Void, Never>?
 
     init(
         resolveEnvironment: @escaping @MainActor () throws -> AppEnvironment,
-        makeDependencies: @escaping @MainActor (AppEnvironment) throws -> any AppDependencyLoading
+        makeDependencies: @escaping @MainActor (AppEnvironment) throws -> any AppDependencyLoading,
+        startsInitialLoad: Bool = false
     ) {
         do {
             let environment = try resolveEnvironment()
@@ -151,7 +156,7 @@ final class AppBootstrapRuntime: ObservableObject {
                 makeDependencies: makeDependencies
             )
             bootstrapAttempt = attempt
-            model = AppBootstrapModel(load: { try attempt.load() })
+            model = AppBootstrapModel(load: { try await attempt.load() })
             hasFatalConfigurationError = false
             #if DEBUG
             preferredColorScheme = environment == .uiTesting
@@ -169,6 +174,16 @@ final class AppBootstrapRuntime: ObservableObject {
             #else
             preferredColorScheme = nil
             #endif
+        }
+        if startsInitialLoad {
+            startInitialLoad()
+        }
+    }
+
+    func startInitialLoad() {
+        guard !hasFatalConfigurationError, initialLoadTask == nil else { return }
+        initialLoadTask = Task(priority: .userInitiated) { [weak self] in
+            await self?.model.loadIfNeeded()
         }
     }
 
@@ -192,9 +207,10 @@ private final class AppBootstrapAttempt {
         self.makeDependencies = makeDependencies
     }
 
-    func load() throws {
+    func load() async throws {
         let dependencies = try makeDependencies(environment)
         try dependencies.load()
+        await dependencies.loadInitialContent()
         self.dependencies = dependencies
     }
 }

@@ -8,6 +8,11 @@ import TrainingKit
 @MainActor
 protocol AppDependencyLoading: AnyObject {
     func load() throws
+    func loadInitialContent() async
+}
+
+extension AppDependencyLoading {
+    func loadInitialContent() async {}
 }
 
 @MainActor
@@ -16,6 +21,7 @@ final class AppDependencies: AppDependencyLoading {
     private let seedLoader: SwiftDataSeedLoader
     private let installUITestFixture: @MainActor () throws -> Void
     let trainingRepository: any TrainingRepository
+    let todayViewModel: TodayViewModel
     let foundationViewModel: FoundationProgramViewModel
     let phaseTransitionViewModel: PhaseTransitionViewModel
     let trainingHistoryViewModel: TrainingHistoryViewModel
@@ -27,7 +33,18 @@ final class AppDependencies: AppDependencyLoading {
         let persistenceMode: PersistenceMode
         switch environment {
         case .uiTesting:
+            #if DEBUG
+            if let identifier = AppUITestLaunchConfiguration.resolve()?
+                .persistentStoreIdentifier {
+                persistenceMode = .local(
+                    storeURL: try Self.makeUITestStoreURL(identifier: identifier)
+                )
+            } else {
+                persistenceMode = .inMemory
+            }
+            #else
             persistenceMode = .inMemory
+            #endif
             persistencePresentation = .uiTestingInMemory
         case let .local(storeURL):
             persistenceMode = .local(storeURL: storeURL)
@@ -53,13 +70,25 @@ final class AppDependencies: AppDependencyLoading {
             case .emptyOnce:
                 trainingRepository = UITestFoundationRepository(
                     repository: repository,
-                    initialOutcome: .missingProgram
+                    foundationInitialOutcome: .missingProgram
                 )
                 shouldLoadFoundation = true
             case .errorOnce:
                 trainingRepository = UITestFoundationRepository(
                     repository: repository,
-                    initialOutcome: .repositoryError
+                    foundationInitialOutcome: .repositoryError
+                )
+                shouldLoadFoundation = true
+            case .todayEmptyOnce:
+                trainingRepository = UITestFoundationRepository(
+                    repository: repository,
+                    todayInitialOutcome: .missingProgram
+                )
+                shouldLoadFoundation = true
+            case .todayErrorOnce:
+                trainingRepository = UITestFoundationRepository(
+                    repository: repository,
+                    todayInitialOutcome: .repositoryError
                 )
                 shouldLoadFoundation = true
             case .loading:
@@ -67,7 +96,9 @@ final class AppDependencies: AppDependencyLoading {
                 shouldLoadFoundation = false
             case .seeded, .fatalConfiguration, .sessionFlow, .sessionFamilies, .sessionResume,
                  .progressionMissingRIR, .weeklyPallof, .ohpSafety, .deloadScheduled,
-                 .deloadReactive, .phaseTransition, .trainingHistory:
+                 .deloadReactive, .phaseTransition, .trainingHistory, .todayTrain,
+                 .todayRest, .todayResume, .todayDeload, .todayPhase, .todayReminder,
+                 .todayPriority:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -80,13 +111,22 @@ final class AppDependencies: AppDependencyLoading {
         shouldLoadFoundation = true
         #endif
 
+        let todayModel = TodayViewModel(
+            repository: trainingRepository,
+            launchStartedAt: AppLaunchPerformance.startedAt,
+            onFirstMeaningfulContent: { elapsed in
+                AppLaunchPerformance.finish(elapsed)
+            }
+        )
         let foundationModel = FoundationProgramViewModel(repository: trainingRepository)
         let phaseModel = PhaseTransitionViewModel(repository: trainingRepository)
+        todayViewModel = todayModel
         foundationViewModel = foundationModel
         phaseTransitionViewModel = phaseModel
         trainingHistoryViewModel = TrainingHistoryViewModel(
             repository: trainingRepository,
-            onHistoryChanged: { [weak foundationModel, weak phaseModel] in
+            onHistoryChanged: { [weak todayModel, weak foundationModel, weak phaseModel] in
+                await todayModel?.load()
                 await foundationModel?.load()
                 await phaseModel?.load()
             }
@@ -113,6 +153,41 @@ final class AppDependencies: AppDependencyLoading {
         try seedLoader.seedIfNeeded(installedAt: .now)
         try installUITestFixture()
     }
+
+    func loadInitialContent() async {
+        guard shouldLoadFoundation else { return }
+        await todayViewModel.load()
+    }
+
+    #if DEBUG
+    private static func makeUITestStoreURL(identifier: UUID) throws -> URL {
+        guard let applicationSupportDirectory = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else {
+            throw AppEnvironment.StorePathError.applicationSupportUnavailable
+        }
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier,
+              !bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AppEnvironment.StorePathError.invalidBundleIdentifier
+        }
+
+        let directory = applicationSupportDirectory
+            .appendingPathComponent(bundleIdentifier, isDirectory: true)
+            .appendingPathComponent("UITestStores", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            throw AppEnvironment.StorePathError.directoryCreationFailed
+        }
+        return directory.appendingPathComponent(
+            "HealthTracking-\(identifier.uuidString).sqlite"
+        )
+    }
+    #endif
 }
 
 #if DEBUG
@@ -124,6 +199,9 @@ private enum UITestSessionFixture {
     private static let resumeSessionID = uuid("00000000-0000-4000-8000-00000000f020")
     private static let resumeProgressID = uuid("00000000-0000-4000-8000-00000000f021")
     private static let progressionSessionID = uuid("00000000-0000-4000-8000-00000000f030")
+    private static let progressionRotationSessionID = uuid(
+        "00000000-0000-4000-8000-00000000f034"
+    )
     private static let weeklyPallofSessionID = uuid("00000000-0000-4000-8000-00000000f040")
     private static let weeklyPallofProgressID = uuid("00000000-0000-4000-8000-00000000f041")
     private static let ohpPriorSessionID = uuid("00000000-0000-4000-8000-00000000f050")
@@ -156,6 +234,15 @@ private enum UITestSessionFixture {
     private static let deloadReactiveNewerSessionID = uuid(
         "00000000-0000-4000-8000-00000000f062"
     )
+    private static let todayRestSessionID = uuid(
+        "00000000-0000-4000-8000-00000000f080"
+    )
+    private static let todayPrioritySessionID = uuid(
+        "00000000-0000-4000-8000-00000000f081"
+    )
+    private static let todayMeasurementReminderID = uuid(
+        "00000000-0000-4000-8000-00000000f082"
+    )
     private static let installedAt = Date(timeIntervalSince1970: 1_700_000_000)
 
     static func install(scenario: AppUITestScenario, in modelContext: ModelContext) throws {
@@ -178,9 +265,123 @@ private enum UITestSessionFixture {
             try installPhaseTransition(in: modelContext)
         case .trainingHistory:
             try installTrainingHistory(in: modelContext)
-        case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow:
+        case .todayTrain:
+            try prepareTodayAlerts(in: modelContext, persistChanges: false)
+        case .todayRest:
+            try prepareTodayAlerts(in: modelContext)
+            try installTodayRest(in: modelContext)
+        case .todayResume:
+            try prepareTodayAlerts(in: modelContext)
+            try installResumeProgress(in: modelContext)
+        case .todayDeload:
+            try prepareTodayAlerts(in: modelContext)
+            try installDeload(scheduled: true, in: modelContext)
+        case .todayPhase:
+            try prepareTodayAlerts(in: modelContext)
+            try installPhaseTransition(in: modelContext)
+        case .todayReminder:
+            try prepareTodayReminder(in: modelContext)
+        case .todayPriority:
+            try installTodayPriority(in: modelContext)
+        case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow,
+             .todayEmptyOnce, .todayErrorOnce:
             return
         }
+    }
+
+    private static func prepareTodayAlerts(
+        in modelContext: ModelContext,
+        persistChanges: Bool = true
+    ) throws {
+        for reminder in try modelContext.fetch(FetchDescriptor<HealthCheckReminder>()) {
+            reminder.status = .done
+            reminder.updatedAt = .now
+        }
+        for reminder in try modelContext.fetch(FetchDescriptor<AppReminder>()) {
+            reminder.isEnabled = false
+            reminder.updatedAt = .now
+        }
+        if persistChanges {
+            try modelContext.save()
+        }
+    }
+
+    private static func prepareTodayReminder(in modelContext: ModelContext) throws {
+        try prepareTodayAlerts(in: modelContext)
+        guard let reminder = try modelContext.fetch(FetchDescriptor<HealthCheckReminder>())
+            .sorted(by: { $0.id.uuidString < $1.id.uuidString })
+            .first else {
+            throw UITestSessionFixtureError.missingSeededProgram
+        }
+        reminder.status = .pending
+        reminder.dueDate = .now.addingTimeInterval(-60)
+        reminder.updatedAt = .now
+        try modelContext.save()
+    }
+
+    private static func installTodayRest(in modelContext: ModelContext) throws {
+        modelContext.insert(
+            WorkoutSession(
+                id: todayRestSessionID,
+                createdAt: .now,
+                updatedAt: .now,
+                date: .now,
+                status: .completed,
+                workoutDayTemplateId: SeedIdentifiers.dayA
+            )
+        )
+        try modelContext.save()
+    }
+
+    private static func installTodayPriority(in modelContext: ModelContext) throws {
+        try prepareTodayAlerts(in: modelContext)
+        guard let profile = try modelContext.fetch(FetchDescriptor<UserProfile>()).first,
+              let state = try modelContext.fetch(FetchDescriptor<ProgramState>())
+                .first(where: { $0.programId == SeedIdentifiers.program }),
+              let bloodwork = try modelContext.fetch(FetchDescriptor<HealthCheckReminder>())
+                .sorted(by: { $0.id.uuidString < $1.id.uuidString })
+                .first else {
+            throw UITestSessionFixtureError.missingSeededProgram
+        }
+        let now = Date.now
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Istanbul")!
+        profile.programStartDate = calendar.date(byAdding: .month, value: -3, to: now)!
+        profile.updatedAt = now
+        state.currentPhaseId = SeedIdentifiers.phase1
+        state.trainingWeekIndex = 5
+        state.deloadStatus = .active
+        state.deloadReason = .scheduled
+        state.deloadUpdatedAt = now
+        state.updatedAt = now
+        bloodwork.status = .pending
+        bloodwork.dueDate = now.addingTimeInterval(-60)
+        bloodwork.updatedAt = now
+
+        modelContext.insert(
+            WorkoutSession(
+                id: todayPrioritySessionID,
+                createdAt: now,
+                updatedAt: now,
+                date: now,
+                status: .inProgress,
+                workoutDayTemplateId: SeedIdentifiers.dayB,
+                ohpSymptomResponse: .symptomsPresent,
+                ohpSymptomCheckedAt: now
+            )
+        )
+        modelContext.insert(
+            AppReminder(
+                id: todayMeasurementReminderID,
+                createdAt: now,
+                updatedAt: now,
+                type: .measurement,
+                schedule: "today-ui-test",
+                message: "Bel ölçümünü kaydet",
+                isEnabled: true
+            )
+        )
+        try modelContext.save()
     }
 
     private static func installTrainingHistory(in modelContext: ModelContext) throws {
@@ -405,39 +606,50 @@ private enum UITestSessionFixture {
 
     private static func installMissingRIRHistory(in modelContext: ModelContext) throws {
         let existingSessions = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
-        guard !existingSessions.contains(where: { $0.id == progressionSessionID }) else {
-            return
+        if !existingSessions.contains(where: { $0.id == progressionSessionID }) {
+            let session = WorkoutSession(
+                id: progressionSessionID,
+                createdAt: installedAt,
+                updatedAt: installedAt,
+                date: installedAt,
+                status: .completed,
+                workoutDayTemplateId: SeedIdentifiers.dayA
+            )
+            modelContext.insert(session)
+            let setIDs = [
+                uuid("00000000-0000-4000-8000-00000000f031"),
+                uuid("00000000-0000-4000-8000-00000000f032"),
+                uuid("00000000-0000-4000-8000-00000000f033"),
+            ]
+            let rirs: [Int?] = [0, nil, 0]
+            for (offset, rir) in rirs.enumerated() {
+                modelContext.insert(
+                    SetLog(
+                        id: setIDs[offset],
+                        createdAt: installedAt,
+                        updatedAt: installedAt,
+                        exerciseTemplateId: SeedIdentifiers.gobletSquat,
+                        setIndex: offset + 1,
+                        weightKg: 10,
+                        reps: 25,
+                        rir: rir,
+                        isWarmupSet: false,
+                        completedAt: installedAt,
+                        workoutSession: session
+                    )
+                )
+            }
         }
 
-        let session = WorkoutSession(
-            id: progressionSessionID,
-            createdAt: installedAt,
-            updatedAt: installedAt,
-            date: installedAt,
-            status: .completed,
-            workoutDayTemplateId: SeedIdentifiers.dayA
-        )
-        modelContext.insert(session)
-        let setIDs = [
-            uuid("00000000-0000-4000-8000-00000000f031"),
-            uuid("00000000-0000-4000-8000-00000000f032"),
-            uuid("00000000-0000-4000-8000-00000000f033"),
-        ]
-        let rirs: [Int?] = [0, nil, 0]
-        for (offset, rir) in rirs.enumerated() {
+        if !existingSessions.contains(where: { $0.id == progressionRotationSessionID }) {
             modelContext.insert(
-                SetLog(
-                    id: setIDs[offset],
-                    createdAt: installedAt,
-                    updatedAt: installedAt,
-                    exerciseTemplateId: SeedIdentifiers.gobletSquat,
-                    setIndex: offset + 1,
-                    weightKg: 10,
-                    reps: 25,
-                    rir: rir,
-                    isWarmupSet: false,
-                    completedAt: installedAt,
-                    workoutSession: session
+                WorkoutSession(
+                    id: progressionRotationSessionID,
+                    createdAt: installedAt.addingTimeInterval(1),
+                    updatedAt: installedAt.addingTimeInterval(1),
+                    date: installedAt.addingTimeInterval(1),
+                    status: .completed,
+                    workoutDayTemplateId: SeedIdentifiers.dayC
                 )
             )
         }
@@ -664,27 +876,53 @@ private final class UITestFoundationRepository: TrainingRepository {
     }
 
     private let repository: any TrainingRepository
-    private let initialOutcome: InitialOutcome
+    private let foundationInitialOutcome: InitialOutcome?
+    private let todayInitialOutcome: InitialOutcome?
     private var foundationLoadAttempt = 0
+    private var todayLoadAttempt = 0
 
-    init(repository: any TrainingRepository, initialOutcome: InitialOutcome) {
+    init(
+        repository: any TrainingRepository,
+        foundationInitialOutcome: InitialOutcome? = nil,
+        todayInitialOutcome: InitialOutcome? = nil
+    ) {
         self.repository = repository
-        self.initialOutcome = initialOutcome
+        self.foundationInitialOutcome = foundationInitialOutcome
+        self.todayInitialOutcome = todayInitialOutcome
+    }
+
+    func fetchTodaySnapshot() async throws -> TodayRepositorySnapshot? {
+        guard let todayInitialOutcome else {
+            return try await repository.fetchTodaySnapshot()
+        }
+        todayLoadAttempt += 1
+        if todayLoadAttempt == 1 {
+            switch todayInitialOutcome {
+            case .missingProgram:
+                return nil
+            case .repositoryError:
+                throw UITestFoundationRepositoryError.initialLoad
+            }
+        }
+        return try await repository.fetchTodaySnapshot()
     }
 
     func fetchUserProfile() async throws -> UserProfile? {
+        guard let foundationInitialOutcome else {
+            return try await repository.fetchUserProfile()
+        }
         foundationLoadAttempt += 1
         if foundationLoadAttempt > 1 {
             try await Task.sleep(nanoseconds: 2_500_000_000)
         }
-        if foundationLoadAttempt == 1, initialOutcome == .repositoryError {
+        if foundationLoadAttempt == 1, foundationInitialOutcome == .repositoryError {
             throw UITestFoundationRepositoryError.initialLoad
         }
         return try await repository.fetchUserProfile()
     }
 
     func fetchActiveProgram() async throws -> Program? {
-        if foundationLoadAttempt == 1, initialOutcome == .missingProgram {
+        if foundationLoadAttempt == 1, foundationInitialOutcome == .missingProgram {
             return nil
         }
         return try await repository.fetchActiveProgram()
