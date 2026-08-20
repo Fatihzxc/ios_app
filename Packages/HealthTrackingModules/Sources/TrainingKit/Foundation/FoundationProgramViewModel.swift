@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import GuidanceKit
 import Observation
 
 public enum FoundationUnitDisplayMode: Equatable, Sendable {
@@ -99,22 +100,51 @@ public struct FoundationWorkoutDaySummary: Equatable, Sendable {
     }
 }
 
+public enum FoundationDeloadReason: Equatable, Sendable {
+    case scheduled
+    case reactive
+}
+
+public enum FoundationDeloadMode: Equatable, Sendable {
+    case recommended
+    case active
+}
+
+public struct FoundationDeloadSummary: Equatable, Sendable {
+    public let mode: FoundationDeloadMode
+    public let reason: FoundationDeloadReason
+    public let trainingWeekIndex: Int
+
+    public init(
+        mode: FoundationDeloadMode,
+        reason: FoundationDeloadReason,
+        trainingWeekIndex: Int
+    ) {
+        self.mode = mode
+        self.reason = reason
+        self.trainingWeekIndex = trainingWeekIndex
+    }
+}
+
 public struct FoundationProgramSnapshot: Equatable, Sendable {
     public let profile: FoundationProfileSummary
     public let program: FoundationProgramSummary
     public let phases: [FoundationPhaseSummary]
     public let workoutDays: [FoundationWorkoutDaySummary]
+    public let deload: FoundationDeloadSummary?
 
     public init(
         profile: FoundationProfileSummary,
         program: FoundationProgramSummary,
         phases: [FoundationPhaseSummary],
-        workoutDays: [FoundationWorkoutDaySummary]
+        workoutDays: [FoundationWorkoutDaySummary],
+        deload: FoundationDeloadSummary? = nil
     ) {
         self.profile = profile
         self.program = program
         self.phases = phases
         self.workoutDays = workoutDays
+        self.deload = deload
     }
 }
 
@@ -156,17 +186,116 @@ public final class FoundationProgramViewModel {
 
             let phases = try await repository.fetchProgramPhases(programID: program.id)
             let workoutDays = try await repository.fetchWorkoutDays(programID: program.id)
+            let deload = await makeDeloadSummary(
+                programID: program.id,
+                workoutDays: workoutDays
+            )
             state = .content(
                 FoundationProgramSnapshot(
                     profile: Self.makeProfileSummary(profile),
                     program: FoundationProgramSummary(id: program.id, name: program.name),
                     phases: Self.makePhaseSummaries(phases),
-                    workoutDays: Self.makeWorkoutDaySummaries(workoutDays)
+                    workoutDays: Self.makeWorkoutDaySummaries(workoutDays),
+                    deload: deload
                 )
             )
         } catch {
             state = .error
         }
+    }
+
+    private func makeDeloadSummary(
+        programID: UUID,
+        workoutDays: [WorkoutDayTemplate]
+    ) async -> FoundationDeloadSummary? {
+        guard let state = try? await repository.fetchProgramState(programID: programID) else {
+            return nil
+        }
+        switch state.deloadStatus {
+        case .skipped:
+            return nil
+        case .active:
+            guard let reason = state.deloadReason?.foundationReason else { return nil }
+            return .init(
+                mode: .active,
+                reason: reason,
+                trainingWeekIndex: state.trainingWeekIndex
+            )
+        case .recommended:
+            guard let reason = state.deloadReason?.foundationReason else { return nil }
+            return .init(
+                mode: .recommended,
+                reason: reason,
+                trainingWeekIndex: state.trainingWeekIndex
+            )
+        case .none:
+            break
+        }
+
+        if state.trainingWeekIndex >= 1,
+           state.trainingWeekIndex.isMultiple(of: 5) {
+            return .init(
+                mode: .recommended,
+                reason: .scheduled,
+                trainingWeekIndex: state.trainingWeekIndex
+            )
+        }
+
+        var histories: [DeloadGuidance.ExerciseHistory] = []
+        for workoutDay in workoutDays {
+            guard let exercises = try? await repository.fetchExerciseTemplates(
+                workoutDayID: workoutDay.id
+            ) else {
+                return nil
+            }
+            for exercise in exercises {
+                guard let snapshots = try? await repository.fetchCompletedExerciseHistory(
+                    exerciseTemplateID: exercise.id
+                ) else {
+                    return nil
+                }
+                histories.append(
+                    DeloadGuidance.ExerciseHistory(
+                        exerciseID: exercise.id,
+                        sessions: snapshots.map(Self.makeDeloadSession)
+                    )
+                )
+            }
+        }
+
+        guard case .recommended(.reactive(exerciseID: _)) = DeloadGuidance.evaluate(
+            .init(
+                trainingWeekIndex: state.trainingWeekIndex,
+                status: .none,
+                storedReason: nil,
+                histories: histories
+            )
+        ) else {
+            return nil
+        }
+        return .init(
+            mode: .recommended,
+            reason: .reactive,
+            trainingWeekIndex: state.trainingWeekIndex
+        )
+    }
+
+    private static func makeDeloadSession(
+        _ snapshot: CompletedExerciseHistorySnapshot
+    ) -> DeloadGuidance.CompletedSession {
+        .init(
+            id: snapshot.session.id,
+            completedAt: snapshot.session.date,
+            perceivedRecovery: snapshot.session.perceivedRecovery,
+            sets: snapshot.setLogs.map {
+                .init(
+                    setIndex: $0.setIndex,
+                    weightKg: $0.measurement.weightKg,
+                    reps: $0.measurement.reps,
+                    isWarmupSet: $0.isWarmupSet
+                )
+            }
+        )
     }
 
     private static func makeProfileSummary(_ profile: UserProfile) -> FoundationProfileSummary {
@@ -250,5 +379,16 @@ public final class FoundationProgramViewModel {
             return lhs.orderIndex < rhs.orderIndex
         }
         return lhs.id.uuidString < rhs.id.uuidString
+    }
+}
+
+private extension DeloadReason {
+    var foundationReason: FoundationDeloadReason {
+        switch self {
+        case .scheduled:
+            .scheduled
+        case .reactive:
+            .reactive
+        }
     }
 }

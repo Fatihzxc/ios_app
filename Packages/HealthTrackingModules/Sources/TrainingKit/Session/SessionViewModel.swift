@@ -12,6 +12,7 @@ public final class SessionViewModel {
     public private(set) var setSaveState: SessionSetSaveState = .idle
     public private(set) var recommendationReason: SessionRecommendationReason = .noPrefill
     public private(set) var ohpSafetyState: SessionOHPSafetyState = .notRequired
+    public private(set) var deloadState: SessionDeloadState = .notRequired
     public private(set) var isDeleteConfirmationPresented = false
     public private(set) var summaryRecovery: Int?
     public private(set) var summaryNote = ""
@@ -41,6 +42,8 @@ public final class SessionViewModel {
     private var ohpSafeAlternative: SessionExerciseSnapshot?
     @ObservationIgnored
     private var activePhaseOrderIndex = 1
+    @ObservationIgnored
+    private var activeProgramID: UUID?
 
     public init(
         repository: any TrainingRepository,
@@ -60,6 +63,7 @@ public final class SessionViewModel {
         setSaveState = .idle
         recommendationReason = .noPrefill
         ohpSafetyState = .notRequired
+        deloadState = .notRequired
         isDeleteConfirmationPresented = false
         summaryRecovery = nil
         summaryNote = ""
@@ -73,6 +77,7 @@ public final class SessionViewModel {
         ohpTrainingWeekIndex = 1
         ohpSafeAlternative = nil
         activePhaseOrderIndex = 1
+        activeProgramID = nil
 
         do {
             let existing = try await repository.fetchInProgressWorkoutSession()
@@ -122,12 +127,14 @@ public final class SessionViewModel {
             currentSetDraft = nil
             currentVariantOptions = []
             ohpSafetyState = .notRequired
+            deloadState = .notRequired
         }
     }
 
     public func toggleWarmupItem(id: UUID) async {
         guard let presentation = activePresentation,
               !isAwaitingPreviousOHPSymptomResponse,
+              !isAwaitingDeloadResponse,
               presentation.progress.stage == .warmup,
               presentation.plan.warmupItems.contains(where: { $0.id == id }) else {
             return
@@ -245,8 +252,37 @@ public final class SessionViewModel {
         }
     }
 
+    public func respondToDeload(_ action: SessionDeloadAction) async {
+        guard case let .recommendation(reason, trainingWeekIndex) = deloadState,
+              let activeProgramID else {
+            return
+        }
+        do {
+            _ = try await repository.applyDeloadAction(
+                programID: activeProgramID,
+                reason: reason.coreReason,
+                action: action.coreAction,
+                at: now()
+            )
+            if action == .accepted {
+                deloadState = .active(
+                    reason: reason,
+                    trainingWeekIndex: trainingWeekIndex
+                )
+            } else {
+                deloadState = .notRequired
+            }
+            configureDraft()
+        } catch {
+            state = .failed(.deload)
+            currentSetDraft = nil
+            currentVariantOptions = []
+        }
+    }
+
     public func advanceExercise() async {
         guard let presentation = activePresentation,
+              !isAwaitingDeloadResponse,
               presentation.progress.stage == .movement,
               let currentIndex = presentation.currentExerciseIndex else {
             return
@@ -277,7 +313,8 @@ public final class SessionViewModel {
     }
 
     public func goBack() async {
-        guard let presentation = activePresentation else { return }
+        guard let presentation = activePresentation,
+              !isAwaitingDeloadResponse else { return }
 
         switch presentation.progress.stage {
         case .warmup:
@@ -325,6 +362,7 @@ public final class SessionViewModel {
 
     public func toggleCooldownItem(id: UUID) async {
         guard let presentation = activePresentation,
+              !isAwaitingDeloadResponse,
               presentation.progress.stage == .cooldown,
               presentation.plan.cooldownItems.contains(where: { $0.id == id }) else {
             return
@@ -354,6 +392,7 @@ public final class SessionViewModel {
 
     public func finishIncomplete() async {
         guard let presentation = activePresentation,
+              !isAwaitingDeloadResponse,
               presentation.progress.stage == .movement else {
             return
         }
@@ -361,7 +400,8 @@ public final class SessionViewModel {
     }
 
     public func saveCurrentSet() async {
-        guard let draft = currentSetDraft else { return }
+        guard !isAwaitingDeloadResponse,
+              let draft = currentSetDraft else { return }
         do {
             let request = try draft.makeSaveRequest(completedAt: now())
             pendingSetRequest = request
@@ -446,6 +486,13 @@ public final class SessionViewModel {
         return false
     }
 
+    private var isAwaitingDeloadResponse: Bool {
+        if case .recommendation = deloadState {
+            return true
+        }
+        return false
+    }
+
     private var latestCompletedOHPHistory: CompletedExerciseHistorySnapshot? {
         guard let exerciseID = activePresentation?.plan.exercises.first(where: {
             $0.progressionRule == .gradedEntryOHP
@@ -461,11 +508,90 @@ public final class SessionViewModel {
             return
         }
 
+        activeProgramID = program.id
         ohpTrainingWeekIndex = programState.trainingWeekIndex
+        let workoutDays = try await repository.fetchWorkoutDays(programID: program.id)
+        for workoutDay in workoutDays {
+            let exercises = try await repository.fetchExerciseTemplates(
+                workoutDayID: workoutDay.id
+            )
+            for exercise in exercises where completedHistoryByExerciseID[exercise.id] == nil {
+                completedHistoryByExerciseID[exercise.id] = try await repository
+                    .fetchCompletedExerciseHistory(exerciseTemplateID: exercise.id)
+            }
+        }
         let phases = try await repository.fetchProgramPhases(programID: program.id)
         activePhaseOrderIndex = phases.first(where: {
             $0.id == programState.currentPhaseId
         })?.orderIndex ?? 1
+        resolveDeload(programState: programState)
+    }
+
+    private func resolveDeload(programState: ProgramState) {
+        let histories = completedHistoryByExerciseID
+            .map { exerciseID, snapshots in
+                DeloadGuidance.ExerciseHistory(
+                    exerciseID: exerciseID,
+                    sessions: snapshots.map { snapshot in
+                        DeloadGuidance.CompletedSession(
+                            id: snapshot.session.id,
+                            completedAt: snapshot.session.date,
+                            perceivedRecovery: snapshot.session.perceivedRecovery,
+                            sets: snapshot.setLogs.map { setLog in
+                                DeloadGuidance.WorkingSet(
+                                    setIndex: setLog.setIndex,
+                                    weightKg: setLog.measurement.weightKg,
+                                    reps: setLog.measurement.reps,
+                                    isWarmupSet: setLog.isWarmupSet
+                                )
+                            }
+                        )
+                    }
+                )
+            }
+        let reactiveProbe = DeloadGuidance.evaluate(
+            DeloadGuidance.Input(
+                trainingWeekIndex: nonScheduledWeek(programState.trainingWeekIndex),
+                status: .none,
+                storedReason: nil,
+                histories: histories
+            )
+        )
+        let detectedReactiveExerciseID: UUID?
+        if case let .recommended(.reactive(exerciseID: exerciseID)) = reactiveProbe {
+            detectedReactiveExerciseID = exerciseID
+        } else {
+            detectedReactiveExerciseID = nil
+        }
+        let storedReason = programState.deloadReason.map {
+            $0.guidanceReason(reactiveExerciseID: detectedReactiveExerciseID)
+        }
+        let recommendation = DeloadGuidance.evaluate(
+            DeloadGuidance.Input(
+                trainingWeekIndex: programState.trainingWeekIndex,
+                status: programState.deloadStatus.guidanceStatus,
+                storedReason: storedReason,
+                histories: histories
+            )
+        )
+        switch recommendation {
+        case .none:
+            deloadState = .notRequired
+        case let .recommended(reason):
+            deloadState = .recommendation(
+                reason: reason.sessionReason,
+                trainingWeekIndex: programState.trainingWeekIndex
+            )
+        case let .active(reason):
+            deloadState = .active(
+                reason: reason.sessionReason,
+                trainingWeekIndex: programState.trainingWeekIndex
+            )
+        }
+    }
+
+    private func nonScheduledWeek(_ week: Int) -> Int {
+        week.isMultiple(of: 5) ? week + 1 : week
     }
 
     private func prepareOHPSafety(
@@ -581,6 +707,7 @@ public final class SessionViewModel {
     private func leaveWarmup(disposition: WorkoutChecklistDisposition) async {
         guard let presentation = activePresentation,
               !isAwaitingPreviousOHPSymptomResponse,
+              !isAwaitingDeloadResponse,
               presentation.progress.stage == .warmup else {
             return
         }
@@ -603,6 +730,7 @@ public final class SessionViewModel {
         cooldownDisposition: WorkoutChecklistDisposition
     ) async {
         guard let presentation = activePresentation,
+              !isAwaitingDeloadResponse,
               presentation.session.status == .inProgress else {
             return
         }
@@ -766,19 +894,26 @@ public final class SessionViewModel {
                 phaseOrderIndex: activePhaseOrderIndex
             )
         }
+        let finalGuidance = Self.composeDeloadGuidance(
+            composedGuidance,
+            sameSessionPrevious: sameSessionPrevious,
+            exercise: exercise,
+            history: latestHistory,
+            state: deloadState
+        )
         currentSetDraft = SetDraft(
             workoutSessionID: presentation.session.id,
             exerciseTemplateID: exercise.id,
             setIndex: nextSetIndex,
             measurementKind: exercise.measurementKind,
             isWarmupSet: false,
-            guidance: composedGuidance?.measurement,
+            guidance: finalGuidance?.measurement,
             sameSessionPrevious: sameSessionPrevious,
             priorSessionSameIndex: priorSessionSameIndex,
             seed: seed
         )
-        if let composedGuidance {
-            recommendationReason = composedGuidance.reason
+        if let finalGuidance {
+            recommendationReason = finalGuidance.reason
         } else if sameSessionPrevious != nil {
             recommendationReason = .sameSessionPrevious
         } else if priorSessionSameIndex != nil {
@@ -868,6 +1003,45 @@ public final class SessionViewModel {
             return (measurement, .phaseTrainingFocus(.boneFocusLowerBound))
         }
         return (measurement, base.reason)
+    }
+
+    private static func composeDeloadGuidance(
+        _ base: (measurement: SetMeasurementInput, reason: SessionRecommendationReason)?,
+        sameSessionPrevious: SetMeasurementInput?,
+        exercise: SessionExerciseSnapshot,
+        history: CompletedExerciseHistorySnapshot?,
+        state: SessionDeloadState
+    ) -> (measurement: SetMeasurementInput, reason: SessionRecommendationReason)? {
+        guard sameSessionPrevious == nil,
+              case let .active(reason, _) = state,
+              let history else {
+            return base
+        }
+        let lastWorkingSet = history.setLogs
+            .filter { !$0.isWarmupSet }
+            .sorted { $0.setIndex < $1.setIndex }
+            .last
+        guard let lastWorkingSet,
+              let load = DeloadGuidance.loadRecommendation(
+                  lastWeightKg: lastWorkingSet.measurement.weightKg,
+                  equipmentIncrementKg: 2.5
+              ) else {
+            return base
+        }
+
+        var measurement = base?.measurement ?? lastWorkingSet.measurement
+        measurement.weightKg = load.defaultWeightKg
+        measurement.reps = exercise.repLow ?? measurement.reps
+        return (
+            measurement,
+            .deload(
+                SessionDeloadRecommendationReason(
+                    reason: reason,
+                    defaultFraction: 0.5,
+                    allowedFractionRange: load.allowedFractionRange
+                )
+            )
+        )
     }
 
     private static func doubleProgressionGuidance(
@@ -1171,6 +1345,73 @@ private extension OHPSafetyGate.LoadIncreaseBlockReason {
             .previousResponseUncertain
         case .currentSymptomsPresent:
             .currentSymptomsPresent
+        }
+    }
+}
+
+private extension DeloadStatus {
+    var guidanceStatus: DeloadGuidance.Status {
+        switch self {
+        case .none:
+            .none
+        case .recommended:
+            .recommended
+        case .active:
+            .active
+        case .skipped:
+            .skipped
+        }
+    }
+}
+
+private extension DeloadReason {
+    func guidanceReason(reactiveExerciseID: UUID?) -> DeloadGuidance.Reason {
+        switch self {
+        case .scheduled:
+            .scheduled
+        case .reactive:
+            .reactive(
+                exerciseID: reactiveExerciseID ?? UUID(
+                    uuidString: "00000000-0000-0000-0000-000000000000"
+                )!
+            )
+        }
+    }
+}
+
+private extension DeloadGuidance.Reason {
+    var sessionReason: SessionDeloadReason {
+        switch self {
+        case .scheduled:
+            .scheduled
+        case let .reactive(exerciseID):
+            .reactive(exerciseID: exerciseID)
+        }
+    }
+}
+
+private extension SessionDeloadReason {
+    var coreReason: DeloadReason {
+        switch self {
+        case .scheduled:
+            .scheduled
+        case .reactive:
+            .reactive
+        }
+    }
+}
+
+private extension SessionDeloadAction {
+    var coreAction: DeloadAction {
+        switch self {
+        case .accepted:
+            .accepted
+        case .stay:
+            .stay
+        case .techniqueReview:
+            .techniqueReview
+        case .skipped:
+            .skipped
         }
     }
 }

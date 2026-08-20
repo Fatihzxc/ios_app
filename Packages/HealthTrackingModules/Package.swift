@@ -36,7 +36,7 @@ let package = Package(
         ),
         .target(
             name: "PersistenceKit",
-            dependencies: ["CoreModels", "TrainingKit"],
+            dependencies: ["CoreModels", "GuidanceKit", "TrainingKit"],
             swiftSettings: strictConcurrency
         ),
         .target(

@@ -64,7 +64,8 @@ final class AppDependencies: AppDependencyLoading {
                 trainingRepository = repository
                 shouldLoadFoundation = false
             case .seeded, .fatalConfiguration, .sessionFlow, .sessionFamilies, .sessionResume,
-                 .progressionMissingRIR, .weeklyPallof, .ohpSafety:
+                 .progressionMissingRIR, .weeklyPallof, .ohpSafety, .deloadScheduled,
+                 .deloadReactive:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -116,6 +117,15 @@ private enum UITestSessionFixture {
     private static let ohpPriorSessionID = uuid("00000000-0000-4000-8000-00000000f050")
     private static let ohpCurrentSessionID = uuid("00000000-0000-4000-8000-00000000f051")
     private static let ohpCurrentProgressID = uuid("00000000-0000-4000-8000-00000000f052")
+    private static let deloadScheduledSessionID = uuid(
+        "00000000-0000-4000-8000-00000000f060"
+    )
+    private static let deloadReactiveOlderSessionID = uuid(
+        "00000000-0000-4000-8000-00000000f061"
+    )
+    private static let deloadReactiveNewerSessionID = uuid(
+        "00000000-0000-4000-8000-00000000f062"
+    )
     private static let installedAt = Date(timeIntervalSince1970: 1_700_000_000)
 
     static func install(scenario: AppUITestScenario, in modelContext: ModelContext) throws {
@@ -130,6 +140,10 @@ private enum UITestSessionFixture {
             try installWeeklyPallofProgress(in: modelContext)
         case .ohpSafety:
             try installOHPSafety(in: modelContext)
+        case .deloadScheduled:
+            try installDeload(scheduled: true, in: modelContext)
+        case .deloadReactive:
+            try installDeload(scheduled: false, in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow:
             return
         }
@@ -424,6 +438,95 @@ private enum UITestSessionFixture {
             )
         )
         try modelContext.save()
+    }
+
+    private static func installDeload(
+        scheduled: Bool,
+        in modelContext: ModelContext
+    ) throws {
+        let markerID = scheduled
+            ? deloadScheduledSessionID
+            : deloadReactiveNewerSessionID
+        let existingSessions = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
+        guard !existingSessions.contains(where: { $0.id == markerID }) else { return }
+        guard let programState = try modelContext.fetch(FetchDescriptor<ProgramState>())
+            .first(where: { $0.id == SeedIdentifiers.programState }) else {
+            throw UITestSessionFixtureError.missingSeededProgram
+        }
+
+        programState.trainingWeekIndex = scheduled ? 5 : 6
+        programState.deloadStatus = .none
+        programState.deloadReason = nil
+        programState.deloadUpdatedAt = nil
+        programState.lastDeloadSkippedAt = nil
+        programState.lastDeloadAction = nil
+        programState.updatedAt = installedAt
+
+        if scheduled {
+            insertDeloadHistory(
+                sessionID: deloadScheduledSessionID,
+                setIDBase: 90_063,
+                date: installedAt.addingTimeInterval(-7 * 24 * 60 * 60),
+                reps: [10, 10, 10],
+                in: modelContext
+            )
+        } else {
+            insertDeloadHistory(
+                sessionID: deloadReactiveOlderSessionID,
+                setIDBase: 90_066,
+                date: installedAt.addingTimeInterval(-14 * 24 * 60 * 60),
+                reps: [10, 10, 10],
+                in: modelContext
+            )
+            insertDeloadHistory(
+                sessionID: deloadReactiveNewerSessionID,
+                setIDBase: 90_069,
+                date: installedAt.addingTimeInterval(-7 * 24 * 60 * 60),
+                reps: [9, 9, 9],
+                in: modelContext
+            )
+        }
+        try modelContext.save()
+    }
+
+    private static func insertDeloadHistory(
+        sessionID: UUID,
+        setIDBase: Int,
+        date: Date,
+        reps: [Int],
+        in modelContext: ModelContext
+    ) {
+        let session = WorkoutSession(
+            id: sessionID,
+            createdAt: date,
+            updatedAt: date,
+            date: date,
+            status: .completed,
+            workoutDayTemplateId: SeedIdentifiers.dayA
+        )
+        modelContext.insert(session)
+        for (offset, repetitionCount) in reps.enumerated() {
+            modelContext.insert(
+                SetLog(
+                    id: uuid(
+                        String(
+                            format: "00000000-0000-4000-8000-%012d",
+                            setIDBase + offset
+                        )
+                    ),
+                    createdAt: date,
+                    updatedAt: date,
+                    exerciseTemplateId: SeedIdentifiers.gobletSquat,
+                    setIndex: offset + 1,
+                    weightKg: 10,
+                    reps: repetitionCount,
+                    rir: 2,
+                    isWarmupSet: false,
+                    completedAt: date,
+                    workoutSession: session
+                )
+            )
+        }
     }
 
     private static func uuid(_ value: String) -> UUID {

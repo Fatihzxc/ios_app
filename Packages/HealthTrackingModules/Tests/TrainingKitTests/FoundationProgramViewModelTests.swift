@@ -264,6 +264,73 @@ final class FoundationProgramViewModelTests: XCTestCase {
         assertCallCounts(repository, profile: 1, program: 1, phases: 1, days: 1)
     }
 
+    func testScheduledDeloadIsIncludedInTheSingleFoundationSnapshot() async {
+        let program = makeProgram()
+        let repository = FakeTrainingRepository()
+        repository.userProfileResponses = [.success(makeProfile())]
+        repository.activeProgramResponses = [.success(program)]
+        repository.programPhaseResponses = [.success([])]
+        repository.workoutDayResponses = [.success([])]
+        repository.programState = ProgramState(
+            programId: program.id,
+            trainingWeekIndex: 5
+        )
+        let viewModel = FoundationProgramViewModel(repository: repository)
+
+        await viewModel.load()
+
+        guard case let .content(snapshot) = viewModel.state else {
+            XCTFail("Expected content state.")
+            return
+        }
+        XCTAssertEqual(
+            snapshot.deload,
+            .init(mode: .recommended, reason: .scheduled, trainingWeekIndex: 5)
+        )
+    }
+
+    func testReactiveDeloadUsesCompletedExerciseHistoryInTheFoundationSnapshot() async {
+        let program = makeProgram()
+        let day = WorkoutDayTemplate(id: UUID(), name: "Gün A", orderIndex: 1)
+        let exercise = ExerciseTemplate(id: UUID(), name: "Goblet Squat", orderIndex: 1)
+        let repository = FakeTrainingRepository()
+        repository.userProfileResponses = [.success(makeProfile())]
+        repository.activeProgramResponses = [.success(program)]
+        repository.programPhaseResponses = [.success([])]
+        repository.workoutDayResponses = [.success([day])]
+        repository.programState = ProgramState(
+            programId: program.id,
+            trainingWeekIndex: 6
+        )
+        repository.exerciseTemplatesByDayID[day.id] = [exercise]
+        repository.completedHistoryByExerciseID[exercise.id] = [
+            makeCompletedHistory(
+                dayID: day.id,
+                exerciseID: exercise.id,
+                completedAt: Date(timeIntervalSinceReferenceDate: 20_000),
+                reps: [9, 9, 9]
+            ),
+            makeCompletedHistory(
+                dayID: day.id,
+                exerciseID: exercise.id,
+                completedAt: Date(timeIntervalSinceReferenceDate: 10_000),
+                reps: [10, 10, 10]
+            ),
+        ]
+        let viewModel = FoundationProgramViewModel(repository: repository)
+
+        await viewModel.load()
+
+        guard case let .content(snapshot) = viewModel.state else {
+            XCTFail("Expected content state.")
+            return
+        }
+        XCTAssertEqual(
+            snapshot.deload,
+            .init(mode: .recommended, reason: .reactive, trainingWeekIndex: 6)
+        )
+    }
+
     func testContentUsesUUIDAsDefensiveTieBreakForPhasesAndWorkoutDays() async {
         let lowerPhaseID = uuid("00000000-0000-4000-8000-000000000301")
         let higherPhaseID = uuid("00000000-0000-4000-8000-000000000302")
@@ -431,6 +498,40 @@ final class FoundationProgramViewModelTests: XCTestCase {
         )
     }
 
+    private func makeCompletedHistory(
+        dayID: UUID,
+        exerciseID: UUID,
+        completedAt: Date,
+        reps: [Int]
+    ) -> CompletedExerciseHistorySnapshot {
+        let session = WorkoutSessionSnapshot(
+            id: UUID(),
+            date: completedAt,
+            status: .completed,
+            workoutDayTemplateID: dayID
+        )
+        return CompletedExerciseHistorySnapshot(
+            session: session,
+            setLogs: reps.enumerated().map { offset, repetitionCount in
+                SetLogSnapshot(
+                    id: UUID(),
+                    createdAt: completedAt,
+                    updatedAt: completedAt,
+                    workoutSessionID: session.id,
+                    exerciseTemplateID: exerciseID,
+                    setIndex: offset + 1,
+                    measurement: .init(
+                        weightKg: 10,
+                        reps: repetitionCount,
+                        rir: 1
+                    ),
+                    isWarmupSet: false,
+                    completedAt: completedAt
+                )
+            }
+        )
+    }
+
     private func sensitiveFailure(_ detail: String) -> SensitiveRepositoryError {
         SensitiveRepositoryError(detail: detail)
     }
@@ -463,6 +564,9 @@ private final class FakeTrainingRepository: TrainingRepository {
     var activeProgramResponses: [QueuedResponse<Program?>] = []
     var programPhaseResponses: [QueuedResponse<[ProgramPhase]>] = []
     var workoutDayResponses: [QueuedResponse<[WorkoutDayTemplate]>] = []
+    var programState: ProgramState?
+    var exerciseTemplatesByDayID: [UUID: [ExerciseTemplate]] = [:]
+    var completedHistoryByExerciseID: [UUID: [CompletedExerciseHistorySnapshot]] = [:]
 
     private(set) var fetchUserProfileCallCount = 0
     private(set) var fetchActiveProgramCallCount = 0
@@ -510,7 +614,7 @@ private final class FakeTrainingRepository: TrainingRepository {
     }
 
     func fetchExerciseTemplates(workoutDayID: UUID) async throws -> [ExerciseTemplate] {
-        throw FakeRepositoryError.unexpectedCall("fetchExerciseTemplates")
+        exerciseTemplatesByDayID[workoutDayID, default: []]
     }
 
     func fetchWarmupItems(workoutDayID: UUID) async throws -> [WarmupItem] {
@@ -526,7 +630,7 @@ private final class FakeTrainingRepository: TrainingRepository {
     }
 
     func fetchProgramState(programID: UUID) async throws -> ProgramState? {
-        throw FakeRepositoryError.unexpectedCall("fetchProgramState")
+        programState?.programId == programID ? programState : nil
     }
 
     func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot {
@@ -582,7 +686,7 @@ private final class FakeTrainingRepository: TrainingRepository {
     func fetchCompletedExerciseHistory(
         exerciseTemplateID: UUID
     ) async throws -> [CompletedExerciseHistorySnapshot] {
-        throw FakeRepositoryError.unexpectedCall("fetchCompletedExerciseHistory")
+        completedHistoryByExerciseID[exerciseTemplateID, default: []]
     }
 
     func fetchWeeklyPallofHistory() async throws -> WeeklyPallofHistorySnapshot {

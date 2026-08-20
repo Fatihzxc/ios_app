@@ -103,6 +103,7 @@ public struct ExerciseStageView: View {
                 }
             }
 
+            deloadLoadInformation
             equipmentCeilingInformation
 
             if let safetyNote = exercise.safetyNote, !safetyNote.isEmpty {
@@ -263,8 +264,41 @@ public struct ExerciseStageView: View {
             return equipmentCeilingText(reason)
         case .phaseTrainingFocus(.boneFocusLowerBound):
             return localized("session.recommendation.phaseTrainingFocus")
+        case let .deload(reason):
+            return deloadRecommendationText(reason)
         case .noPrefill:
             return localized("session.recommendation.none")
+        }
+    }
+
+    @ViewBuilder
+    private var deloadLoadInformation: some View {
+        if case .active = viewModel.deloadState {
+            AppCard {
+                VStack(alignment: .leading, spacing: AppSpacing.compact) {
+                    StatusPill(
+                        text: localized("session.deload.active"),
+                        systemImage: "exclamationmark.triangle.fill",
+                        style: .warning
+                    )
+                    Text(localized("session.deload.load"))
+                        .font(AppTypography.body)
+                        .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("session.deload.load")
+                }
+            }
+        }
+    }
+
+    private func deloadRecommendationText(
+        _ reason: SessionDeloadRecommendationReason
+    ) -> String {
+        switch reason.reason {
+        case .scheduled:
+            localized("session.recommendation.deload.scheduled")
+        case .reactive:
+            localized("session.recommendation.deload.reactive")
         }
     }
 

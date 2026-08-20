@@ -98,6 +98,21 @@
     "today.foundation.heading" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Program temeli" } } }
     },
+    "today.deload.active" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "DELOAD aktif" } } }
+    },
+    "today.deload.load" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Kabul edilen deload’da aynı hareketler son yükün yüzde 40–50’siyle sürer; varsayılan yüzde 50’dir." } } }
+    },
+    "today.deload.reactive" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Aynı hareketin son iki tamamlanmış seansında ilerleme olmadığı için bu hafta deload öneriliyor." } } }
+    },
+    "today.deload.recommended" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Deload önerisi" } } }
+    },
+    "today.deload.scheduled" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "%lld. antrenman haftası zamanlı deload haftasıdır." } } }
+    },
     "today.inventory.format" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "%1$lld faz: %2$@\n%3$lld antrenman günü: %4$@" } } }
     },

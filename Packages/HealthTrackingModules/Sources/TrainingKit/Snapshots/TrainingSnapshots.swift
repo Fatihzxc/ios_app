@@ -434,6 +434,7 @@ public enum SessionViewFailure: Equatable, Sendable {
     case deletion
     case summary
     case ohpSafety
+    case deload
 }
 
 public enum SessionViewState: Equatable, Sendable {
@@ -463,7 +464,42 @@ public enum SessionRecommendationReason: Equatable, Sendable {
     case ohp(SessionOHPRecommendationReason)
     case equipmentCeiling(SessionEquipmentCeilingReason)
     case phaseTrainingFocus(SessionPhaseTrainingFocusReason)
+    case deload(SessionDeloadRecommendationReason)
     case noPrefill
+}
+
+public enum SessionDeloadReason: Equatable, Sendable {
+    case scheduled
+    case reactive(exerciseID: UUID)
+}
+
+public enum SessionDeloadAction: Equatable, Sendable {
+    case accepted
+    case stay
+    case techniqueReview
+    case skipped
+}
+
+public enum SessionDeloadState: Equatable, Sendable {
+    case notRequired
+    case recommendation(reason: SessionDeloadReason, trainingWeekIndex: Int)
+    case active(reason: SessionDeloadReason, trainingWeekIndex: Int)
+}
+
+public struct SessionDeloadRecommendationReason: Equatable, Sendable {
+    public let reason: SessionDeloadReason
+    public let defaultFraction: Double
+    public let allowedFractionRange: ClosedRange<Double>
+
+    public init(
+        reason: SessionDeloadReason,
+        defaultFraction: Double,
+        allowedFractionRange: ClosedRange<Double>
+    ) {
+        self.reason = reason
+        self.defaultFraction = defaultFraction
+        self.allowedFractionRange = allowedFractionRange
+    }
 }
 
 public struct SessionEquipmentCeilingReason: Equatable, Sendable {

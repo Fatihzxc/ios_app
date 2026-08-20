@@ -615,6 +615,142 @@ final class SessionViewModelTests: XCTestCase {
         )
     }
 
+    func testScheduledDeloadBlocksWarmupUntilAcceptedAndThenPrefillsHalfLoad() async {
+        let plan = makePlan()
+        let repository = FakeSessionRepository(plan: plan)
+        repository.configureProgram(week: 5, deloadStatus: .none)
+        let exercise = plan.exercises[0]
+        repository.completedExerciseHistory[exercise.id] = [
+            makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                measurements: [
+                    .init(weightKg: 20, reps: 12, rir: 1),
+                    .init(weightKg: 20, reps: 12, rir: 1),
+                    .init(weightKg: 20, reps: 12, rir: 1),
+                ]
+            ),
+        ]
+        let viewModel = makeViewModel(repository)
+
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+
+        XCTAssertEqual(
+            viewModel.deloadState,
+            .recommendation(reason: .scheduled, trainingWeekIndex: 5)
+        )
+        await viewModel.skipWarmup()
+        XCTAssertEqual(requireActive(viewModel.state).progress.stage, .warmup)
+
+        await viewModel.respondToDeload(.accepted)
+
+        XCTAssertEqual(
+            repository.deloadUpdates,
+            [
+                .init(
+                    programID: repository.activeProgram!.id,
+                    reason: .scheduled,
+                    action: .accepted,
+                    date: now
+                ),
+            ]
+        )
+        XCTAssertEqual(
+            viewModel.deloadState,
+            .active(reason: .scheduled, trainingWeekIndex: 5)
+        )
+        await viewModel.skipWarmup()
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.weightKg, 10)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.reps, 8)
+        guard case let .deload(reason) = viewModel.recommendationReason else {
+            XCTFail("Expected active deload recommendation reason.")
+            return
+        }
+        XCTAssertEqual(reason.reason, .scheduled)
+        XCTAssertEqual(reason.defaultFraction, 0.5)
+        XCTAssertEqual(reason.allowedFractionRange, 0.4...0.5)
+    }
+
+    func testReactiveDeloadUsesTwoCompletedSessionsAndTechniqueReviewSuppressesTheWeek() async {
+        let plan = makePlan()
+        let repository = FakeSessionRepository(plan: plan)
+        repository.configureProgram(week: 6, deloadStatus: .none)
+        let exercise = plan.exercises[0]
+        let older = makeCompletedHistory(
+            sessionID: uuid("00000000-0000-0000-0000-000000000760"),
+            completedAt: now.addingTimeInterval(-14 * 24 * 60 * 60),
+            dayID: plan.workoutDayID,
+            exerciseID: exercise.id,
+            measurements: [
+                .init(weightKg: 10, reps: 10, rir: 1),
+                .init(weightKg: 10, reps: 10, rir: 1),
+                .init(weightKg: 10, reps: 10, rir: 1),
+            ]
+        )
+        let newer = makeCompletedHistory(
+            sessionID: uuid("00000000-0000-0000-0000-000000000761"),
+            completedAt: now.addingTimeInterval(-7 * 24 * 60 * 60),
+            dayID: plan.workoutDayID,
+            exerciseID: exercise.id,
+            measurements: [
+                .init(weightKg: 10, reps: 9, rir: 1),
+                .init(weightKg: 10, reps: 9, rir: 1),
+                .init(weightKg: 10, reps: 9, rir: 1),
+            ]
+        )
+        repository.completedExerciseHistory[exercise.id] = [newer, older]
+        let viewModel = makeViewModel(repository)
+
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+
+        XCTAssertEqual(
+            viewModel.deloadState,
+            .recommendation(reason: .reactive(exerciseID: exercise.id), trainingWeekIndex: 6)
+        )
+        await viewModel.respondToDeload(.techniqueReview)
+
+        XCTAssertEqual(viewModel.deloadState, .notRequired)
+        XCTAssertEqual(repository.programState?.deloadStatus, .skipped)
+        XCTAssertEqual(repository.programState?.lastDeloadAction, .techniqueReview)
+        XCTAssertEqual(repository.deloadUpdates.last?.reason, .reactive)
+        await viewModel.skipWarmup()
+        XCTAssertEqual(requireActive(viewModel.state).progress.stage, .movement)
+    }
+
+    func testStoredActiveReactiveDeloadSurvivesReloadWithoutASecondDecision() async {
+        let plan = makePlan()
+        let repository = FakeSessionRepository(plan: plan)
+        repository.configureProgram(
+            week: 6,
+            deloadStatus: .active,
+            deloadReason: .reactive
+        )
+        let exercise = plan.exercises[0]
+        repository.completedExerciseHistory[exercise.id] = [
+            makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                measurements: [
+                    .init(weightKg: 20, reps: 10, rir: 1),
+                    .init(weightKg: 20, reps: 10, rir: 1),
+                ]
+            ),
+        ]
+        let viewModel = makeViewModel(repository)
+
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+
+        guard case let .active(reason, trainingWeekIndex) = viewModel.deloadState,
+              case .reactive(exerciseID: _) = reason else {
+            XCTFail("Persisted reactive deload must reopen as active.")
+            return
+        }
+        XCTAssertEqual(trainingWeekIndex, 6)
+        XCTAssertTrue(repository.deloadUpdates.isEmpty)
+        await viewModel.skipWarmup()
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.weightKg, 10)
+    }
+
     func testSummaryValuesStayNilUntilChosenAndSaveOnlyExplicitInput() async {
         let repository = FakeSessionRepository(plan: makePlan())
         let viewModel = makeViewModel(repository)
@@ -813,14 +949,16 @@ final class SessionViewModelTests: XCTestCase {
     }
 
     private func makeCompletedHistory(
+        sessionID: UUID? = nil,
+        completedAt explicitCompletedAt: Date? = nil,
         dayID: UUID,
         exerciseID: UUID,
         ohpSymptomResponse: OHPSymptomResponse = .notAsked,
         measurements: [SetMeasurementInput]
     ) -> CompletedExerciseHistorySnapshot {
-        let completedAt = now.addingTimeInterval(-3_600)
+        let completedAt = explicitCompletedAt ?? now.addingTimeInterval(-3_600)
         let session = WorkoutSessionSnapshot(
-            id: uuid("00000000-0000-0000-0000-000000000730"),
+            id: sessionID ?? uuid("00000000-0000-0000-0000-000000000730"),
             date: completedAt,
             status: .completed,
             workoutDayTemplateID: dayID,
@@ -972,6 +1110,13 @@ private final class FakeSessionRepository: TrainingRepository {
         let date: Date
     }
 
+    struct DeloadUpdate: Equatable {
+        let programID: UUID
+        let reason: DeloadReason
+        let action: DeloadAction
+        let date: Date
+    }
+
     let plan: SessionWorkoutPlanSnapshot
     var inProgressSession: WorkoutSessionSnapshot?
     var progress: WorkoutSessionProgressSnapshot?
@@ -1010,6 +1155,7 @@ private final class FakeSessionRepository: TrainingRepository {
     private(set) var deletedSessionIDs: [UUID] = []
     private(set) var summaryUpdates: [SummaryUpdate] = []
     private(set) var ohpSymptomUpdates: [OHPSymptomUpdate] = []
+    private(set) var deloadUpdates: [DeloadUpdate] = []
 
     init(plan: SessionWorkoutPlanSnapshot) {
         self.plan = plan
@@ -1029,14 +1175,21 @@ private final class FakeSessionRepository: TrainingRepository {
         programState?.programId == programID ? programState : nil
     }
 
-    func configureProgram(week: Int, phaseOrderIndex: Int = 1) {
+    func configureProgram(
+        week: Int,
+        phaseOrderIndex: Int = 1,
+        deloadStatus: DeloadStatus = .skipped,
+        deloadReason: DeloadReason? = nil
+    ) {
         let programID = UUID(uuidString: "00000000-0000-0000-0000-000000000754")!
         let phaseID = UUID(uuidString: "00000000-0000-0000-0000-000000000755")!
         activeProgram = Program(id: programID, name: "OHP programı", isActive: true)
         programState = ProgramState(
             programId: programID,
             currentPhaseId: phaseID,
-            trainingWeekIndex: week
+            trainingWeekIndex: week,
+            deloadStatus: deloadStatus,
+            deloadReason: deloadReason
         )
         programPhases = [
             ProgramPhase(
@@ -1047,6 +1200,27 @@ private final class FakeSessionRepository: TrainingRepository {
                 monthEnd: 12
             ),
         ]
+    }
+
+    func applyDeloadAction(
+        programID: UUID,
+        reason: DeloadReason,
+        action: DeloadAction,
+        at date: Date
+    ) async throws -> ProgramState {
+        guard let programState, programState.programId == programID else {
+            throw FakeSessionError.load
+        }
+        deloadUpdates.append(
+            .init(programID: programID, reason: reason, action: action, date: date)
+        )
+        programState.deloadStatus = action == .accepted ? .active : .skipped
+        programState.deloadReason = reason
+        programState.deloadUpdatedAt = date
+        programState.lastDeloadSkippedAt = action == .accepted ? nil : date
+        programState.lastDeloadAction = action
+        programState.updatedAt = date
+        return programState
     }
 
     func createWorkoutSession(

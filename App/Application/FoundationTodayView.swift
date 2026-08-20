@@ -92,6 +92,10 @@ struct FoundationTodayView: View {
                 }
             }
 
+            if let deload = snapshot.deload {
+                deloadCard(deload)
+            }
+
             if let workoutDay = snapshot.workoutDays.first {
                 PrimaryActionButton(
                     title: String(localized: "today.session.open"),
@@ -117,6 +121,42 @@ struct FoundationTodayView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+        }
+    }
+
+    private func deloadCard(_ deload: FoundationDeloadSummary) -> some View {
+        AppCard {
+            VStack(alignment: .leading, spacing: AppSpacing.compact) {
+                StatusPill(
+                    text: deload.mode == .active
+                        ? String(localized: "today.deload.active")
+                        : String(localized: "today.deload.recommended"),
+                    systemImage: "exclamationmark.triangle.fill",
+                    style: .warning
+                )
+                Text(deloadMessage(deload))
+                    .font(AppTypography.body)
+                    .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("today.deload.message")
+                Text(String(localized: "today.deload.load"))
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func deloadMessage(_ deload: FoundationDeloadSummary) -> String {
+        switch deload.reason {
+        case .scheduled:
+            String(
+                format: String(localized: "today.deload.scheduled"),
+                locale: .current,
+                Int64(deload.trainingWeekIndex)
+            )
+        case .reactive:
+            String(localized: "today.deload.reactive")
         }
     }
 

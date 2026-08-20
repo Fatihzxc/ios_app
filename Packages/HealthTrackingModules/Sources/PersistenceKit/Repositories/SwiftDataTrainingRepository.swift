@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import GuidanceKit
 import SwiftData
 import TrainingKit
 
@@ -23,6 +24,7 @@ public enum TrainingRepositoryIntegrityError: Error, Equatable, Sendable {
     case transactionDidNotProduceSetSnapshot
     case transactionDidNotProduceSessionSnapshot
     case transactionDidNotProduceProgressSnapshot
+    case missingProgramState(programID: UUID)
 }
 
 public enum TrainingRepositoryMutationError: Error, Equatable, Sendable {
@@ -39,9 +41,11 @@ public enum TrainingRepositoryMutationError: Error, Equatable, Sendable {
 @MainActor
 public final class SwiftDataTrainingRepository: TrainingRepository {
     private let modelContext: ModelContext
+    private let calendar: Calendar
 
-    public init(modelContext: ModelContext) {
+    public init(modelContext: ModelContext, calendar: Calendar = .current) {
         self.modelContext = modelContext
+        self.calendar = calendar
     }
 
     public func fetchUserProfile() async throws -> UserProfile? {
@@ -179,6 +183,93 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
         return states.first
     }
 
+    public func recalculateProgramStateTrainingWeek(
+        programID: UUID,
+        programStartDate: Date,
+        at date: Date
+    ) async throws -> ProgramState {
+        var updatedState: ProgramState?
+        try modelContext.transaction {
+            let state = try requiredProgramState(programID: programID)
+            let dayIDs = Set(
+                try modelContext.fetch(FetchDescriptor<WorkoutDayTemplate>())
+                    .filter { $0.program?.id == programID }
+                    .map(\.id)
+            )
+            let completedDates = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
+                .filter {
+                    $0.status == .completed && dayIDs.contains($0.workoutDayTemplateId)
+                }
+                .map(\.date)
+            let decision = TrainingWeek.resolve(
+                TrainingWeek.Input(
+                    programStartDate: programStartDate,
+                    completedSessionDates: completedDates
+                ),
+                calendar: calendar
+            )
+
+            state.trainingWeekIndex = decision.trainingWeekIndex
+            if state.deloadStatus == .active || state.deloadStatus == .skipped,
+               let deloadUpdatedAt = state.deloadUpdatedAt,
+               let latestWeekStart = decision.countedWeekStarts.last,
+               let deloadWeekStart = calendar.dateInterval(
+                   of: .weekOfYear,
+                   for: deloadUpdatedAt
+               )?.start,
+               latestWeekStart > deloadWeekStart {
+                state.deloadStatus = .none
+                state.deloadReason = nil
+            }
+            state.updatedAt = date
+            try modelContext.save()
+            updatedState = state
+        }
+        guard let updatedState else {
+            throw TrainingRepositoryIntegrityError.missingProgramState(programID: programID)
+        }
+        return updatedState
+    }
+
+    public func applyDeloadAction(
+        programID: UUID,
+        reason: DeloadReason,
+        action: DeloadAction,
+        at date: Date
+    ) async throws -> ProgramState {
+        var updatedState: ProgramState?
+        try modelContext.transaction {
+            let state = try requiredProgramState(programID: programID)
+            state.deloadStatus = action == .accepted ? .active : .skipped
+            state.deloadReason = reason
+            state.deloadUpdatedAt = date
+            state.lastDeloadSkippedAt = action == .accepted ? nil : date
+            state.lastDeloadAction = action
+            state.updatedAt = date
+            try modelContext.save()
+            updatedState = state
+        }
+        guard let updatedState else {
+            throw TrainingRepositoryIntegrityError.missingProgramState(programID: programID)
+        }
+        return updatedState
+    }
+
+    private func requiredProgramState(programID: UUID) throws -> ProgramState {
+        let states = try modelContext.fetch(FetchDescriptor<ProgramState>())
+            .filter { $0.programId == programID }
+        guard states.count <= 1 else {
+            throw TrainingRepositoryIntegrityError.duplicateProgramStates(
+                programID: programID,
+                count: states.count
+            )
+        }
+        guard let state = states.first else {
+            throw TrainingRepositoryIntegrityError.missingProgramState(programID: programID)
+        }
+        return state
+    }
+
     public func createWorkoutSession(
         _ request: WorkoutSessionCreateRequest
     ) async throws -> WorkoutSessionSnapshot {
@@ -272,6 +363,13 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
 
             session.status = status
             session.updatedAt = date
+            if status == .completed {
+                try synchronizeTrainingWeekAfterCompletion(
+                    workoutDayTemplateID: session.workoutDayTemplateId,
+                    completionDate: session.date,
+                    at: date
+                )
+            }
             try modelContext.save()
             savedSnapshot = Self.sessionSnapshot(session)
         }
@@ -279,6 +377,70 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
             throw TrainingRepositoryIntegrityError.transactionDidNotProduceSessionSnapshot
         }
         return savedSnapshot
+    }
+
+    private func synchronizeTrainingWeekAfterCompletion(
+        workoutDayTemplateID: UUID,
+        completionDate: Date,
+        at date: Date
+    ) throws {
+        let matchingDays = try modelContext.fetch(FetchDescriptor<WorkoutDayTemplate>())
+            .filter { $0.id == workoutDayTemplateID }
+        guard matchingDays.count <= 1 else {
+            throw TrainingRepositoryIntegrityError.duplicateWorkoutDayTemplates(
+                id: workoutDayTemplateID,
+                count: matchingDays.count
+            )
+        }
+        guard let programID = matchingDays.first?.program?.id else { return }
+
+        let profiles = try modelContext.fetch(FetchDescriptor<UserProfile>())
+        guard profiles.count <= 1 else {
+            throw TrainingRepositoryIntegrityError.duplicateUserProfiles(count: profiles.count)
+        }
+        guard let programStartDate = profiles.first?.programStartDate else { return }
+
+        let states = try modelContext.fetch(FetchDescriptor<ProgramState>())
+            .filter { $0.programId == programID }
+        guard states.count <= 1 else {
+            throw TrainingRepositoryIntegrityError.duplicateProgramStates(
+                programID: programID,
+                count: states.count
+            )
+        }
+        guard let state = states.first else { return }
+
+        let programDayIDs = Set(
+            try modelContext.fetch(FetchDescriptor<WorkoutDayTemplate>())
+                .filter { $0.program?.id == programID }
+                .map(\.id)
+        )
+        var completedDates = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
+            .filter {
+                $0.status == .completed && programDayIDs.contains($0.workoutDayTemplateId)
+            }
+            .map(\.date)
+        completedDates.append(completionDate)
+        let decision = TrainingWeek.resolve(
+            .init(
+                programStartDate: programStartDate,
+                completedSessionDates: completedDates
+            ),
+            calendar: calendar
+        )
+        state.trainingWeekIndex = decision.trainingWeekIndex
+        if state.deloadStatus == .active || state.deloadStatus == .skipped,
+           let deloadUpdatedAt = state.deloadUpdatedAt,
+           let newestCompletedWeek = decision.countedWeekStarts.last,
+           let deloadWeek = calendar.dateInterval(
+               of: .weekOfYear,
+               for: deloadUpdatedAt
+           )?.start,
+           newestCompletedWeek > deloadWeek {
+            state.deloadStatus = .none
+            state.deloadReason = nil
+        }
+        state.updatedAt = date
     }
 
     public func fetchWorkoutSessionProgress(

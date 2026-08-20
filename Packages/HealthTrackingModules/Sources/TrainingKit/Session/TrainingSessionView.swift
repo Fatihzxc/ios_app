@@ -99,41 +99,54 @@ public struct TrainingSessionView: View {
             OHPPriorSymptomQuestionView { response in
                 Task { await viewModel.answerPreviousOHPSymptom(response) }
             }
+        } else if case let .recommendation(reason, trainingWeekIndex) =
+                    viewModel.deloadState {
+            DeloadRecommendationView(
+                reason: reason,
+                trainingWeekIndex: trainingWeekIndex
+            ) { action in
+                Task { await viewModel.respondToDeload(action) }
+            }
         } else {
-            switch presentation.progress.stage {
-            case .warmup:
-                WarmupStageView(
-                    presentation: presentation,
-                    toggleItem: { id in
-                        Task { await viewModel.toggleWarmupItem(id: id) }
-                    },
-                    complete: {
-                        Task { await viewModel.completeWarmup() }
-                    },
-                    skip: {
-                        Task { await viewModel.skipWarmup() }
-                    }
-                )
-            case .movement:
-                ExerciseStageView(viewModel: viewModel, presentation: presentation)
-            case .cooldown:
-                CooldownStageView(
-                    presentation: presentation,
-                    toggleItem: { id in
-                        Task { await viewModel.toggleCooldownItem(id: id) }
-                    },
-                    goBack: {
-                        Task { await viewModel.goBack() }
-                    },
-                    complete: {
-                        Task { await viewModel.completeCooldown() }
-                    },
-                    skip: {
-                        Task { await viewModel.skipCooldown() }
-                    }
-                )
-            case .summary:
-                SessionSummaryView(viewModel: viewModel, presentation: presentation)
+            VStack(spacing: 0) {
+                if case .active = viewModel.deloadState {
+                    DeloadActiveBanner()
+                }
+                switch presentation.progress.stage {
+                case .warmup:
+                    WarmupStageView(
+                        presentation: presentation,
+                        toggleItem: { id in
+                            Task { await viewModel.toggleWarmupItem(id: id) }
+                        },
+                        complete: {
+                            Task { await viewModel.completeWarmup() }
+                        },
+                        skip: {
+                            Task { await viewModel.skipWarmup() }
+                        }
+                    )
+                case .movement:
+                    ExerciseStageView(viewModel: viewModel, presentation: presentation)
+                case .cooldown:
+                    CooldownStageView(
+                        presentation: presentation,
+                        toggleItem: { id in
+                            Task { await viewModel.toggleCooldownItem(id: id) }
+                        },
+                        goBack: {
+                            Task { await viewModel.goBack() }
+                        },
+                        complete: {
+                            Task { await viewModel.completeCooldown() }
+                        },
+                        skip: {
+                            Task { await viewModel.skipCooldown() }
+                        }
+                    )
+                case .summary:
+                    SessionSummaryView(viewModel: viewModel, presentation: presentation)
+                }
             }
         }
     }

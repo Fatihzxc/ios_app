@@ -14,6 +14,8 @@ enum AppUITestScenario: String {
     case progressionMissingRIR = "progression-missing-rir"
     case weeklyPallof = "weekly-pallof"
     case ohpSafety = "ohp-safety"
+    case deloadScheduled = "deload-scheduled"
+    case deloadReactive = "deload-reactive"
 }
 
 struct AppUITestLaunchConfiguration {

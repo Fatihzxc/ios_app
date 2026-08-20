@@ -12,6 +12,17 @@ public protocol TrainingRepository: AnyObject {
     func fetchCooldownItems(workoutDayID: UUID) async throws -> [CooldownItem]
     func fetchHealthCheckReminders() async throws -> [HealthCheckReminder]
     func fetchProgramState(programID: UUID) async throws -> ProgramState?
+    func recalculateProgramStateTrainingWeek(
+        programID: UUID,
+        programStartDate: Date,
+        at date: Date
+    ) async throws -> ProgramState
+    func applyDeloadAction(
+        programID: UUID,
+        reason: DeloadReason,
+        action: DeloadAction,
+        at date: Date
+    ) async throws -> ProgramState
     func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot
     func createWorkoutSession(
         _ request: WorkoutSessionCreateRequest
@@ -50,4 +61,27 @@ public protocol TrainingRepository: AnyObject {
         at date: Date
     ) async throws -> WorkoutSessionSnapshot
     func deleteWorkoutSession(id: UUID) async throws
+}
+
+public enum TrainingRepositoryCapabilityError: Error, Equatable, Sendable {
+    case programStateMutationUnavailable
+}
+
+public extension TrainingRepository {
+    func recalculateProgramStateTrainingWeek(
+        programID _: UUID,
+        programStartDate _: Date,
+        at _: Date
+    ) async throws -> ProgramState {
+        throw TrainingRepositoryCapabilityError.programStateMutationUnavailable
+    }
+
+    func applyDeloadAction(
+        programID _: UUID,
+        reason _: DeloadReason,
+        action _: DeloadAction,
+        at _: Date
+    ) async throws -> ProgramState {
+        throw TrainingRepositoryCapabilityError.programStateMutationUnavailable
+    }
 }

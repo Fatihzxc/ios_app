@@ -40,7 +40,10 @@ struct AppRootView: View {
             TrainingSessionView(
                 viewModel: route.viewModel,
                 workoutDayID: route.workoutDayID,
-                onClose: { sessionRoute = nil }
+                onClose: {
+                    sessionRoute = nil
+                    Task { await foundationViewModel.load() }
+                }
             )
         }
     }

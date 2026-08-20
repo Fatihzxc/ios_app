@@ -415,6 +415,8 @@ public struct SetEntryBar: View {
             return localized("session.recommendation.equipmentCeiling.short")
         case .phaseTrainingFocus:
             return localized("session.recommendation.phaseTrainingFocus.short")
+        case .deload:
+            return localized("session.recommendation.deload.short")
         case .noPrefill:
             return localized("session.recommendation.none.short")
         }
