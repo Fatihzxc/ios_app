@@ -312,6 +312,13 @@ private final class FakeLifecycleRepository: TrainingRepository {
         []
     }
 
+    func fetchWeeklyPallofHistory() async throws -> WeeklyPallofHistorySnapshot {
+        WeeklyPallofHistorySnapshot(
+            eligibleExerciseTemplateIDs: [],
+            completions: []
+        )
+    }
+
     func updateWorkoutSessionSummary(
         id: UUID,
         perceivedRecovery: Int?,

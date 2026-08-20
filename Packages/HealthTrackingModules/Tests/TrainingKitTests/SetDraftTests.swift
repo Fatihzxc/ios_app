@@ -129,6 +129,23 @@ final class SetDraftTests: XCTestCase {
         assertEquatableSendable(request)
     }
 
+    func testExplicitVariantSelectionPersistsTheOverrideRatherThanTheSuggestion() throws {
+        let draft = makeDraft(
+            kind: .duration,
+            guidance: .init(durationSec: 30, performedVariant: "pallof")
+        )
+
+        draft.selectPerformedVariant("plank")
+        let request = try draft.makeSaveRequest(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000120")!,
+            completedAt: Date(timeIntervalSinceReferenceDate: 4_000)
+        )
+
+        XCTAssertEqual(draft.measurement.performedVariant, "plank")
+        XCTAssertEqual(request.measurement.performedVariant, "plank")
+        XCTAssertEqual(draft.prefillSource, .guidance)
+    }
+
     private func assertPrefill(
         _ expected: SetMeasurementInput,
         source: SetDraft.PrefillSource,

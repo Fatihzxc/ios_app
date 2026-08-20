@@ -278,7 +278,7 @@ final class SessionViewModelTests: XCTestCase {
     }
 
     func testNonDoubleProgressionFallsBackToPriorSessionSameSetIndex() async {
-        let plan = makePlan()
+        let plan = makeMeasurementFamilyPlan()
         let repository = FakeSessionRepository(plan: plan)
         let exercise = plan.exercises[1]
         repository.completedExerciseHistory[exercise.id] = [
@@ -300,6 +300,67 @@ final class SessionViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.currentSetDraft?.measurement.reps, 9)
         XCTAssertEqual(viewModel.currentSetDraft?.measurement.performedVariant, "Nötr tutuş")
         XCTAssertEqual(viewModel.recommendationReason, .priorSessionSameIndex)
+    }
+
+    func testBodyweightHistoryMapsSameVariantWithoutInventingExternalLoad() async {
+        let plan = makePlan()
+        let repository = FakeSessionRepository(plan: plan)
+        let exercise = plan.exercises[1]
+        repository.completedExerciseHistory[exercise.id] = [
+            makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                measurements: [
+                    .init(reps: 8, performedVariant: "bant-yesil", rir: 2),
+                    .init(reps: 10, performedVariant: "bant-yesil", rir: 1),
+                ]
+            ),
+        ]
+        let viewModel = makeViewModel(repository)
+
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        await viewModel.advanceExercise()
+
+        XCTAssertEqual(viewModel.currentSetDraft?.prefillSource, .guidance)
+        XCTAssertNil(viewModel.currentSetDraft?.measurement.weightKg)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.reps, 12)
+        XCTAssertEqual(
+            viewModel.currentSetDraft?.measurement.performedVariant,
+            "bant-yesil"
+        )
+        XCTAssertEqual(viewModel.recommendationReason, .bodyweight(.buildRepetitions))
+        XCTAssertTrue(repository.saveSetRequests.isEmpty)
+    }
+
+    func testWeeklyPallofSuggestionExposesChoicesAndPersistsExplicitOverride() async {
+        let plan = makePallofPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        let exercise = plan.exercises[0]
+        repository.weeklyPallofHistory = WeeklyPallofHistorySnapshot(
+            eligibleExerciseTemplateIDs: [exercise.id, UUID()],
+            completions: []
+        )
+        let viewModel = makeViewModel(repository)
+
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+
+        XCTAssertEqual(viewModel.currentVariantOptions, [.pallof, .plank])
+        XCTAssertEqual(viewModel.currentSetDraft?.prefillSource, .guidance)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.durationSec, 30)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.performedVariant, "pallof")
+        XCTAssertEqual(viewModel.recommendationReason, .weeklyPallof(.pallofDue))
+
+        viewModel.selectPerformedVariant(.plank)
+        await viewModel.saveCurrentSet()
+
+        XCTAssertEqual(repository.saveSetRequests.count, 1)
+        XCTAssertEqual(
+            repository.saveSetRequests[0].measurement.performedVariant,
+            "plank"
+        )
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.performedVariant, "plank")
     }
 
     func testSummaryValuesStayNilUntilChosenAndSaveOnlyExplicitInput() async {
@@ -503,6 +564,42 @@ final class SessionViewModelTests: XCTestCase {
         return CompletedExerciseHistorySnapshot(session: session, setLogs: setLogs)
     }
 
+    private func makePallofPlan() -> SessionWorkoutPlanSnapshot {
+        let dayID = uuid("00000000-0000-0000-0000-000000000740")
+        return SessionWorkoutPlanSnapshot(
+            workoutDayID: dayID,
+            name: "Pallof günü",
+            focus: "Haftalık core seçimi",
+            warmupItems: [
+                .init(
+                    id: uuid("00000000-0000-0000-0000-000000000741"),
+                    title: "Hazırlık",
+                    detail: "30 sn",
+                    orderIndex: 1
+                ),
+            ],
+            exercises: [
+                .init(
+                    id: uuid("00000000-0000-0000-0000-000000000742"),
+                    name: "Plank / Pallof",
+                    orderIndex: 1,
+                    targetSets: 2,
+                    repLow: 30,
+                    repHigh: 60,
+                    rirLow: 0,
+                    rirHigh: 0,
+                    allowFailure: false,
+                    cues: "Kontrollü uygula",
+                    safetyNote: "Kalçayı sabit tut",
+                    startingWeightKg: nil,
+                    progressionRule: .timeQuality,
+                    measurementKind: .duration
+                ),
+            ],
+            cooldownItems: []
+        )
+    }
+
     private func makeSession(dayID: UUID) -> WorkoutSessionSnapshot {
         WorkoutSessionSnapshot(
             id: uuid("00000000-0000-0000-0000-000000000720"),
@@ -554,6 +651,10 @@ private final class FakeSessionRepository: TrainingRepository {
     var progress: WorkoutSessionProgressSnapshot?
     var setLogs: [SetLogSnapshot] = []
     var completedExerciseHistory: [UUID: [CompletedExerciseHistorySnapshot]] = [:]
+    var weeklyPallofHistory = WeeklyPallofHistorySnapshot(
+        eligibleExerciseTemplateIDs: [],
+        completions: []
+    )
     var saveSetOutcomes: [Result<Void, Error>] = []
     var fetchPlanError: Error?
 
@@ -662,6 +763,10 @@ private final class FakeSessionRepository: TrainingRepository {
         exerciseTemplateID: UUID
     ) async throws -> [CompletedExerciseHistorySnapshot] {
         completedExerciseHistory[exerciseTemplateID, default: []]
+    }
+
+    func fetchWeeklyPallofHistory() async throws -> WeeklyPallofHistorySnapshot {
+        weeklyPallofHistory
     }
 
     func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot {

@@ -36,6 +36,7 @@ public protocol TrainingRepository: AnyObject {
     func fetchCompletedExerciseHistory(
         exerciseTemplateID: UUID
     ) async throws -> [CompletedExerciseHistorySnapshot]
+    func fetchWeeklyPallofHistory() async throws -> WeeklyPallofHistorySnapshot
     func updateWorkoutSessionSummary(
         id: UUID,
         perceivedRecovery: Int?,

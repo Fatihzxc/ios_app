@@ -64,7 +64,7 @@ final class AppDependencies: AppDependencyLoading {
                 trainingRepository = repository
                 shouldLoadFoundation = false
             case .seeded, .fatalConfiguration, .sessionFlow, .sessionFamilies, .sessionResume,
-                 .progressionMissingRIR:
+                 .progressionMissingRIR, .weeklyPallof:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -111,6 +111,8 @@ private enum UITestSessionFixture {
     private static let resumeSessionID = uuid("00000000-0000-4000-8000-00000000f020")
     private static let resumeProgressID = uuid("00000000-0000-4000-8000-00000000f021")
     private static let progressionSessionID = uuid("00000000-0000-4000-8000-00000000f030")
+    private static let weeklyPallofSessionID = uuid("00000000-0000-4000-8000-00000000f040")
+    private static let weeklyPallofProgressID = uuid("00000000-0000-4000-8000-00000000f041")
     private static let installedAt = Date(timeIntervalSince1970: 1_700_000_000)
 
     static func install(scenario: AppUITestScenario, in modelContext: ModelContext) throws {
@@ -121,6 +123,8 @@ private enum UITestSessionFixture {
             try installResumeProgress(in: modelContext)
         case .progressionMissingRIR:
             try installMissingRIRHistory(in: modelContext)
+        case .weeklyPallof:
+            try installWeeklyPallofProgress(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow:
             return
         }
@@ -312,6 +316,39 @@ private enum UITestSessionFixture {
         try modelContext.save()
     }
 
+    private static func installWeeklyPallofProgress(in modelContext: ModelContext) throws {
+        let existingSessions = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
+        guard !existingSessions.contains(where: { $0.id == weeklyPallofSessionID }) else {
+            return
+        }
+
+        modelContext.insert(
+            WorkoutSession(
+                id: weeklyPallofSessionID,
+                createdAt: installedAt,
+                updatedAt: installedAt,
+                date: installedAt,
+                status: .inProgress,
+                workoutDayTemplateId: SeedIdentifiers.dayA
+            )
+        )
+        modelContext.insert(
+            WorkoutSessionProgress(
+                id: weeklyPallofProgressID,
+                createdAt: installedAt,
+                updatedAt: installedAt,
+                workoutSessionId: weeklyPallofSessionID,
+                stage: .movement,
+                currentExerciseTemplateId: SeedIdentifiers.plankPallof,
+                completedWarmupItemIdsData: WorkoutSessionProgressCodec.emptyPayload,
+                completedCooldownItemIdsData: WorkoutSessionProgressCodec.emptyPayload,
+                warmupDisposition: .completed,
+                cooldownDisposition: .pending
+            )
+        )
+        try modelContext.save()
+    }
+
     private static func uuid(_ value: String) -> UUID {
         UUID(uuidString: value)!
     }
@@ -448,6 +485,10 @@ private final class UITestFoundationRepository: TrainingRepository {
         try await repository.fetchCompletedExerciseHistory(
             exerciseTemplateID: exerciseTemplateID
         )
+    }
+
+    func fetchWeeklyPallofHistory() async throws -> WeeklyPallofHistorySnapshot {
+        try await repository.fetchWeeklyPallofHistory()
     }
 
     func updateWorkoutSessionSummary(

@@ -487,6 +487,37 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
         }
     }
 
+    public func fetchWeeklyPallofHistory() async throws -> WeeklyPallofHistorySnapshot {
+        let eligibleExerciseTemplateIDs: Set<UUID> = [
+            SeedIdentifiers.plankPallof,
+            SeedIdentifiers.sidePlankPallof,
+        ]
+        let completions = try modelContext.fetch(FetchDescriptor<SetLog>())
+            .filter {
+                eligibleExerciseTemplateIDs.contains($0.exerciseTemplateId)
+                    && !$0.isWarmupSet
+                    && $0.workoutSession?.status == .completed
+            }
+            .sorted { lhs, rhs in
+                if lhs.completedAt != rhs.completedAt {
+                    return lhs.completedAt > rhs.completedAt
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+            .map {
+                WeeklyPallofCompletionSnapshot(
+                    id: $0.id,
+                    exerciseTemplateID: $0.exerciseTemplateId,
+                    completedAt: $0.completedAt,
+                    performedVariant: $0.performedVariant
+                )
+            }
+        return WeeklyPallofHistorySnapshot(
+            eligibleExerciseTemplateIDs: eligibleExerciseTemplateIDs,
+            completions: completions
+        )
+    }
+
     public func updateWorkoutSessionSummary(
         id: UUID,
         perceivedRecovery: Int?,

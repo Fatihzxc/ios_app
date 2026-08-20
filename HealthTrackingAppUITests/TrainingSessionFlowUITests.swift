@@ -265,6 +265,45 @@ final class TrainingSessionFlowUITests: XCTestCase {
         attachScreenshot(named: "session-progression-missing-rir-light")
     }
 
+    func testWeeklyPallofVariantChooserPersistsExplicitOverride() {
+        let app = launchApp(scenario: "weekly-pallof", appearance: .light)
+        requireFoundationContent("root.today.content", in: app)
+        tapAction(
+            "today.session.open",
+            in: app,
+            message: "The weekly Pallof fixture must use the real Today route."
+        )
+        assertExercise(named: "Plank / Pallof", family: "duration", in: app)
+
+        let pallof = requireElement(
+            app.buttons["session.set.variant.pallof"],
+            "Pallof must be a real accessible variant choice."
+        )
+        let plank = requireElement(
+            app.buttons["session.set.variant.plank"],
+            "Plank must be a real accessible variant choice."
+        )
+        XCTAssertEqual(pallof.value as? String, "Seçili")
+        XCTAssertEqual(plank.value as? String, "")
+
+        plank.tap()
+        XCTAssertEqual(plank.value as? String, "Seçili")
+        tapAction(
+            "session.set.save",
+            in: app,
+            message: "The explicit Plank override must persist as the real set value."
+        )
+        waitForLabel("1 / 3", identifier: "session.exercise.completedSets", in: app)
+        XCTAssertEqual(
+            requireElement(
+                app.buttons["session.set.variant.plank"],
+                "The next set must preserve the user's real variant override."
+            ).value as? String,
+            "Seçili"
+        )
+        attachScreenshot(named: "session-weekly-pallof-override-light")
+    }
+
     private func assertExercise(
         named expectedName: String,
         family: String,

@@ -8,6 +8,7 @@ import Observation
 public final class SessionViewModel {
     public private(set) var state: SessionViewState = .idle
     public private(set) var currentSetDraft: SetDraft?
+    public private(set) var currentVariantOptions: [SessionVariantOption] = []
     public private(set) var setSaveState: SessionSetSaveState = .idle
     public private(set) var recommendationReason: SessionRecommendationReason = .noPrefill
     public private(set) var isDeleteConfirmationPresented = false
@@ -19,24 +20,34 @@ public final class SessionViewModel {
     @ObservationIgnored
     private let coordinator: SessionCoordinator
     @ObservationIgnored
+    private let calendar: Calendar
+    @ObservationIgnored
     private let now: @MainActor () -> Date
     @ObservationIgnored
     private var pendingSetRequest: SetLogSaveRequest?
     @ObservationIgnored
     private var completedHistoryByExerciseID: [UUID: [CompletedExerciseHistorySnapshot]] = [:]
+    @ObservationIgnored
+    private var weeklyPallofHistory = WeeklyPallofHistorySnapshot(
+        eligibleExerciseTemplateIDs: [],
+        completions: []
+    )
 
     public init(
         repository: any TrainingRepository,
+        calendar: Calendar = .current,
         now: @escaping @MainActor () -> Date = { .now }
     ) {
         self.repository = repository
         coordinator = SessionCoordinator(repository: repository)
+        self.calendar = calendar
         self.now = now
     }
 
     public func start(workoutDayID: UUID) async {
         state = .loading
         currentSetDraft = nil
+        currentVariantOptions = []
         setSaveState = .idle
         recommendationReason = .noPrefill
         isDeleteConfirmationPresented = false
@@ -44,6 +55,10 @@ public final class SessionViewModel {
         summaryNote = ""
         pendingSetRequest = nil
         completedHistoryByExerciseID = [:]
+        weeklyPallofHistory = WeeklyPallofHistorySnapshot(
+            eligibleExerciseTemplateIDs: [],
+            completions: []
+        )
 
         do {
             let existing = try await repository.fetchInProgressWorkoutSession()
@@ -71,6 +86,7 @@ public final class SessionViewModel {
                     .fetchCompletedExerciseHistory(exerciseTemplateID: exercise.id)
             }
             completedHistoryByExerciseID = completedHistory
+            weeklyPallofHistory = try await repository.fetchWeeklyPallofHistory()
             state = .active(
                 SessionPresentation(
                     session: session,
@@ -88,6 +104,7 @@ public final class SessionViewModel {
         } catch {
             state = .failed(.load)
             currentSetDraft = nil
+            currentVariantOptions = []
         }
     }
 
@@ -280,6 +297,11 @@ public final class SessionViewModel {
         summaryRecovery = recovery
     }
 
+    public func selectPerformedVariant(_ option: SessionVariantOption) {
+        guard currentVariantOptions.contains(option) else { return }
+        currentSetDraft?.selectPerformedVariant(option.rawValue)
+    }
+
     public func updateSummaryNote(_ note: String) {
         summaryNote = note
     }
@@ -438,6 +460,7 @@ public final class SessionViewModel {
         guard let presentation = activePresentation,
               let exercise = presentation.currentExercise else {
             currentSetDraft = nil
+            currentVariantOptions = []
             recommendationReason = .noPrefill
             setSaveState = .idle
             return
@@ -450,11 +473,36 @@ public final class SessionViewModel {
         let priorSessionSameIndex = latestHistory?.setLogs.first(where: {
             !$0.isWarmupSet && $0.setIndex == nextSetIndex
         })?.measurement
-        let progressionGuidance = Self.doubleProgressionGuidance(
-            for: exercise,
-            history: latestHistory
-        )
         let seed = Self.templateSeed(for: exercise)
+        let isWeeklyPallofExercise = weeklyPallofHistory
+            .eligibleExerciseTemplateIDs
+            .contains(exercise.id)
+        currentVariantOptions = isWeeklyPallofExercise ? SessionVariantOption.allCases : []
+        let progressionGuidance: (
+            measurement: SetMeasurementInput,
+            reason: SessionRecommendationReason
+        )?
+        if sameSessionPrevious != nil,
+           exercise.progressionRule == .bodyweightProgression || isWeeklyPallofExercise {
+            progressionGuidance = nil
+        } else if isWeeklyPallofExercise {
+            progressionGuidance = Self.weeklyPallofGuidance(
+                history: weeklyPallofHistory,
+                baseMeasurement: priorSessionSameIndex ?? seed,
+                now: now(),
+                calendar: calendar
+            )
+        } else if exercise.progressionRule == .bodyweightProgression {
+            progressionGuidance = Self.bodyweightGuidance(
+                for: exercise,
+                history: latestHistory
+            )
+        } else {
+            progressionGuidance = Self.doubleProgressionGuidance(
+                for: exercise,
+                history: latestHistory
+            )
+        }
         currentSetDraft = SetDraft(
             workoutSessionID: presentation.session.id,
             exerciseTemplateID: exercise.id,
@@ -541,6 +589,77 @@ public final class SessionViewModel {
         )
     }
 
+    private static func bodyweightGuidance(
+        for exercise: SessionExerciseSnapshot,
+        history: CompletedExerciseHistorySnapshot?
+    ) -> (measurement: SetMeasurementInput, reason: SessionRecommendationReason)? {
+        guard exercise.progressionRule == .bodyweightProgression,
+              let history else {
+            return nil
+        }
+        let suggestion = BodyweightProgression.suggest(
+            BodyweightProgression.Input(
+                repLow: exercise.repLow ?? 1,
+                repHigh: exercise.repHigh,
+                definedHarderVariant: nil,
+                sets: history.setLogs.map {
+                    BodyweightProgression.WorkingSet(
+                        setIndex: $0.setIndex,
+                        weightKg: $0.measurement.weightKg,
+                        reps: $0.measurement.reps,
+                        performedVariant: $0.measurement.performedVariant,
+                        isWarmupSet: $0.isWarmupSet
+                    )
+                }
+            )
+        )
+        return (
+            SetMeasurementInput(
+                weightKg: suggestion.proposedMeasurement.weightKg,
+                reps: suggestion.proposedMeasurement.reps,
+                performedVariant: suggestion.proposedMeasurement.performedVariant
+            ),
+            .bodyweight(suggestion.reason.sessionReason)
+        )
+    }
+
+    private static func weeklyPallofGuidance(
+        history: WeeklyPallofHistorySnapshot,
+        baseMeasurement: SetMeasurementInput,
+        now: Date,
+        calendar: Calendar
+    ) -> (measurement: SetMeasurementInput, reason: SessionRecommendationReason)? {
+        let outcome = WeeklyPallofSelection.resolve(
+            input: WeeklyPallofSelection.Input(
+                eligibleExerciseTemplateIDs: history.eligibleExerciseTemplateIDs,
+                completions: history.completions.map {
+                    WeeklyPallofSelection.Completion(
+                        id: $0.id,
+                        exerciseTemplateID: $0.exerciseTemplateID,
+                        completedAt: $0.completedAt,
+                        performedVariant: $0.performedVariant.flatMap(
+                            WeeklyPallofSelection.Variant.init(rawValue:)
+                        )
+                    )
+                }
+            ),
+            now: now,
+            calendar: calendar
+        )
+        guard case let .suggestion(suggestion) = outcome else { return nil }
+        return (
+            SetMeasurementInput(
+                weightKg: baseMeasurement.weightKg,
+                reps: baseMeasurement.reps,
+                durationSec: baseMeasurement.durationSec,
+                distanceSteps: baseMeasurement.distanceSteps,
+                performedVariant: suggestion.proposedVariant.rawValue,
+                rir: baseMeasurement.rir
+            ),
+            .weeklyPallof(suggestion.reason.sessionReason)
+        )
+    }
+
     private static func recommendationReason(
         for reason: DoubleProgression.Reason
     ) -> SessionRecommendationReason {
@@ -568,6 +687,36 @@ private extension DoubleProgression.HoldReason {
             .rirAboveThreshold
         case .missingExternalWeight:
             .missingExternalWeight
+        }
+    }
+}
+
+private extension BodyweightProgression.Reason {
+    var sessionReason: SessionBodyweightRecommendationReason {
+        switch self {
+        case .noWorkingSets:
+            .noWorkingSets
+        case .missingRepCeiling:
+            .missingRepCeiling
+        case .inconsistentVariants:
+            .inconsistentVariants
+        case .buildRepetitions:
+            .buildRepetitions
+        case .advanceToDefinedVariant:
+            .advanceToDefinedVariant
+        case .programAdjustmentRequired:
+            .programAdjustmentRequired
+        }
+    }
+}
+
+private extension WeeklyPallofSelection.Reason {
+    var sessionReason: SessionWeeklyPallofRecommendationReason {
+        switch self {
+        case .pallofDue:
+            .pallofDue
+        case .pallofCompletedThisWeek:
+            .pallofCompletedThisWeek
         }
     }
 }

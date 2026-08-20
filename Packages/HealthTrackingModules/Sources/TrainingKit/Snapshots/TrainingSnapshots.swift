@@ -76,6 +76,38 @@ public struct CompletedExerciseHistorySnapshot: Equatable, Sendable {
     }
 }
 
+public struct WeeklyPallofCompletionSnapshot: Equatable, Sendable, Identifiable {
+    public let id: UUID
+    public let exerciseTemplateID: UUID
+    public let completedAt: Date
+    public let performedVariant: String?
+
+    public init(
+        id: UUID,
+        exerciseTemplateID: UUID,
+        completedAt: Date,
+        performedVariant: String?
+    ) {
+        self.id = id
+        self.exerciseTemplateID = exerciseTemplateID
+        self.completedAt = completedAt
+        self.performedVariant = performedVariant
+    }
+}
+
+public struct WeeklyPallofHistorySnapshot: Equatable, Sendable {
+    public let eligibleExerciseTemplateIDs: Set<UUID>
+    public let completions: [WeeklyPallofCompletionSnapshot]
+
+    public init(
+        eligibleExerciseTemplateIDs: Set<UUID>,
+        completions: [WeeklyPallofCompletionSnapshot]
+    ) {
+        self.eligibleExerciseTemplateIDs = eligibleExerciseTemplateIDs
+        self.completions = completions
+    }
+}
+
 public struct WorkoutSessionCreateRequest: Equatable, Sendable {
     public let id: UUID
     public let date: Date
@@ -425,6 +457,8 @@ public enum SessionRecommendationReason: Equatable, Sendable {
     case priorSessionSameIndex
     case doubleProgressionIncrease
     case doubleProgressionHold(SessionDoubleProgressionHoldReason)
+    case bodyweight(SessionBodyweightRecommendationReason)
+    case weeklyPallof(SessionWeeklyPallofRecommendationReason)
     case noPrefill
 }
 
@@ -435,4 +469,23 @@ public enum SessionDoubleProgressionHoldReason: Equatable, Sendable {
     case missingRIR
     case rirAboveThreshold
     case missingExternalWeight
+}
+
+public enum SessionBodyweightRecommendationReason: Equatable, Sendable {
+    case noWorkingSets
+    case missingRepCeiling
+    case inconsistentVariants
+    case buildRepetitions
+    case advanceToDefinedVariant
+    case programAdjustmentRequired
+}
+
+public enum SessionWeeklyPallofRecommendationReason: Equatable, Sendable {
+    case pallofDue
+    case pallofCompletedThisWeek
+}
+
+public enum SessionVariantOption: String, CaseIterable, Equatable, Hashable, Sendable {
+    case pallof
+    case plank
 }

@@ -83,6 +83,12 @@ public final class SetDraft {
         measurement.rir = rir
     }
 
+    public func selectPerformedVariant(_ performedVariant: String?) {
+        let normalized = performedVariant?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        measurement.performedVariant = normalized?.isEmpty == false ? normalized : nil
+    }
+
     public func makeSaveRequest(
         id: UUID = UUID(),
         completedAt: Date = .now

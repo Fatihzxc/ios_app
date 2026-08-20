@@ -8,6 +8,8 @@ public struct SetEntryBar: View {
     @Bindable private var draft: SetDraft
     private let saveState: SessionSetSaveState
     private let recommendationReason: SessionRecommendationReason
+    private let variantOptions: [SessionVariantOption]
+    private let selectVariant: (SessionVariantOption) -> Void
     private let save: () -> Void
     private let retry: () -> Void
 
@@ -15,12 +17,16 @@ public struct SetEntryBar: View {
         draft: SetDraft,
         saveState: SessionSetSaveState,
         recommendationReason: SessionRecommendationReason,
+        variantOptions: [SessionVariantOption],
+        selectVariant: @escaping (SessionVariantOption) -> Void,
         save: @escaping () -> Void,
         retry: @escaping () -> Void
     ) {
         self.draft = draft
         self.saveState = saveState
         self.recommendationReason = recommendationReason
+        self.variantOptions = variantOptions
+        self.selectVariant = selectVariant
         self.save = save
         self.retry = retry
     }
@@ -189,17 +195,64 @@ public struct SetEntryBar: View {
     @ViewBuilder
     private var variantControl: some View {
         if draft.enabledFields.contains(.performedVariant) {
-            TextField(
-                localized("session.set.variant"),
-                text: Binding(
-                    get: { draft.measurement.performedVariant ?? "" },
-                    set: { value in
-                        draft.measurement.performedVariant = value.isEmpty ? nil : value
-                    }
+            if variantOptions.isEmpty {
+                TextField(
+                    localized("session.set.variant"),
+                    text: Binding(
+                        get: { draft.measurement.performedVariant ?? "" },
+                        set: { draft.selectPerformedVariant($0) }
+                    )
                 )
-            )
-            .textFieldStyle(.roundedBorder)
-            .accessibilityIdentifier("session.set.variant")
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("session.set.variant")
+            } else {
+                VStack(alignment: .leading, spacing: AppSpacing.compact) {
+                    Text(localized("session.set.variant.choice"))
+                        .font(AppTypography.label)
+                        .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
+                    HStack(spacing: AppSpacing.compact) {
+                        ForEach(variantOptions, id: \.rawValue) { option in
+                            variantButton(option)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func variantButton(_ option: SessionVariantOption) -> some View {
+        let isSelected = draft.measurement.performedVariant == option.rawValue
+        return Button {
+            selectVariant(option)
+        } label: {
+            Text(variantLabel(option))
+                .font(AppTypography.label)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(
+                    AppColors.color(
+                        isSelected ? .accentAction : .backgroundSunken,
+                        scheme: colorScheme
+                    )
+                )
+                .foregroundStyle(
+                    AppColors.color(
+                        isSelected ? .accentOnAction : .inkPrimary,
+                        scheme: colorScheme
+                    )
+                )
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(isSelected ? localized("session.selection.selected") : "")
+        .accessibilityIdentifier("session.set.variant.\(option.rawValue)")
+    }
+
+    private func variantLabel(_ option: SessionVariantOption) -> String {
+        switch option {
+        case .pallof:
+            localized("session.set.variant.pallof")
+        case .plank:
+            localized("session.set.variant.plank")
         }
     }
 
@@ -352,6 +405,10 @@ public struct SetEntryBar: View {
             return localized("session.recommendation.doubleProgression.increase.short")
         case .doubleProgressionHold:
             return localized("session.recommendation.doubleProgression.hold.short")
+        case .bodyweight:
+            return localized("session.recommendation.bodyweight.short")
+        case .weeklyPallof:
+            return localized("session.recommendation.weeklyPallof.short")
         case .noPrefill:
             return localized("session.recommendation.none.short")
         }

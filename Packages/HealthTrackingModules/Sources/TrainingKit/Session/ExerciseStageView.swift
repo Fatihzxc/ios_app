@@ -27,6 +27,8 @@ public struct ExerciseStageView: View {
                             draft: draft,
                             saveState: viewModel.setSaveState,
                             recommendationReason: viewModel.recommendationReason,
+                            variantOptions: viewModel.currentVariantOptions,
+                            selectVariant: viewModel.selectPerformedVariant,
                             save: {
                                 Task { await viewModel.saveCurrentSet() }
                             },
@@ -179,8 +181,42 @@ public struct ExerciseStageView: View {
             return localized("session.recommendation.doubleProgression.increase")
         case let .doubleProgressionHold(reason):
             return doubleProgressionHoldText(reason)
+        case let .bodyweight(reason):
+            return bodyweightText(reason)
+        case let .weeklyPallof(reason):
+            return weeklyPallofText(reason)
         case .noPrefill:
             return localized("session.recommendation.none")
+        }
+    }
+
+    private func bodyweightText(
+        _ reason: SessionBodyweightRecommendationReason
+    ) -> String {
+        switch reason {
+        case .noWorkingSets:
+            localized("session.recommendation.bodyweight.noWorkingSets")
+        case .missingRepCeiling:
+            localized("session.recommendation.bodyweight.missingRepCeiling")
+        case .inconsistentVariants:
+            localized("session.recommendation.bodyweight.inconsistentVariants")
+        case .buildRepetitions:
+            localized("session.recommendation.bodyweight.buildRepetitions")
+        case .advanceToDefinedVariant:
+            localized("session.recommendation.bodyweight.advanceToDefinedVariant")
+        case .programAdjustmentRequired:
+            localized("session.recommendation.bodyweight.programAdjustmentRequired")
+        }
+    }
+
+    private func weeklyPallofText(
+        _ reason: SessionWeeklyPallofRecommendationReason
+    ) -> String {
+        switch reason {
+        case .pallofDue:
+            localized("session.recommendation.weeklyPallof.pallofDue")
+        case .pallofCompletedThisWeek:
+            localized("session.recommendation.weeklyPallof.pallofCompletedThisWeek")
         }
     }
 

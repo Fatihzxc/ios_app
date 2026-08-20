@@ -442,6 +442,75 @@ final class TrainingRepositoryContractTests: XCTestCase {
         assertEquatableSendable(history[0])
     }
 
+    func testWeeklyPallofHistorySpansBothTemplatesAndExcludesUnfinishedSessions() async throws {
+        let container = try ModelContainerFactory.make(for: .inMemory)
+        let context = ModelContext(container)
+        let olderDate = Date(timeIntervalSinceReferenceDate: 5_000)
+        let newerDate = Date(timeIntervalSinceReferenceDate: 6_000)
+        let older = WorkoutSession(date: olderDate, status: .completed)
+        let newer = WorkoutSession(date: newerDate, status: .completed)
+        let active = WorkoutSession(
+            date: Date(timeIntervalSinceReferenceDate: 7_000),
+            status: .inProgress
+        )
+        [older, newer, active].forEach(context.insert)
+        let newerSet = SetLog(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000181")!,
+            exerciseTemplateId: SeedIdentifiers.sidePlankPallof,
+            setIndex: 1,
+            durationSec: 40,
+            performedVariant: "plank",
+            completedAt: newerDate,
+            workoutSession: newer
+        )
+        let logs = [
+            SetLog(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000182")!,
+                exerciseTemplateId: SeedIdentifiers.plankPallof,
+                setIndex: 1,
+                durationSec: 30,
+                performedVariant: "pallof",
+                completedAt: olderDate,
+                workoutSession: older
+            ),
+            newerSet,
+            SetLog(
+                exerciseTemplateId: SeedIdentifiers.plankPallof,
+                setIndex: 1,
+                durationSec: 30,
+                performedVariant: "pallof",
+                completedAt: newerDate,
+                workoutSession: active
+            ),
+            SetLog(
+                exerciseTemplateId: UUID(),
+                setIndex: 1,
+                durationSec: 30,
+                performedVariant: "pallof",
+                completedAt: newerDate,
+                workoutSession: newer
+            ),
+        ]
+        logs.forEach(context.insert)
+        try context.save()
+        let repository = SwiftDataTrainingRepository(modelContext: ModelContext(container))
+
+        let history = try await repository.fetchWeeklyPallofHistory()
+
+        XCTAssertEqual(
+            history.eligibleExerciseTemplateIDs,
+            [SeedIdentifiers.plankPallof, SeedIdentifiers.sidePlankPallof]
+        )
+        XCTAssertEqual(history.completions.map(\.exerciseTemplateID), [
+            SeedIdentifiers.sidePlankPallof,
+            SeedIdentifiers.plankPallof,
+        ])
+        XCTAssertEqual(history.completions.map(\.performedVariant), ["plank", "pallof"])
+        newerSet.performedVariant = "pallof"
+        XCTAssertEqual(history.completions.first?.performedVariant, "plank")
+        assertEquatableSendable(history)
+    }
+
     func testSaveSetRevalidatesAndReturnsAnImmutableSnapshot() async throws {
         let fixture = try makeSetMutationFixture(kind: .weightReps)
         let setID = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
