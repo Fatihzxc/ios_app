@@ -277,6 +277,65 @@ final class SessionViewModelTests: XCTestCase {
         XCTAssertTrue(repository.saveSetRequests.isEmpty)
     }
 
+    func testEquipmentCeilingComposesAfterProgressionAndClampsTheDraftToTwenty() async {
+        let plan = makePlan()
+        let repository = FakeSessionRepository(plan: plan)
+        let exercise = plan.exercises[0]
+        repository.completedExerciseHistory[exercise.id] = [
+            makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                measurements: [
+                    .init(weightKg: 20, reps: 12, rir: 1),
+                    .init(weightKg: 20, reps: 12, rir: 0),
+                ]
+            ),
+        ]
+        let viewModel = makeViewModel(repository)
+
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.weightKg, 20)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.reps, 8)
+        XCTAssertEqual(
+            viewModel.recommendationReason,
+            .equipmentCeiling(
+                .init(weightKg: 20, phaseFocusApplied: false)
+            )
+        )
+        XCTAssertTrue(repository.saveSetRequests.isEmpty)
+    }
+
+    func testPhaseThreeBoneFocusUsesTheRealPhaseAndExistingTemplateLowerBound() async {
+        let plan = makeBoneFocusPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        repository.configureProgram(week: 28, phaseOrderIndex: 3)
+        let exercise = plan.exercises[0]
+        let history = makeCompletedHistory(
+            dayID: plan.workoutDayID,
+            exerciseID: exercise.id,
+            measurements: [
+                .init(weightKg: 10, reps: 11, rir: 1),
+                .init(weightKg: 10, reps: 11, rir: 1),
+            ]
+        )
+        repository.completedExerciseHistory[exercise.id] = [history]
+        let viewModel = makeViewModel(repository)
+
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.weightKg, 10)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.reps, exercise.repLow)
+        XCTAssertEqual(
+            viewModel.recommendationReason,
+            .phaseTrainingFocus(.boneFocusLowerBound)
+        )
+        XCTAssertEqual(repository.completedExerciseHistory[exercise.id], [history])
+        XCTAssertTrue(repository.saveSetRequests.isEmpty)
+    }
+
     func testNonDoubleProgressionFallsBackToPriorSessionSameSetIndex() async {
         let plan = makeMeasurementFamilyPlan()
         let repository = FakeSessionRepository(plan: plan)
@@ -470,6 +529,41 @@ final class SessionViewModelTests: XCTestCase {
         XCTAssertEqual(
             heldViewModel.recommendationReason,
             .ohp(.previousResponseUncertain)
+        )
+    }
+
+    func testOHPCeilingRetainsTheSafetyReasonWhileClampingTheLoad() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        repository.configureProgram(week: 5)
+        let exercise = plan.exercises[0]
+        repository.completedExerciseHistory[exercise.id] = [
+            makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                ohpSymptomResponse: .symptomFree,
+                measurements: [
+                    .init(weightKg: 20, reps: 12, rir: 1),
+                    .init(weightKg: 20, reps: 12, rir: 1),
+                    .init(weightKg: 20, reps: 12, rir: 1),
+                ]
+            ),
+        ]
+        let viewModel = makeViewModel(repository)
+
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.weightKg, 20)
+        XCTAssertEqual(
+            viewModel.recommendationReason,
+            .equipmentCeiling(
+                .init(
+                    weightKg: 20,
+                    phaseFocusApplied: false,
+                    ohpReason: .increaseAllowed
+                )
+            )
         )
     }
 
@@ -689,6 +783,35 @@ final class SessionViewModelTests: XCTestCase {
         )
     }
 
+    private func makeBoneFocusPlan() -> SessionWorkoutPlanSnapshot {
+        let base = makePlan()
+        return SessionWorkoutPlanSnapshot(
+            workoutDayID: base.workoutDayID,
+            name: "Kemik odağı",
+            focus: "Faz 3 alt tekrar bandı",
+            warmupItems: base.warmupItems,
+            exercises: [
+                .init(
+                    id: uuid("00000000-0000-0000-0000-000000000716"),
+                    name: "Tanımlı ağır odak hareketi",
+                    orderIndex: 1,
+                    targetSets: 3,
+                    repLow: 8,
+                    repHigh: 12,
+                    rirLow: 1,
+                    rirHigh: 2,
+                    allowFailure: false,
+                    cues: "Şablondaki sınırları koru",
+                    safetyNote: nil,
+                    startingWeightKg: 10,
+                    progressionRule: .boneFocusHeavy,
+                    measurementKind: .weightReps
+                ),
+            ],
+            cooldownItems: base.cooldownItems
+        )
+    }
+
     private func makeCompletedHistory(
         dayID: UUID,
         exerciseID: UUID,
@@ -862,6 +985,7 @@ private final class FakeSessionRepository: TrainingRepository {
     var fetchPlanError: Error?
     var activeProgram: Program?
     var programState: ProgramState?
+    var programPhases: [ProgramPhase] = []
     var ohpSafeAlternative = SessionExerciseSnapshot(
         id: UUID(uuidString: "00000000-0000-0000-0000-000000000753")!,
         name: "Half-Kneeling DB Press",
@@ -893,7 +1017,9 @@ private final class FakeSessionRepository: TrainingRepository {
 
     func fetchUserProfile() async throws -> UserProfile? { nil }
     func fetchActiveProgram() async throws -> Program? { activeProgram }
-    func fetchProgramPhases(programID: UUID) async throws -> [ProgramPhase] { [] }
+    func fetchProgramPhases(programID: UUID) async throws -> [ProgramPhase] {
+        programPhases.filter { $0.program?.id == nil || $0.program?.id == programID }
+    }
     func fetchWorkoutDays(programID: UUID) async throws -> [WorkoutDayTemplate] { [] }
     func fetchExerciseTemplates(workoutDayID: UUID) async throws -> [ExerciseTemplate] { [] }
     func fetchWarmupItems(workoutDayID: UUID) async throws -> [WarmupItem] { [] }
@@ -903,13 +1029,24 @@ private final class FakeSessionRepository: TrainingRepository {
         programState?.programId == programID ? programState : nil
     }
 
-    func configureProgram(week: Int) {
+    func configureProgram(week: Int, phaseOrderIndex: Int = 1) {
         let programID = UUID(uuidString: "00000000-0000-0000-0000-000000000754")!
+        let phaseID = UUID(uuidString: "00000000-0000-0000-0000-000000000755")!
         activeProgram = Program(id: programID, name: "OHP programı", isActive: true)
         programState = ProgramState(
             programId: programID,
+            currentPhaseId: phaseID,
             trainingWeekIndex: week
         )
+        programPhases = [
+            ProgramPhase(
+                id: phaseID,
+                name: "Test fazı",
+                orderIndex: phaseOrderIndex,
+                monthStart: 1,
+                monthEnd: 12
+            ),
+        ]
     }
 
     func createWorkoutSession(

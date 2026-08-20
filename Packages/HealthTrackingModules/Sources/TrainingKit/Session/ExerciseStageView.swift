@@ -103,6 +103,8 @@ public struct ExerciseStageView: View {
                 }
             }
 
+            equipmentCeilingInformation
+
             if let safetyNote = exercise.safetyNote, !safetyNote.isEmpty {
                 AppCard {
                     VStack(alignment: .leading, spacing: AppSpacing.compact) {
@@ -257,9 +259,63 @@ public struct ExerciseStageView: View {
             return weeklyPallofText(reason)
         case let .ohp(reason):
             return ohpRecommendationText(reason)
+        case let .equipmentCeiling(reason):
+            return equipmentCeilingText(reason)
+        case .phaseTrainingFocus(.boneFocusLowerBound):
+            return localized("session.recommendation.phaseTrainingFocus")
         case .noPrefill:
             return localized("session.recommendation.none")
         }
+    }
+
+    @ViewBuilder
+    private var equipmentCeilingInformation: some View {
+        if case .equipmentCeiling = viewModel.recommendationReason {
+            AppCard {
+                VStack(alignment: .leading, spacing: AppSpacing.compact) {
+                    StatusPill(
+                        text: localized("session.recommendation.equipmentCeiling.investment.title"),
+                        systemImage: "info.circle",
+                        style: .info
+                    )
+                    Text(localized("session.recommendation.equipmentCeiling.investment"))
+                        .font(AppTypography.body)
+                        .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("session.equipment-ceiling.investment-information")
+        }
+    }
+
+    private func equipmentCeilingText(_ reason: SessionEquipmentCeilingReason) -> String {
+        let weight = formatWeight(reason.weightKg)
+        let ceilingText: String
+        if reason.phaseFocusApplied {
+            ceilingText = String(
+                format: localized("session.recommendation.equipmentCeiling.withPhaseFocus"),
+                locale: .current,
+                weight
+            )
+        } else {
+            ceilingText = String(
+                format: localized("session.recommendation.equipmentCeiling"),
+                locale: .current,
+                weight
+            )
+        }
+        guard let ohpReason = reason.ohpReason else { return ceilingText }
+        return "\(ohpRecommendationText(ohpReason)) \(ceilingText)"
+    }
+
+    private func formatWeight(_ value: Double) -> String {
+        let formatter = MeasurementFormatter()
+        formatter.locale = .current
+        formatter.unitOptions = .providedUnit
+        formatter.unitStyle = .short
+        formatter.numberFormatter.maximumFractionDigits = 1
+        return formatter.string(from: Measurement(value: value, unit: UnitMass.kilograms))
     }
 
     private func ohpRecommendationText(

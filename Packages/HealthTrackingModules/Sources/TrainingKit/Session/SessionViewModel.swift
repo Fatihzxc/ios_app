@@ -39,6 +39,8 @@ public final class SessionViewModel {
     private var ohpTrainingWeekIndex = 1
     @ObservationIgnored
     private var ohpSafeAlternative: SessionExerciseSnapshot?
+    @ObservationIgnored
+    private var activePhaseOrderIndex = 1
 
     public init(
         repository: any TrainingRepository,
@@ -70,6 +72,7 @@ public final class SessionViewModel {
         ohpDecision = nil
         ohpTrainingWeekIndex = 1
         ohpSafeAlternative = nil
+        activePhaseOrderIndex = 1
 
         do {
             let existing = try await repository.fetchInProgressWorkoutSession()
@@ -98,6 +101,7 @@ public final class SessionViewModel {
             }
             completedHistoryByExerciseID = completedHistory
             weeklyPallofHistory = try await repository.fetchWeeklyPallofHistory()
+            try await prepareProgramGuidanceContext()
             try await prepareOHPSafety(plan: plan, session: session)
             state = .active(
                 SessionPresentation(
@@ -451,6 +455,19 @@ public final class SessionViewModel {
         return completedHistoryByExerciseID[exerciseID]?.first
     }
 
+    private func prepareProgramGuidanceContext() async throws {
+        guard let program = try await repository.fetchActiveProgram(),
+              let programState = try await repository.fetchProgramState(programID: program.id) else {
+            return
+        }
+
+        ohpTrainingWeekIndex = programState.trainingWeekIndex
+        let phases = try await repository.fetchProgramPhases(programID: program.id)
+        activePhaseOrderIndex = phases.first(where: {
+            $0.id == programState.currentPhaseId
+        })?.orderIndex ?? 1
+    }
+
     private func prepareOHPSafety(
         plan: SessionWorkoutPlanSnapshot,
         session: WorkoutSessionSnapshot
@@ -467,13 +484,6 @@ public final class SessionViewModel {
         ohpSafeAlternative = alternative
         completedHistoryByExerciseID[alternative.id] = try await repository
             .fetchCompletedExerciseHistory(exerciseTemplateID: alternative.id)
-
-        if let program = try await repository.fetchActiveProgram(),
-           let programState = try await repository.fetchProgramState(programID: program.id) {
-            ohpTrainingWeekIndex = programState.trainingWeekIndex
-        } else {
-            ohpTrainingWeekIndex = 1
-        }
 
         let ohpExerciseID = plan.exercises.first(where: {
             $0.progressionRule == .gradedEntryOHP
@@ -749,19 +759,26 @@ public final class SessionViewModel {
                 history: latestHistory
             )
         }
+        let composedGuidance = progressionGuidance.map {
+            Self.composeEquipmentAndPhaseGuidance(
+                $0,
+                for: exercise,
+                phaseOrderIndex: activePhaseOrderIndex
+            )
+        }
         currentSetDraft = SetDraft(
             workoutSessionID: presentation.session.id,
             exerciseTemplateID: exercise.id,
             setIndex: nextSetIndex,
             measurementKind: exercise.measurementKind,
             isWarmupSet: false,
-            guidance: progressionGuidance?.measurement,
+            guidance: composedGuidance?.measurement,
             sameSessionPrevious: sameSessionPrevious,
             priorSessionSameIndex: priorSessionSameIndex,
             seed: seed
         )
-        if let progressionGuidance {
-            recommendationReason = progressionGuidance.reason
+        if let composedGuidance {
+            recommendationReason = composedGuidance.reason
         } else if sameSessionPrevious != nil {
             recommendationReason = .sameSessionPrevious
         } else if priorSessionSameIndex != nil {
@@ -801,11 +818,64 @@ public final class SessionViewModel {
         }
     }
 
+    private static func composeEquipmentAndPhaseGuidance(
+        _ base: (measurement: SetMeasurementInput, reason: SessionRecommendationReason),
+        for exercise: SessionExerciseSnapshot,
+        phaseOrderIndex: Int
+    ) -> (measurement: SetMeasurementInput, reason: SessionRecommendationReason) {
+        let phaseDecision = PhaseTrainingFocus.resolve(
+            PhaseTrainingFocus.Input(
+                phaseOrderIndex: phaseOrderIndex,
+                exerciseFocus: exercise.progressionRule == .boneFocusHeavy
+                    ? .boneFocusHeavy
+                    : .standard,
+                templateRepLow: exercise.repLow,
+                baseSuggestedReps: base.measurement.reps
+            )
+        )
+        var measurement = base.measurement
+        measurement.reps = phaseDecision.suggestedReps
+
+        let ceilingDecision = EquipmentCeiling.apply(
+            EquipmentCeiling.Input(
+                suggestedWeightKg: measurement.weightKg,
+                suggestedReps: measurement.reps
+            )
+        )
+        measurement.weightKg = ceilingDecision.suggestedWeightKg
+        measurement.reps = ceilingDecision.suggestedReps
+
+        let phaseFocusApplied = phaseDecision.reason == .boneFocusLowerBound
+        if ceilingDecision.reason == .atCeiling {
+            let ohpReason: SessionOHPRecommendationReason?
+            if case let .ohp(reason) = base.reason {
+                ohpReason = reason
+            } else {
+                ohpReason = nil
+            }
+            return (
+                measurement,
+                .equipmentCeiling(
+                    SessionEquipmentCeilingReason(
+                        weightKg: EquipmentCeiling.maximumWeightKg,
+                        phaseFocusApplied: phaseFocusApplied,
+                        ohpReason: ohpReason
+                    )
+                )
+            )
+        }
+        if phaseFocusApplied {
+            return (measurement, .phaseTrainingFocus(.boneFocusLowerBound))
+        }
+        return (measurement, base.reason)
+    }
+
     private static func doubleProgressionGuidance(
         for exercise: SessionExerciseSnapshot,
         history: CompletedExerciseHistorySnapshot?
     ) -> (measurement: SetMeasurementInput, reason: SessionRecommendationReason)? {
-        guard exercise.progressionRule == .doubleProgression,
+        guard exercise.progressionRule == .doubleProgression ||
+                  exercise.progressionRule == .boneFocusHeavy,
               let repLow = exercise.repLow,
               let history else {
             return nil

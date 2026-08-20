@@ -461,7 +461,29 @@ public enum SessionRecommendationReason: Equatable, Sendable {
     case bodyweight(SessionBodyweightRecommendationReason)
     case weeklyPallof(SessionWeeklyPallofRecommendationReason)
     case ohp(SessionOHPRecommendationReason)
+    case equipmentCeiling(SessionEquipmentCeilingReason)
+    case phaseTrainingFocus(SessionPhaseTrainingFocusReason)
     case noPrefill
+}
+
+public struct SessionEquipmentCeilingReason: Equatable, Sendable {
+    public let weightKg: Double
+    public let phaseFocusApplied: Bool
+    public let ohpReason: SessionOHPRecommendationReason?
+
+    public init(
+        weightKg: Double,
+        phaseFocusApplied: Bool,
+        ohpReason: SessionOHPRecommendationReason? = nil
+    ) {
+        self.weightKg = weightKg
+        self.phaseFocusApplied = phaseFocusApplied
+        self.ohpReason = ohpReason
+    }
+}
+
+public enum SessionPhaseTrainingFocusReason: Equatable, Sendable {
+    case boneFocusLowerBound
 }
 
 public enum SessionDoubleProgressionHoldReason: Equatable, Sendable {
