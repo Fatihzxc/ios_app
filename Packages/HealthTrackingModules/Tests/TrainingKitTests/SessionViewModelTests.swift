@@ -363,6 +363,164 @@ final class SessionViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.currentSetDraft?.measurement.performedVariant, "plank")
     }
 
+    func testOHPQuestionBlocksWarmupWritesPriorSessionAndThenAllowsQualifiedIncrease() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        repository.configureProgram(week: 3)
+        let exercise = plan.exercises[0]
+        let prior = makeCompletedHistory(
+            dayID: plan.workoutDayID,
+            exerciseID: exercise.id,
+            ohpSymptomResponse: .notAsked,
+            measurements: [
+                .init(weightKg: 10, reps: 12, rir: 1),
+                .init(weightKg: 10, reps: 12, rir: 1),
+                .init(weightKg: 10, reps: 12, rir: 1),
+            ]
+        )
+        repository.completedExerciseHistory[exercise.id] = [prior]
+        let viewModel = makeViewModel(repository)
+
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+
+        XCTAssertEqual(
+            viewModel.ohpSafetyState,
+            .awaitingPreviousSessionResponse(
+                sessionID: prior.session.id,
+                entryVariant: .standingNeutral
+            )
+        )
+        await viewModel.skipWarmup()
+        XCTAssertEqual(requireActive(viewModel.state).progress.stage, .warmup)
+
+        await viewModel.answerPreviousOHPSymptom(.symptomFree)
+
+        XCTAssertEqual(
+            repository.ohpSymptomUpdates,
+            [
+                .init(
+                    id: prior.session.id,
+                    response: .symptomFree,
+                    date: now
+                ),
+            ]
+        )
+        XCTAssertEqual(
+            viewModel.ohpSafetyState,
+            .ready(entryVariant: .standingNeutral, loadIncreasePolicy: .allowed)
+        )
+
+        await viewModel.skipWarmup()
+
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.weightKg, 12.5)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.reps, 8)
+        XCTAssertEqual(
+            viewModel.currentSetDraft?.measurement.performedVariant,
+            "standing-neutral"
+        )
+        XCTAssertEqual(viewModel.recommendationReason, .ohp(.increaseAllowed))
+    }
+
+    func testOHPFirstSessionAndUncertainHistoryNeverIncreaseLoad() async {
+        let firstPlan = makeOHPPlan()
+        let firstRepository = FakeSessionRepository(plan: firstPlan)
+        firstRepository.configureProgram(week: 5)
+        let firstViewModel = makeViewModel(firstRepository)
+
+        await firstViewModel.start(workoutDayID: firstPlan.workoutDayID)
+        XCTAssertEqual(
+            firstViewModel.ohpSafetyState,
+            .ready(
+                entryVariant: .standingStandard,
+                loadIncreasePolicy: .blocked(.firstSession)
+            )
+        )
+        await firstViewModel.skipWarmup()
+        XCTAssertEqual(firstViewModel.currentSetDraft?.measurement.weightKg, 10)
+        XCTAssertEqual(firstViewModel.currentSetDraft?.measurement.reps, 8)
+        XCTAssertEqual(
+            firstViewModel.currentSetDraft?.measurement.performedVariant,
+            "standing-standard"
+        )
+        XCTAssertEqual(firstViewModel.recommendationReason, .ohp(.firstSession))
+
+        let heldPlan = makeOHPPlan()
+        let heldRepository = FakeSessionRepository(plan: heldPlan)
+        heldRepository.configureProgram(week: 4)
+        let heldExercise = heldPlan.exercises[0]
+        heldRepository.completedExerciseHistory[heldExercise.id] = [
+            makeCompletedHistory(
+                dayID: heldPlan.workoutDayID,
+                exerciseID: heldExercise.id,
+                ohpSymptomResponse: .uncertain,
+                measurements: [
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                ]
+            ),
+        ]
+        let heldViewModel = makeViewModel(heldRepository)
+
+        await heldViewModel.start(workoutDayID: heldPlan.workoutDayID)
+        await heldViewModel.skipWarmup()
+
+        XCTAssertEqual(heldViewModel.currentSetDraft?.measurement.weightKg, 10)
+        XCTAssertNotEqual(heldViewModel.currentSetDraft?.measurement.weightKg, 12.5)
+        XCTAssertEqual(
+            heldViewModel.recommendationReason,
+            .ohp(.previousResponseUncertain)
+        )
+    }
+
+    func testCurrentOHPSymptomWritesCurrentSessionAndRoutesOnlyTheExerciseToAlternative() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        repository.configureProgram(week: 5)
+        let exercise = plan.exercises[0]
+        repository.completedExerciseHistory[exercise.id] = [
+            makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                ohpSymptomResponse: .symptomFree,
+                measurements: [
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                ]
+            ),
+        ]
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let currentSessionID = requireActive(viewModel.state).session.id
+
+        await viewModel.reportCurrentOHPSymptom()
+
+        XCTAssertEqual(
+            repository.ohpSymptomUpdates.last,
+            .init(id: currentSessionID, response: .symptomsPresent, date: now)
+        )
+        XCTAssertEqual(
+            viewModel.ohpSafetyState,
+            .stopped(alternative: repository.ohpSafeAlternative)
+        )
+        XCTAssertEqual(viewModel.displayedExercise?.id, repository.ohpSafeAlternative.id)
+        XCTAssertEqual(
+            viewModel.currentSetDraft?.exerciseTemplateID,
+            repository.ohpSafeAlternative.id
+        )
+        XCTAssertEqual(
+            requireActive(viewModel.state).progress.currentExerciseTemplateID,
+            exercise.id,
+            "The safety stop must not corrupt the persisted Day B exercise order."
+        )
+        XCTAssertEqual(
+            requireActive(viewModel.state).session.ohpSymptomResponse,
+            .symptomsPresent
+        )
+    }
+
     func testSummaryValuesStayNilUntilChosenAndSaveOnlyExplicitInput() async {
         let repository = FakeSessionRepository(plan: makePlan())
         let viewModel = makeViewModel(repository)
@@ -534,6 +692,7 @@ final class SessionViewModelTests: XCTestCase {
     private func makeCompletedHistory(
         dayID: UUID,
         exerciseID: UUID,
+        ohpSymptomResponse: OHPSymptomResponse = .notAsked,
         measurements: [SetMeasurementInput]
     ) -> CompletedExerciseHistorySnapshot {
         let completedAt = now.addingTimeInterval(-3_600)
@@ -541,7 +700,9 @@ final class SessionViewModelTests: XCTestCase {
             id: uuid("00000000-0000-0000-0000-000000000730"),
             date: completedAt,
             status: .completed,
-            workoutDayTemplateID: dayID
+            workoutDayTemplateID: dayID,
+            ohpSymptomResponse: ohpSymptomResponse,
+            ohpSymptomCheckedAt: ohpSymptomResponse == .notAsked ? nil : completedAt
         )
         let setLogs = measurements.enumerated().map { offset, measurement in
             SetLogSnapshot(
@@ -562,6 +723,42 @@ final class SessionViewModelTests: XCTestCase {
             )
         }
         return CompletedExerciseHistorySnapshot(session: session, setLogs: setLogs)
+    }
+
+    private func makeOHPPlan() -> SessionWorkoutPlanSnapshot {
+        let dayID = uuid("00000000-0000-0000-0000-000000000750")
+        return SessionWorkoutPlanSnapshot(
+            workoutDayID: dayID,
+            name: "OHP günü",
+            focus: "Kademeli omuz presi",
+            warmupItems: [
+                .init(
+                    id: uuid("00000000-0000-0000-0000-000000000751"),
+                    title: "Omuz hazırlığı",
+                    detail: "8 tekrar",
+                    orderIndex: 1
+                ),
+            ],
+            exercises: [
+                .init(
+                    id: uuid("00000000-0000-0000-0000-000000000752"),
+                    name: "DB Overhead Press",
+                    orderIndex: 1,
+                    targetSets: 3,
+                    repLow: 8,
+                    repHigh: 12,
+                    rirLow: 1,
+                    rirHigh: 2,
+                    allowFailure: false,
+                    cues: "Kontrollü uygula",
+                    safetyNote: "Semptom olursa hareketi durdur",
+                    startingWeightKg: 10,
+                    progressionRule: .gradedEntryOHP,
+                    measurementKind: .weightReps
+                ),
+            ],
+            cooldownItems: []
+        )
     }
 
     private func makePallofPlan() -> SessionWorkoutPlanSnapshot {
@@ -646,6 +843,12 @@ private final class FakeSessionRepository: TrainingRepository {
         let date: Date
     }
 
+    struct OHPSymptomUpdate: Equatable {
+        let id: UUID
+        let response: OHPSymptomResponse
+        let date: Date
+    }
+
     let plan: SessionWorkoutPlanSnapshot
     var inProgressSession: WorkoutSessionSnapshot?
     var progress: WorkoutSessionProgressSnapshot?
@@ -657,6 +860,24 @@ private final class FakeSessionRepository: TrainingRepository {
     )
     var saveSetOutcomes: [Result<Void, Error>] = []
     var fetchPlanError: Error?
+    var activeProgram: Program?
+    var programState: ProgramState?
+    var ohpSafeAlternative = SessionExerciseSnapshot(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000753")!,
+        name: "Half-Kneeling DB Press",
+        orderIndex: 5,
+        targetSets: 3,
+        repLow: 8,
+        repHigh: 10,
+        rirLow: 1,
+        rirHigh: 2,
+        allowFailure: false,
+        cues: "Yarım diz çökerek kontrollü uygula",
+        safetyNote: "OHP güvenli alternatifi",
+        startingWeightKg: 7.5,
+        progressionRule: .doubleProgression,
+        measurementKind: .weightReps
+    )
 
     private(set) var createRequests: [WorkoutSessionCreateRequest] = []
     private(set) var transitions: [Transition] = []
@@ -664,20 +885,32 @@ private final class FakeSessionRepository: TrainingRepository {
     private(set) var saveSetRequests: [SetLogSaveRequest] = []
     private(set) var deletedSessionIDs: [UUID] = []
     private(set) var summaryUpdates: [SummaryUpdate] = []
+    private(set) var ohpSymptomUpdates: [OHPSymptomUpdate] = []
 
     init(plan: SessionWorkoutPlanSnapshot) {
         self.plan = plan
     }
 
     func fetchUserProfile() async throws -> UserProfile? { nil }
-    func fetchActiveProgram() async throws -> Program? { nil }
+    func fetchActiveProgram() async throws -> Program? { activeProgram }
     func fetchProgramPhases(programID: UUID) async throws -> [ProgramPhase] { [] }
     func fetchWorkoutDays(programID: UUID) async throws -> [WorkoutDayTemplate] { [] }
     func fetchExerciseTemplates(workoutDayID: UUID) async throws -> [ExerciseTemplate] { [] }
     func fetchWarmupItems(workoutDayID: UUID) async throws -> [WarmupItem] { [] }
     func fetchCooldownItems(workoutDayID: UUID) async throws -> [CooldownItem] { [] }
     func fetchHealthCheckReminders() async throws -> [HealthCheckReminder] { [] }
-    func fetchProgramState(programID: UUID) async throws -> ProgramState? { nil }
+    func fetchProgramState(programID: UUID) async throws -> ProgramState? {
+        programState?.programId == programID ? programState : nil
+    }
+
+    func configureProgram(week: Int) {
+        let programID = UUID(uuidString: "00000000-0000-0000-0000-000000000754")!
+        activeProgram = Program(id: programID, name: "OHP programı", isActive: true)
+        programState = ProgramState(
+            programId: programID,
+            trainingWeekIndex: week
+        )
+    }
 
     func createWorkoutSession(
         _ request: WorkoutSessionCreateRequest
@@ -767,6 +1000,40 @@ private final class FakeSessionRepository: TrainingRepository {
 
     func fetchWeeklyPallofHistory() async throws -> WeeklyPallofHistorySnapshot {
         weeklyPallofHistory
+    }
+
+    func fetchOHPSafeAlternative() async throws -> SessionExerciseSnapshot {
+        ohpSafeAlternative
+    }
+
+    func updateWorkoutSessionOHPSymptomResponse(
+        id: UUID,
+        response: OHPSymptomResponse,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot {
+        ohpSymptomUpdates.append(.init(id: id, response: response, date: date))
+        let historySession = completedExerciseHistory.values
+            .flatMap { $0 }
+            .map(\.session)
+            .first { $0.id == id }
+        let source = inProgressSession?.id == id ? inProgressSession : historySession
+        guard let source else { throw FakeSessionError.load }
+        let updated = WorkoutSessionSnapshot(
+            id: source.id,
+            createdAt: source.createdAt,
+            updatedAt: date,
+            date: source.date,
+            status: source.status,
+            workoutDayTemplateID: source.workoutDayTemplateID,
+            perceivedRecovery: source.perceivedRecovery,
+            note: source.note,
+            ohpSymptomResponse: response,
+            ohpSymptomCheckedAt: date
+        )
+        if inProgressSession?.id == id {
+            inProgressSession = updated
+        }
+        return updated
     }
 
     func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot {

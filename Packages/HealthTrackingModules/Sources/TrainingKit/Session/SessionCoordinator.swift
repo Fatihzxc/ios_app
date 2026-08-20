@@ -66,6 +66,18 @@ public final class SessionCoordinator {
         )
     }
 
+    public func recordOHPSymptomResponse(
+        sessionID: UUID,
+        response: OHPSymptomResponse,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot {
+        try await repository.updateWorkoutSessionOHPSymptomResponse(
+            id: sessionID,
+            response: response,
+            at: date
+        )
+    }
+
     private func inferredRestore(
         session: WorkoutSessionSnapshot,
         exercises suppliedExercises: [SessionExerciseSnapshot]? = nil,

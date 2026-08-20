@@ -64,7 +64,7 @@ final class AppDependencies: AppDependencyLoading {
                 trainingRepository = repository
                 shouldLoadFoundation = false
             case .seeded, .fatalConfiguration, .sessionFlow, .sessionFamilies, .sessionResume,
-                 .progressionMissingRIR, .weeklyPallof:
+                 .progressionMissingRIR, .weeklyPallof, .ohpSafety:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -113,6 +113,9 @@ private enum UITestSessionFixture {
     private static let progressionSessionID = uuid("00000000-0000-4000-8000-00000000f030")
     private static let weeklyPallofSessionID = uuid("00000000-0000-4000-8000-00000000f040")
     private static let weeklyPallofProgressID = uuid("00000000-0000-4000-8000-00000000f041")
+    private static let ohpPriorSessionID = uuid("00000000-0000-4000-8000-00000000f050")
+    private static let ohpCurrentSessionID = uuid("00000000-0000-4000-8000-00000000f051")
+    private static let ohpCurrentProgressID = uuid("00000000-0000-4000-8000-00000000f052")
     private static let installedAt = Date(timeIntervalSince1970: 1_700_000_000)
 
     static func install(scenario: AppUITestScenario, in modelContext: ModelContext) throws {
@@ -125,6 +128,8 @@ private enum UITestSessionFixture {
             try installMissingRIRHistory(in: modelContext)
         case .weeklyPallof:
             try installWeeklyPallofProgress(in: modelContext)
+        case .ohpSafety:
+            try installOHPSafety(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow:
             return
         }
@@ -349,6 +354,78 @@ private enum UITestSessionFixture {
         try modelContext.save()
     }
 
+    private static func installOHPSafety(in modelContext: ModelContext) throws {
+        let existingSessions = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
+        guard !existingSessions.contains(where: { $0.id == ohpCurrentSessionID }) else {
+            return
+        }
+        guard let programState = try modelContext.fetch(FetchDescriptor<ProgramState>())
+            .first(where: { $0.id == SeedIdentifiers.programState }) else {
+            throw UITestSessionFixtureError.missingSeededProgram
+        }
+        programState.trainingWeekIndex = 3
+        programState.updatedAt = installedAt
+
+        let priorDate = installedAt.addingTimeInterval(-7 * 24 * 60 * 60)
+        let prior = WorkoutSession(
+            id: ohpPriorSessionID,
+            createdAt: priorDate,
+            updatedAt: priorDate,
+            date: priorDate,
+            status: .completed,
+            workoutDayTemplateId: SeedIdentifiers.dayB,
+            ohpSymptomResponse: .notAsked
+        )
+        modelContext.insert(prior)
+        for offset in 0..<3 {
+            modelContext.insert(
+                SetLog(
+                    id: uuid(
+                        String(
+                            format: "00000000-0000-4000-8000-%012d",
+                            90_053 + offset
+                        )
+                    ),
+                    createdAt: priorDate,
+                    updatedAt: priorDate,
+                    exerciseTemplateId: SeedIdentifiers.dbOverheadPress,
+                    setIndex: offset + 1,
+                    weightKg: 10,
+                    reps: 12,
+                    rir: 1,
+                    isWarmupSet: false,
+                    completedAt: priorDate,
+                    workoutSession: prior
+                )
+            )
+        }
+
+        modelContext.insert(
+            WorkoutSession(
+                id: ohpCurrentSessionID,
+                createdAt: installedAt,
+                updatedAt: installedAt,
+                date: installedAt,
+                status: .inProgress,
+                workoutDayTemplateId: SeedIdentifiers.dayB
+            )
+        )
+        modelContext.insert(
+            WorkoutSessionProgress(
+                id: ohpCurrentProgressID,
+                createdAt: installedAt,
+                updatedAt: installedAt,
+                workoutSessionId: ohpCurrentSessionID,
+                stage: .warmup,
+                completedWarmupItemIdsData: WorkoutSessionProgressCodec.emptyPayload,
+                completedCooldownItemIdsData: WorkoutSessionProgressCodec.emptyPayload,
+                warmupDisposition: .pending,
+                cooldownDisposition: .pending
+            )
+        )
+        try modelContext.save()
+    }
+
     private static func uuid(_ value: String) -> UUID {
         UUID(uuidString: value)!
     }
@@ -489,6 +566,22 @@ private final class UITestFoundationRepository: TrainingRepository {
 
     func fetchWeeklyPallofHistory() async throws -> WeeklyPallofHistorySnapshot {
         try await repository.fetchWeeklyPallofHistory()
+    }
+
+    func fetchOHPSafeAlternative() async throws -> SessionExerciseSnapshot {
+        try await repository.fetchOHPSafeAlternative()
+    }
+
+    func updateWorkoutSessionOHPSymptomResponse(
+        id: UUID,
+        response: OHPSymptomResponse,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot {
+        try await repository.updateWorkoutSessionOHPSymptomResponse(
+            id: id,
+            response: response,
+            at: date
+        )
     }
 
     func updateWorkoutSessionSummary(

@@ -1,3 +1,4 @@
+import CoreModels
 import DesignSystem
 import Foundation
 import SwiftUI
@@ -19,7 +20,8 @@ public struct ExerciseStageView: View {
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppSpacing.large) {
-                if let exercise = presentation.currentExercise {
+                if let exercise = viewModel.displayedExercise {
+                    ohpSafetyStop
                     exerciseHeader(exercise)
                     exerciseGuidance(exercise)
                     if let draft = viewModel.currentSetDraft {
@@ -75,7 +77,7 @@ public struct ExerciseStageView: View {
                 String(
                     format: localized("session.exercise.completedSets"),
                     locale: .current,
-                    Int64(presentation.completedWorkingSetsForCurrentExercise.count),
+                    Int64(viewModel.completedWorkingSetsForDisplayedExercise.count),
                     Int64(exercise.targetSets)
                 )
             )
@@ -87,6 +89,8 @@ public struct ExerciseStageView: View {
 
     private func exerciseGuidance(_ exercise: SessionExerciseSnapshot) -> some View {
         VStack(spacing: AppSpacing.standard) {
+            ohpVariant
+
             AppCard {
                 VStack(alignment: .leading, spacing: AppSpacing.compact) {
                     Text(localized("session.exercise.recommendation.heading"))
@@ -138,6 +142,72 @@ public struct ExerciseStageView: View {
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
             }
+
+            if viewModel.canReportCurrentOHPSymptom {
+                Button(role: .destructive) {
+                    Task { await viewModel.reportCurrentOHPSymptom() }
+                } label: {
+                    Label(
+                        localized("session.ohp.currentSymptom"),
+                        systemImage: "hand.raised.fill"
+                    )
+                    .font(AppTypography.label)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("session.ohp.current-symptom")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var ohpSafetyStop: some View {
+        if presentation.currentExercise?.progressionRule == .gradedEntryOHP,
+           case .stopped = viewModel.ohpSafetyState {
+            AppCard {
+                VStack(alignment: .leading, spacing: AppSpacing.compact) {
+                    StatusPill(
+                        text: localized("session.ohp.stop.title"),
+                        systemImage: "hand.raised.fill",
+                        style: .danger
+                    )
+                    Text(localized("session.ohp.stop.message"))
+                        .font(AppTypography.body)
+                        .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(localized("session.ohp.medicalDisclaimer"))
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("session.ohp.stop")
+        }
+    }
+
+    @ViewBuilder
+    private var ohpVariant: some View {
+        if viewModel.canReportCurrentOHPSymptom {
+            switch viewModel.ohpSafetyState {
+            case let .awaitingPreviousSessionResponse(_, entryVariant),
+                 let .ready(entryVariant, _):
+                AppCard {
+                    HStack(spacing: AppSpacing.compact) {
+                        Image(systemName: "lock.shield")
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(localized("session.ohp.variant.heading"))
+                                .font(AppTypography.caption)
+                            Text(ohpVariantText(entryVariant))
+                                .font(AppTypography.label)
+                                .accessibilityIdentifier("session.ohp.variant")
+                        }
+                    }
+                    .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
+                }
+            case .notRequired, .stopped:
+                EmptyView()
+            }
         }
     }
 
@@ -185,8 +255,42 @@ public struct ExerciseStageView: View {
             return bodyweightText(reason)
         case let .weeklyPallof(reason):
             return weeklyPallofText(reason)
+        case let .ohp(reason):
+            return ohpRecommendationText(reason)
         case .noPrefill:
             return localized("session.recommendation.none")
+        }
+    }
+
+    private func ohpRecommendationText(
+        _ reason: SessionOHPRecommendationReason
+    ) -> String {
+        switch reason {
+        case .firstSession:
+            localized("session.recommendation.ohp.firstSession")
+        case .previousResponseRequired:
+            localized("session.recommendation.ohp.previousResponseRequired")
+        case .previousSymptomsPresent:
+            localized("session.recommendation.ohp.previousSymptomsPresent")
+        case .previousResponseUncertain:
+            localized("session.recommendation.ohp.previousResponseUncertain")
+        case .currentSymptomsPresent:
+            localized("session.recommendation.ohp.currentSymptomsPresent")
+        case .increaseAllowed:
+            localized("session.recommendation.ohp.increaseAllowed")
+        case let .progressionHold(holdReason):
+            doubleProgressionHoldText(holdReason)
+        }
+    }
+
+    private func ohpVariantText(_ variant: SessionOHPEntryVariant) -> String {
+        switch variant {
+        case .seatedNeutral:
+            localized("session.ohp.variant.seatedNeutral")
+        case .standingNeutral:
+            localized("session.ohp.variant.standingNeutral")
+        case .standingStandard:
+            localized("session.ohp.variant.standingStandard")
         }
     }
 

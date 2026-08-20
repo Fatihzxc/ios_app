@@ -433,6 +433,7 @@ public enum SessionViewFailure: Equatable, Sendable {
     case completion
     case deletion
     case summary
+    case ohpSafety
 }
 
 public enum SessionViewState: Equatable, Sendable {
@@ -459,6 +460,7 @@ public enum SessionRecommendationReason: Equatable, Sendable {
     case doubleProgressionHold(SessionDoubleProgressionHoldReason)
     case bodyweight(SessionBodyweightRecommendationReason)
     case weeklyPallof(SessionWeeklyPallofRecommendationReason)
+    case ohp(SessionOHPRecommendationReason)
     case noPrefill
 }
 
@@ -483,6 +485,48 @@ public enum SessionBodyweightRecommendationReason: Equatable, Sendable {
 public enum SessionWeeklyPallofRecommendationReason: Equatable, Sendable {
     case pallofDue
     case pallofCompletedThisWeek
+}
+
+public enum SessionOHPEntryVariant: String, Equatable, Sendable {
+    case seatedNeutral = "seated-neutral"
+    case standingNeutral = "standing-neutral"
+    case standingStandard = "standing-standard"
+}
+
+public enum SessionOHPLoadIncreaseBlockReason: Equatable, Sendable {
+    case firstSession
+    case previousResponseRequired
+    case previousSymptomsPresent
+    case previousResponseUncertain
+    case currentSymptomsPresent
+}
+
+public enum SessionOHPLoadIncreasePolicy: Equatable, Sendable {
+    case allowed
+    case blocked(SessionOHPLoadIncreaseBlockReason)
+}
+
+public enum SessionOHPSafetyState: Equatable, Sendable {
+    case notRequired
+    case awaitingPreviousSessionResponse(
+        sessionID: UUID,
+        entryVariant: SessionOHPEntryVariant
+    )
+    case ready(
+        entryVariant: SessionOHPEntryVariant,
+        loadIncreasePolicy: SessionOHPLoadIncreasePolicy
+    )
+    case stopped(alternative: SessionExerciseSnapshot)
+}
+
+public enum SessionOHPRecommendationReason: Equatable, Sendable {
+    case firstSession
+    case previousResponseRequired
+    case previousSymptomsPresent
+    case previousResponseUncertain
+    case currentSymptomsPresent
+    case increaseAllowed
+    case progressionHold(SessionDoubleProgressionHoldReason)
 }
 
 public enum SessionVariantOption: String, CaseIterable, Equatable, Hashable, Sendable {

@@ -37,6 +37,12 @@ public protocol TrainingRepository: AnyObject {
         exerciseTemplateID: UUID
     ) async throws -> [CompletedExerciseHistorySnapshot]
     func fetchWeeklyPallofHistory() async throws -> WeeklyPallofHistorySnapshot
+    func fetchOHPSafeAlternative() async throws -> SessionExerciseSnapshot
+    func updateWorkoutSessionOHPSymptomResponse(
+        id: UUID,
+        response: OHPSymptomResponse,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot
     func updateWorkoutSessionSummary(
         id: UUID,
         perceivedRecovery: Int?,

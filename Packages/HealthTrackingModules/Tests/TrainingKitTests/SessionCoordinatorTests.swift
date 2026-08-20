@@ -319,6 +319,18 @@ private final class FakeLifecycleRepository: TrainingRepository {
         )
     }
 
+    func fetchOHPSafeAlternative() async throws -> SessionExerciseSnapshot {
+        throw FakeLifecycleError.unexpectedCall("fetchOHPSafeAlternative")
+    }
+
+    func updateWorkoutSessionOHPSymptomResponse(
+        id: UUID,
+        response: OHPSymptomResponse,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot {
+        throw FakeLifecycleError.unexpectedCall("updateWorkoutSessionOHPSymptomResponse")
+    }
+
     func updateWorkoutSessionSummary(
         id: UUID,
         perceivedRecovery: Int?,

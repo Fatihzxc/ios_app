@@ -589,6 +589,18 @@ private final class FakeTrainingRepository: TrainingRepository {
         throw FakeRepositoryError.unexpectedCall("fetchWeeklyPallofHistory")
     }
 
+    func fetchOHPSafeAlternative() async throws -> SessionExerciseSnapshot {
+        throw FakeRepositoryError.unexpectedCall("fetchOHPSafeAlternative")
+    }
+
+    func updateWorkoutSessionOHPSymptomResponse(
+        id: UUID,
+        response: OHPSymptomResponse,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot {
+        throw FakeRepositoryError.unexpectedCall("updateWorkoutSessionOHPSymptomResponse")
+    }
+
     func updateWorkoutSessionSummary(
         id: UUID,
         perceivedRecovery: Int?,

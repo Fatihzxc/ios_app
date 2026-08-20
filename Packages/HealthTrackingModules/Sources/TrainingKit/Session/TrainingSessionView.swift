@@ -95,40 +95,46 @@ public struct TrainingSessionView: View {
 
     @ViewBuilder
     private func activeContent(_ presentation: SessionPresentation) -> some View {
-        switch presentation.progress.stage {
-        case .warmup:
-            WarmupStageView(
-                presentation: presentation,
-                toggleItem: { id in
-                    Task { await viewModel.toggleWarmupItem(id: id) }
-                },
-                complete: {
-                    Task { await viewModel.completeWarmup() }
-                },
-                skip: {
-                    Task { await viewModel.skipWarmup() }
-                }
-            )
-        case .movement:
-            ExerciseStageView(viewModel: viewModel, presentation: presentation)
-        case .cooldown:
-            CooldownStageView(
-                presentation: presentation,
-                toggleItem: { id in
-                    Task { await viewModel.toggleCooldownItem(id: id) }
-                },
-                goBack: {
-                    Task { await viewModel.goBack() }
-                },
-                complete: {
-                    Task { await viewModel.completeCooldown() }
-                },
-                skip: {
-                    Task { await viewModel.skipCooldown() }
-                }
-            )
-        case .summary:
-            SessionSummaryView(viewModel: viewModel, presentation: presentation)
+        if case .awaitingPreviousSessionResponse = viewModel.ohpSafetyState {
+            OHPPriorSymptomQuestionView { response in
+                Task { await viewModel.answerPreviousOHPSymptom(response) }
+            }
+        } else {
+            switch presentation.progress.stage {
+            case .warmup:
+                WarmupStageView(
+                    presentation: presentation,
+                    toggleItem: { id in
+                        Task { await viewModel.toggleWarmupItem(id: id) }
+                    },
+                    complete: {
+                        Task { await viewModel.completeWarmup() }
+                    },
+                    skip: {
+                        Task { await viewModel.skipWarmup() }
+                    }
+                )
+            case .movement:
+                ExerciseStageView(viewModel: viewModel, presentation: presentation)
+            case .cooldown:
+                CooldownStageView(
+                    presentation: presentation,
+                    toggleItem: { id in
+                        Task { await viewModel.toggleCooldownItem(id: id) }
+                    },
+                    goBack: {
+                        Task { await viewModel.goBack() }
+                    },
+                    complete: {
+                        Task { await viewModel.completeCooldown() }
+                    },
+                    skip: {
+                        Task { await viewModel.skipCooldown() }
+                    }
+                )
+            case .summary:
+                SessionSummaryView(viewModel: viewModel, presentation: presentation)
+            }
         }
     }
 

@@ -518,6 +518,53 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
         )
     }
 
+    public func fetchOHPSafeAlternative() async throws -> SessionExerciseSnapshot {
+        let matches = try modelContext.fetch(FetchDescriptor<ExerciseTemplate>())
+            .filter { $0.id == SeedIdentifiers.halfKneelingDBPress }
+        guard !matches.isEmpty else {
+            throw TrainingRepositoryIntegrityError.missingExerciseTemplate(
+                id: SeedIdentifiers.halfKneelingDBPress
+            )
+        }
+        guard matches.count == 1, let alternative = matches.first else {
+            throw TrainingRepositoryIntegrityError.duplicateExerciseTemplates(
+                id: SeedIdentifiers.halfKneelingDBPress,
+                count: matches.count
+            )
+        }
+        return Self.exerciseSnapshot(alternative)
+    }
+
+    public func updateWorkoutSessionOHPSymptomResponse(
+        id: UUID,
+        response: OHPSymptomResponse,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot {
+        var savedSnapshot: WorkoutSessionSnapshot?
+        try modelContext.transaction {
+            let matches = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
+                .filter { $0.id == id }
+            guard let session = matches.first else {
+                throw TrainingRepositoryMutationError.workoutSessionNotFound(id: id)
+            }
+            guard matches.count == 1 else {
+                throw TrainingRepositoryIntegrityError.duplicateWorkoutSessions(
+                    id: id,
+                    count: matches.count
+                )
+            }
+            session.ohpSymptomResponse = response
+            session.ohpSymptomCheckedAt = date
+            session.updatedAt = date
+            try modelContext.save()
+            savedSnapshot = Self.sessionSnapshot(session)
+        }
+        guard let savedSnapshot else {
+            throw TrainingRepositoryIntegrityError.transactionDidNotProduceSessionSnapshot
+        }
+        return savedSnapshot
+    }
+
     public func updateWorkoutSessionSummary(
         id: UUID,
         perceivedRecovery: Int?,

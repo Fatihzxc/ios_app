@@ -11,6 +11,7 @@ public final class SessionViewModel {
     public private(set) var currentVariantOptions: [SessionVariantOption] = []
     public private(set) var setSaveState: SessionSetSaveState = .idle
     public private(set) var recommendationReason: SessionRecommendationReason = .noPrefill
+    public private(set) var ohpSafetyState: SessionOHPSafetyState = .notRequired
     public private(set) var isDeleteConfirmationPresented = false
     public private(set) var summaryRecovery: Int?
     public private(set) var summaryNote = ""
@@ -32,6 +33,12 @@ public final class SessionViewModel {
         eligibleExerciseTemplateIDs: [],
         completions: []
     )
+    @ObservationIgnored
+    private var ohpDecision: OHPSafetyGate.Decision?
+    @ObservationIgnored
+    private var ohpTrainingWeekIndex = 1
+    @ObservationIgnored
+    private var ohpSafeAlternative: SessionExerciseSnapshot?
 
     public init(
         repository: any TrainingRepository,
@@ -50,6 +57,7 @@ public final class SessionViewModel {
         currentVariantOptions = []
         setSaveState = .idle
         recommendationReason = .noPrefill
+        ohpSafetyState = .notRequired
         isDeleteConfirmationPresented = false
         summaryRecovery = nil
         summaryNote = ""
@@ -59,6 +67,9 @@ public final class SessionViewModel {
             eligibleExerciseTemplateIDs: [],
             completions: []
         )
+        ohpDecision = nil
+        ohpTrainingWeekIndex = 1
+        ohpSafeAlternative = nil
 
         do {
             let existing = try await repository.fetchInProgressWorkoutSession()
@@ -87,6 +98,7 @@ public final class SessionViewModel {
             }
             completedHistoryByExerciseID = completedHistory
             weeklyPallofHistory = try await repository.fetchWeeklyPallofHistory()
+            try await prepareOHPSafety(plan: plan, session: session)
             state = .active(
                 SessionPresentation(
                     session: session,
@@ -105,11 +117,13 @@ public final class SessionViewModel {
             state = .failed(.load)
             currentSetDraft = nil
             currentVariantOptions = []
+            ohpSafetyState = .notRequired
         }
     }
 
     public func toggleWarmupItem(id: UUID) async {
         guard let presentation = activePresentation,
+              !isAwaitingPreviousOHPSymptomResponse,
               presentation.progress.stage == .warmup,
               presentation.plan.warmupItems.contains(where: { $0.id == id }) else {
             return
@@ -135,6 +149,96 @@ public final class SessionViewModel {
 
     public func skipWarmup() async {
         await leaveWarmup(disposition: .skipped)
+    }
+
+    public var displayedExercise: SessionExerciseSnapshot? {
+        guard let presentation = activePresentation,
+              let currentExercise = presentation.currentExercise else {
+            return nil
+        }
+        guard currentExercise.progressionRule == .gradedEntryOHP,
+              case let .stopped(alternative) = ohpSafetyState else {
+            return currentExercise
+        }
+        return alternative
+    }
+
+    public var completedWorkingSetsForDisplayedExercise: [SetLogSnapshot] {
+        guard let presentation = activePresentation,
+              let displayedExercise else {
+            return []
+        }
+        return presentation.setLogs
+            .filter {
+                !$0.isWarmupSet &&
+                    $0.exerciseTemplateID == displayedExercise.id
+            }
+            .sorted { lhs, rhs in
+                if lhs.setIndex != rhs.setIndex {
+                    return lhs.setIndex < rhs.setIndex
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+    }
+
+    public var canReportCurrentOHPSymptom: Bool {
+        guard activePresentation?.currentExercise?.progressionRule == .gradedEntryOHP else {
+            return false
+        }
+        if case .stopped = ohpSafetyState {
+            return false
+        }
+        return true
+    }
+
+    public func answerPreviousOHPSymptom(_ response: OHPSymptomResponse) async {
+        guard response != .notAsked,
+              case let .awaitingPreviousSessionResponse(sessionID, _) = ohpSafetyState,
+              let presentation = activePresentation else {
+            return
+        }
+        do {
+            let updatedPrevious = try await coordinator.recordOHPSymptomResponse(
+                sessionID: sessionID,
+                response: response,
+                at: now()
+            )
+            replaceCompletedHistorySession(updatedPrevious)
+            resolveOHPSafety(
+                currentSession: presentation.session,
+                previousSession: updatedPrevious
+            )
+            configureDraft()
+        } catch {
+            state = .failed(.ohpSafety)
+            currentSetDraft = nil
+            currentVariantOptions = []
+        }
+    }
+
+    public func reportCurrentOHPSymptom() async {
+        guard canReportCurrentOHPSymptom,
+              let presentation = activePresentation else {
+            return
+        }
+        do {
+            let updatedCurrent = try await coordinator.recordOHPSymptomResponse(
+                sessionID: presentation.session.id,
+                response: .symptomsPresent,
+                at: now()
+            )
+            replaceActiveSession(updatedCurrent)
+            let previous = latestCompletedOHPHistory?.session
+            resolveOHPSafety(
+                currentSession: updatedCurrent,
+                previousSession: previous
+            )
+            configureDraft()
+        } catch {
+            state = .failed(.ohpSafety)
+            currentSetDraft = nil
+            currentVariantOptions = []
+        }
     }
 
     public func advanceExercise() async {
@@ -331,8 +435,142 @@ public final class SessionViewModel {
         return presentation
     }
 
+    private var isAwaitingPreviousOHPSymptomResponse: Bool {
+        if case .awaitingPreviousSessionResponse = ohpSafetyState {
+            return true
+        }
+        return false
+    }
+
+    private var latestCompletedOHPHistory: CompletedExerciseHistorySnapshot? {
+        guard let exerciseID = activePresentation?.plan.exercises.first(where: {
+            $0.progressionRule == .gradedEntryOHP
+        })?.id else {
+            return nil
+        }
+        return completedHistoryByExerciseID[exerciseID]?.first
+    }
+
+    private func prepareOHPSafety(
+        plan: SessionWorkoutPlanSnapshot,
+        session: WorkoutSessionSnapshot
+    ) async throws {
+        guard plan.exercises.contains(where: {
+            $0.progressionRule == .gradedEntryOHP
+        }) else {
+            ohpDecision = nil
+            ohpSafetyState = .notRequired
+            return
+        }
+
+        let alternative = try await repository.fetchOHPSafeAlternative()
+        ohpSafeAlternative = alternative
+        completedHistoryByExerciseID[alternative.id] = try await repository
+            .fetchCompletedExerciseHistory(exerciseTemplateID: alternative.id)
+
+        if let program = try await repository.fetchActiveProgram(),
+           let programState = try await repository.fetchProgramState(programID: program.id) {
+            ohpTrainingWeekIndex = programState.trainingWeekIndex
+        } else {
+            ohpTrainingWeekIndex = 1
+        }
+
+        let ohpExerciseID = plan.exercises.first(where: {
+            $0.progressionRule == .gradedEntryOHP
+        })?.id
+        let previousSession = ohpExerciseID
+            .flatMap { completedHistoryByExerciseID[$0]?.first?.session }
+        resolveOHPSafety(
+            currentSession: session,
+            previousSession: previousSession
+        )
+    }
+
+    private func resolveOHPSafety(
+        currentSession: WorkoutSessionSnapshot,
+        previousSession: WorkoutSessionSnapshot?
+    ) {
+        let outcome = OHPSafetyGate.resolve(
+            OHPSafetyGate.Input(
+                trainingWeekIndex: ohpTrainingWeekIndex,
+                previousSession: previousSession.map {
+                    OHPSafetyGate.PreviousSession(
+                        id: $0.id,
+                        response: $0.ohpSymptomResponse.guidanceResponse
+                    )
+                },
+                currentSymptomsPresent: currentSession.ohpSymptomResponse == .symptomsPresent
+            )
+        )
+        guard case let .decision(decision) = outcome else {
+            ohpDecision = nil
+            ohpSafetyState = .notRequired
+            return
+        }
+        ohpDecision = decision
+        ohpSafetyState = sessionState(for: decision)
+    }
+
+    private func sessionState(
+        for decision: OHPSafetyGate.Decision
+    ) -> SessionOHPSafetyState {
+        if decision.safetyStop != nil, let ohpSafeAlternative {
+            return .stopped(alternative: ohpSafeAlternative)
+        }
+        if let question = decision.priorSessionQuestion {
+            return .awaitingPreviousSessionResponse(
+                sessionID: question.sessionID,
+                entryVariant: decision.entryVariant.sessionVariant
+            )
+        }
+        switch decision.loadIncreasePolicy {
+        case .allowed:
+            return .ready(
+                entryVariant: decision.entryVariant.sessionVariant,
+                loadIncreasePolicy: .allowed
+            )
+        case let .blocked(reason):
+            return .ready(
+                entryVariant: decision.entryVariant.sessionVariant,
+                loadIncreasePolicy: .blocked(reason.sessionBlockReason)
+            )
+        }
+    }
+
+    private func replaceCompletedHistorySession(_ session: WorkoutSessionSnapshot) {
+        let matchingExerciseIDs = completedHistoryByExerciseID.compactMap { exerciseID, histories in
+            histories.contains(where: { $0.session.id == session.id })
+                ? exerciseID
+                : nil
+        }
+        for exerciseID in matchingExerciseIDs {
+            let histories = completedHistoryByExerciseID[exerciseID, default: []]
+            completedHistoryByExerciseID[exerciseID] = histories.map { history in
+                guard history.session.id == session.id else { return history }
+                return CompletedExerciseHistorySnapshot(
+                    session: session,
+                    setLogs: history.setLogs
+                )
+            }
+        }
+    }
+
+    private func replaceActiveSession(_ session: WorkoutSessionSnapshot) {
+        guard let presentation = activePresentation else { return }
+        state = .active(
+            SessionPresentation(
+                session: session,
+                plan: presentation.plan,
+                progress: presentation.progress,
+                setLogs: presentation.setLogs,
+                restoreSource: presentation.restoreSource
+            )
+        )
+    }
+
     private func leaveWarmup(disposition: WorkoutChecklistDisposition) async {
         guard let presentation = activePresentation,
+              !isAwaitingPreviousOHPSymptomResponse,
               presentation.progress.stage == .warmup else {
             return
         }
@@ -458,7 +696,7 @@ public final class SessionViewModel {
 
     private func configureDraft() {
         guard let presentation = activePresentation,
-              let exercise = presentation.currentExercise else {
+              let exercise = displayedExercise else {
             currentSetDraft = nil
             currentVariantOptions = []
             recommendationReason = .noPrefill
@@ -466,7 +704,7 @@ public final class SessionViewModel {
             return
         }
 
-        let completedSets = presentation.completedWorkingSetsForCurrentExercise
+        let completedSets = completedWorkingSetsForDisplayedExercise
         let nextSetIndex = (completedSets.map(\.setIndex).max() ?? 0) + 1
         let sameSessionPrevious = completedSets.last?.measurement
         let latestHistory = completedHistoryByExerciseID[exercise.id]?.first
@@ -477,13 +715,15 @@ public final class SessionViewModel {
         let isWeeklyPallofExercise = weeklyPallofHistory
             .eligibleExerciseTemplateIDs
             .contains(exercise.id)
-        currentVariantOptions = isWeeklyPallofExercise ? SessionVariantOption.allCases : []
+        currentVariantOptions = isWeeklyPallofExercise ? [.pallof, .plank] : []
         let progressionGuidance: (
             measurement: SetMeasurementInput,
             reason: SessionRecommendationReason
         )?
         if sameSessionPrevious != nil,
-           exercise.progressionRule == .bodyweightProgression || isWeeklyPallofExercise {
+           exercise.progressionRule == .bodyweightProgression ||
+               exercise.progressionRule == .gradedEntryOHP ||
+               isWeeklyPallofExercise {
             progressionGuidance = nil
         } else if isWeeklyPallofExercise {
             progressionGuidance = Self.weeklyPallofGuidance(
@@ -496,6 +736,12 @@ public final class SessionViewModel {
             progressionGuidance = Self.bodyweightGuidance(
                 for: exercise,
                 history: latestHistory
+            )
+        } else if exercise.progressionRule == .gradedEntryOHP {
+            progressionGuidance = Self.ohpGuidance(
+                for: exercise,
+                history: latestHistory,
+                decision: ohpDecision
             )
         } else {
             progressionGuidance = Self.doubleProgressionGuidance(
@@ -587,6 +833,84 @@ public final class SessionViewModel {
             ),
             recommendationReason(for: suggestion.reason)
         )
+    }
+
+    private static func ohpGuidance(
+        for exercise: SessionExerciseSnapshot,
+        history: CompletedExerciseHistorySnapshot?,
+        decision: OHPSafetyGate.Decision?
+    ) -> (measurement: SetMeasurementInput, reason: SessionRecommendationReason)? {
+        guard exercise.progressionRule == .gradedEntryOHP,
+              let decision else {
+            return nil
+        }
+        let variant = decision.entryVariant.rawValue
+        guard let history, let repLow = exercise.repLow else {
+            return (
+                SetMeasurementInput(
+                    weightKg: exercise.startingWeightKg,
+                    reps: exercise.repLow,
+                    performedVariant: variant
+                ),
+                .ohp(.firstSession)
+            )
+        }
+
+        let workingSets = history.setLogs.filter { !$0.isWarmupSet }
+        let suggestion = DoubleProgression.suggest(
+            DoubleProgression.Input(
+                repLow: repLow,
+                repHigh: exercise.repHigh,
+                rirLow: exercise.rirLow,
+                sets: workingSets.map {
+                    DoubleProgression.WorkingSet(
+                        setIndex: $0.setIndex,
+                        weightKg: $0.measurement.weightKg,
+                        reps: $0.measurement.reps,
+                        rir: $0.measurement.rir,
+                        isWarmupSet: $0.isWarmupSet
+                    )
+                }
+            )
+        )
+
+        switch decision.loadIncreasePolicy {
+        case .allowed:
+            let reason: SessionOHPRecommendationReason
+            switch suggestion.reason {
+            case .increase:
+                reason = .increaseAllowed
+            case let .hold(holdReason):
+                reason = .progressionHold(holdReason.sessionReason)
+            }
+            return (
+                SetMeasurementInput(
+                    weightKg: suggestion.proposedMeasurement.weightKg,
+                    reps: suggestion.proposedMeasurement.reps,
+                    performedVariant: variant
+                ),
+                .ohp(reason)
+            )
+        case let .blocked(blockReason):
+            let proposedMeasurement: DoubleProgression.ProposedMeasurement
+            if case .increase = suggestion.reason,
+               let lastSet = workingSets.sorted(by: { $0.setIndex < $1.setIndex }).last {
+                proposedMeasurement = DoubleProgression.ProposedMeasurement(
+                    weightKg: lastSet.measurement.weightKg,
+                    reps: exercise.repHigh ?? lastSet.measurement.reps
+                )
+            } else {
+                proposedMeasurement = suggestion.proposedMeasurement
+            }
+            return (
+                SetMeasurementInput(
+                    weightKg: proposedMeasurement.weightKg,
+                    reps: proposedMeasurement.reps,
+                    performedVariant: variant
+                ),
+                .ohp(blockReason.sessionRecommendationReason)
+            )
+        }
     }
 
     private static func bodyweightGuidance(
@@ -717,6 +1041,66 @@ private extension WeeklyPallofSelection.Reason {
             .pallofDue
         case .pallofCompletedThisWeek:
             .pallofCompletedThisWeek
+        }
+    }
+}
+
+private extension OHPSymptomResponse {
+    var guidanceResponse: OHPSafetyGate.SymptomResponse {
+        switch self {
+        case .notAsked:
+            .notAsked
+        case .symptomFree:
+            .symptomFree
+        case .symptomsPresent:
+            .symptomsPresent
+        case .uncertain:
+            .uncertain
+        }
+    }
+}
+
+private extension OHPSafetyGate.EntryVariant {
+    var sessionVariant: SessionOHPEntryVariant {
+        switch self {
+        case .seatedNeutral:
+            .seatedNeutral
+        case .standingNeutral:
+            .standingNeutral
+        case .standingStandard:
+            .standingStandard
+        }
+    }
+}
+
+private extension OHPSafetyGate.LoadIncreaseBlockReason {
+    var sessionBlockReason: SessionOHPLoadIncreaseBlockReason {
+        switch self {
+        case .firstSession:
+            .firstSession
+        case .previousResponseRequired:
+            .previousResponseRequired
+        case .previousSymptomsPresent:
+            .previousSymptomsPresent
+        case .previousResponseUncertain:
+            .previousResponseUncertain
+        case .currentSymptomsPresent:
+            .currentSymptomsPresent
+        }
+    }
+
+    var sessionRecommendationReason: SessionOHPRecommendationReason {
+        switch self {
+        case .firstSession:
+            .firstSession
+        case .previousResponseRequired:
+            .previousResponseRequired
+        case .previousSymptomsPresent:
+            .previousSymptomsPresent
+        case .previousResponseUncertain:
+            .previousResponseUncertain
+        case .currentSymptomsPresent:
+            .currentSymptomsPresent
         }
     }
 }
