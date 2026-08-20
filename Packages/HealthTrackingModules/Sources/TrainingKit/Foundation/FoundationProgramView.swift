@@ -11,15 +11,18 @@ public struct FoundationProgramView: View {
     @Environment(\.colorScheme) private var colorScheme
     private let viewModel: FoundationProgramViewModel
     private let phaseTransitionViewModel: PhaseTransitionViewModel?
+    private let historyViewModel: TrainingHistoryViewModel?
     private let onOpenSession: (@MainActor (UUID) -> Void)?
 
     public init(
         viewModel: FoundationProgramViewModel,
         phaseTransitionViewModel: PhaseTransitionViewModel? = nil,
+        historyViewModel: TrainingHistoryViewModel? = nil,
         onOpenSession: (@MainActor (UUID) -> Void)? = nil
     ) {
         self.viewModel = viewModel
         self.phaseTransitionViewModel = phaseTransitionViewModel
+        self.historyViewModel = historyViewModel
         self.onOpenSession = onOpenSession
     }
 
@@ -90,6 +93,36 @@ public struct FoundationProgramView: View {
                     .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("training.program.name")
+            }
+
+            if let historyViewModel {
+                sectionHeading(localized("foundation.history.heading"))
+                NavigationLink {
+                    TrainingHistoryView(viewModel: historyViewModel)
+                } label: {
+                    AppCard {
+                        HStack(spacing: AppSpacing.standard) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .foregroundStyle(
+                                    AppColors.color(.stateInfo, scheme: colorScheme)
+                                )
+                                .accessibilityHidden(true)
+                            Text(localized("foundation.history.open"))
+                                .font(AppTypography.titleMedium)
+                                .foregroundStyle(
+                                    AppColors.color(.inkPrimary, scheme: colorScheme)
+                                )
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(
+                                    AppColors.color(.inkSecondary, scheme: colorScheme)
+                                )
+                                .accessibilityHidden(true)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("training.history.link")
             }
 
             if let phaseTransitionViewModel {

@@ -9,6 +9,7 @@ import TrainingKit
 struct AppRootView: View {
     let foundationViewModel: FoundationProgramViewModel
     let phaseTransitionViewModel: PhaseTransitionViewModel
+    let trainingHistoryViewModel: TrainingHistoryViewModel
     let makeSessionViewModel: @MainActor () -> SessionViewModel
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
@@ -47,6 +48,7 @@ struct AppRootView: View {
                     Task {
                         await foundationViewModel.load()
                         await phaseTransitionViewModel.load()
+                        await trainingHistoryViewModel.load()
                     }
                 }
             )
@@ -91,6 +93,7 @@ struct AppRootView: View {
             FoundationProgramView(
                 viewModel: foundationViewModel,
                 phaseTransitionViewModel: phaseTransitionViewModel,
+                historyViewModel: trainingHistoryViewModel,
                 onOpenSession: openSession
             )
         case .nutrition:

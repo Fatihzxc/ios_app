@@ -49,6 +49,9 @@ public protocol TrainingRepository: AnyObject {
         workoutDayID: UUID
     ) async throws -> SessionWorkoutPlanSnapshot?
     func fetchSetLogs(workoutSessionID: UUID) async throws -> [SetLogSnapshot]
+    func fetchTrainingHistory() async throws -> [TrainingHistorySessionSnapshot]
+    func updateSet(_ request: SetLogUpdateRequest) async throws -> SetLogSnapshot
+    func deleteSet(id: UUID, at date: Date) async throws
     func fetchCompletedExerciseHistory(
         exerciseTemplateID: UUID
     ) async throws -> [CompletedExerciseHistorySnapshot]
@@ -70,9 +73,23 @@ public protocol TrainingRepository: AnyObject {
 
 public enum TrainingRepositoryCapabilityError: Error, Equatable, Sendable {
     case programStateMutationUnavailable
+    case trainingHistoryUnavailable
+    case setMutationUnavailable
 }
 
 public extension TrainingRepository {
+    func fetchTrainingHistory() async throws -> [TrainingHistorySessionSnapshot] {
+        throw TrainingRepositoryCapabilityError.trainingHistoryUnavailable
+    }
+
+    func updateSet(_: SetLogUpdateRequest) async throws -> SetLogSnapshot {
+        throw TrainingRepositoryCapabilityError.setMutationUnavailable
+    }
+
+    func deleteSet(id _: UUID, at _: Date) async throws {
+        throw TrainingRepositoryCapabilityError.setMutationUnavailable
+    }
+
     func recalculateProgramStateTrainingWeek(
         programID _: UUID,
         programStartDate _: Date,

@@ -29,6 +29,22 @@ public struct SetLogSaveRequest: Equatable, Sendable {
     }
 }
 
+public struct SetLogUpdateRequest: Equatable, Sendable {
+    public let id: UUID
+    public let measurement: SetMeasurementInput
+    public let updatedAt: Date
+
+    public init(
+        id: UUID,
+        measurement: SetMeasurementInput,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.measurement = measurement
+        self.updatedAt = updatedAt
+    }
+}
+
 public struct SetLogSnapshot: Equatable, Sendable, Identifiable {
     public let id: UUID
     public let createdAt: Date
@@ -73,6 +89,43 @@ public struct CompletedExerciseHistorySnapshot: Equatable, Sendable {
     ) {
         self.session = session
         self.setLogs = setLogs
+    }
+}
+
+public struct TrainingHistoryExerciseSnapshot: Equatable, Sendable {
+    public let exerciseTemplateID: UUID
+    public let exercise: SessionExerciseSnapshot?
+    public let setLogs: [SetLogSnapshot]
+
+    public init(
+        exerciseTemplateID: UUID,
+        exercise: SessionExerciseSnapshot?,
+        setLogs: [SetLogSnapshot]
+    ) {
+        self.exerciseTemplateID = exerciseTemplateID
+        self.exercise = exercise
+        self.setLogs = setLogs
+    }
+}
+
+public struct TrainingHistorySessionSnapshot: Equatable, Sendable, Identifiable {
+    public let session: WorkoutSessionSnapshot
+    public let workoutDayName: String?
+    public let workoutDayFocus: String?
+    public let exercises: [TrainingHistoryExerciseSnapshot]
+
+    public var id: UUID { session.id }
+
+    public init(
+        session: WorkoutSessionSnapshot,
+        workoutDayName: String?,
+        workoutDayFocus: String?,
+        exercises: [TrainingHistoryExerciseSnapshot]
+    ) {
+        self.session = session
+        self.workoutDayName = workoutDayName
+        self.workoutDayFocus = workoutDayFocus
+        self.exercises = exercises
     }
 }
 

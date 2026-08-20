@@ -9,7 +9,11 @@ public enum EpleyEstimate {
               reps > 0 else {
             return nil
         }
-        return weightKg * (1 + Double(reps) / 30)
+        let factored = weightKg * (1 + Double(reps) / 30)
+        let rational = weightKg * Double(30 + reps) / 30
+        // Equivalent binary paths can differ by one ULP. Keep the conservative
+        // full-precision value so floating-point noise cannot manufacture a PR.
+        return min(factored, rational)
     }
 
     public static func isImprovement(_ candidate: Double, over previousBest: Double) -> Bool {

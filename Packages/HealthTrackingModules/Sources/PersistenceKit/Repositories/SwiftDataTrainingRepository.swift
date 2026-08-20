@@ -21,6 +21,7 @@ public enum TrainingRepositoryIntegrityError: Error, Equatable, Sendable {
         exerciseTemplateID: UUID,
         setIndex: Int
     )
+    case duplicateSetLogs(id: UUID, count: Int)
     case transactionDidNotProduceSetSnapshot
     case transactionDidNotProduceSessionSnapshot
     case transactionDidNotProduceProgressSnapshot
@@ -29,6 +30,9 @@ public enum TrainingRepositoryIntegrityError: Error, Equatable, Sendable {
 
 public enum TrainingRepositoryMutationError: Error, Equatable, Sendable {
     case workoutSessionNotFound(id: UUID)
+    case setLogNotFound(id: UUID)
+    case setLogMissingSession(id: UUID)
+    case historyMutationRequiresCompletedSession(id: UUID, status: WorkoutSessionStatus)
     case invalidPerceivedRecovery(Int)
     case summaryRequiresCompletedSession(id: UUID, status: WorkoutSessionStatus)
     case illegalWorkoutSessionTransition(
@@ -636,6 +640,179 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
                 return lhs.id.uuidString < rhs.id.uuidString
             }
             .map { Self.snapshot($0, workoutSessionID: workoutSessionID) }
+    }
+
+    public func fetchTrainingHistory() async throws -> [TrainingHistorySessionSnapshot] {
+        let sessions = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
+            .filter { $0.status == .completed }
+            .sorted { lhs, rhs in
+                if lhs.date != rhs.date {
+                    return lhs.date > rhs.date
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+        let sessionIDs = Set(sessions.map(\.id))
+        let daysByID = Dictionary(
+            grouping: try modelContext.fetch(FetchDescriptor<WorkoutDayTemplate>()),
+            by: \.id
+        )
+        let exercisesByID = Dictionary(
+            grouping: try modelContext.fetch(FetchDescriptor<ExerciseTemplate>()),
+            by: \.id
+        )
+        var setsBySessionID: [UUID: [SetLog]] = [:]
+        for setLog in try modelContext.fetch(FetchDescriptor<SetLog>()) {
+            guard let sessionID = setLog.workoutSession?.id,
+                  sessionIDs.contains(sessionID) else {
+                continue
+            }
+            setsBySessionID[sessionID, default: []].append(setLog)
+        }
+
+        var history: [TrainingHistorySessionSnapshot] = []
+        for session in sessions {
+            let dayMatches = daysByID[session.workoutDayTemplateId, default: []]
+            guard dayMatches.count <= 1 else {
+                throw TrainingRepositoryIntegrityError.duplicateWorkoutDayTemplates(
+                    id: session.workoutDayTemplateId,
+                    count: dayMatches.count
+                )
+            }
+            let day = dayMatches.first
+            let groupedSets = Dictionary(
+                grouping: setsBySessionID[session.id, default: []],
+                by: \.exerciseTemplateId
+            )
+            var exerciseHistory: [TrainingHistoryExerciseSnapshot] = []
+            for (exerciseID, setLogs) in groupedSets {
+                let exerciseMatches = exercisesByID[exerciseID, default: []]
+                guard exerciseMatches.count <= 1 else {
+                    throw TrainingRepositoryIntegrityError.duplicateExerciseTemplates(
+                        id: exerciseID,
+                        count: exerciseMatches.count
+                    )
+                }
+                let sortedLogs = setLogs.sorted { lhs, rhs in
+                    if lhs.setIndex != rhs.setIndex {
+                        return lhs.setIndex < rhs.setIndex
+                    }
+                    if lhs.completedAt != rhs.completedAt {
+                        return lhs.completedAt < rhs.completedAt
+                    }
+                    return lhs.id.uuidString < rhs.id.uuidString
+                }
+                exerciseHistory.append(
+                    TrainingHistoryExerciseSnapshot(
+                        exerciseTemplateID: exerciseID,
+                        exercise: exerciseMatches.first.map(Self.exerciseSnapshot),
+                        setLogs: sortedLogs.map {
+                            Self.snapshot($0, workoutSessionID: session.id)
+                        }
+                    )
+                )
+            }
+            exerciseHistory.sort { lhs, rhs in
+                let lhsOrder = lhs.exercise?.orderIndex ?? .max
+                let rhsOrder = rhs.exercise?.orderIndex ?? .max
+                if lhsOrder != rhsOrder {
+                    return lhsOrder < rhsOrder
+                }
+                return lhs.exerciseTemplateID.uuidString < rhs.exerciseTemplateID.uuidString
+            }
+            history.append(
+                TrainingHistorySessionSnapshot(
+                    session: Self.sessionSnapshot(session),
+                    workoutDayName: day?.name,
+                    workoutDayFocus: day?.focus,
+                    exercises: exerciseHistory
+                )
+            )
+        }
+        return history
+    }
+
+    public func updateSet(_ request: SetLogUpdateRequest) async throws -> SetLogSnapshot {
+        var savedSnapshot: SetLogSnapshot?
+        try modelContext.transaction {
+            let matches = try modelContext.fetch(FetchDescriptor<SetLog>())
+                .filter { $0.id == request.id }
+            guard let setLog = matches.first else {
+                throw TrainingRepositoryMutationError.setLogNotFound(id: request.id)
+            }
+            guard matches.count == 1 else {
+                throw TrainingRepositoryIntegrityError.duplicateSetLogs(
+                    id: request.id,
+                    count: matches.count
+                )
+            }
+            guard let session = setLog.workoutSession else {
+                throw TrainingRepositoryMutationError.setLogMissingSession(id: request.id)
+            }
+            guard session.status == .completed else {
+                throw TrainingRepositoryMutationError.historyMutationRequiresCompletedSession(
+                    id: session.id,
+                    status: session.status
+                )
+            }
+            let exercises = try modelContext.fetch(FetchDescriptor<ExerciseTemplate>())
+                .filter { $0.id == setLog.exerciseTemplateId }
+            guard let exercise = exercises.first else {
+                throw TrainingRepositoryIntegrityError.missingExerciseTemplate(
+                    id: setLog.exerciseTemplateId
+                )
+            }
+            guard exercises.count == 1 else {
+                throw TrainingRepositoryIntegrityError.duplicateExerciseTemplates(
+                    id: setLog.exerciseTemplateId,
+                    count: exercises.count
+                )
+            }
+            try SetMeasurementValidator.validate(
+                request.measurement,
+                for: exercise.measurementKind
+            )
+
+            setLog.weightKg = request.measurement.weightKg
+            setLog.reps = request.measurement.reps
+            setLog.durationSec = request.measurement.durationSec
+            setLog.distanceSteps = request.measurement.distanceSteps
+            setLog.performedVariant = request.measurement.performedVariant
+            setLog.rir = request.measurement.rir
+            setLog.updatedAt = request.updatedAt
+            session.updatedAt = request.updatedAt
+            try modelContext.save()
+            savedSnapshot = Self.snapshot(setLog, workoutSessionID: session.id)
+        }
+        guard let savedSnapshot else {
+            throw TrainingRepositoryIntegrityError.transactionDidNotProduceSetSnapshot
+        }
+        return savedSnapshot
+    }
+
+    public func deleteSet(id: UUID, at date: Date) async throws {
+        try modelContext.transaction {
+            let matches = try modelContext.fetch(FetchDescriptor<SetLog>())
+                .filter { $0.id == id }
+            guard !matches.isEmpty else { return }
+            guard matches.count == 1, let setLog = matches.first else {
+                throw TrainingRepositoryIntegrityError.duplicateSetLogs(
+                    id: id,
+                    count: matches.count
+                )
+            }
+            guard let session = setLog.workoutSession else {
+                throw TrainingRepositoryMutationError.setLogMissingSession(id: id)
+            }
+            guard session.status == .completed else {
+                throw TrainingRepositoryMutationError.historyMutationRequiresCompletedSession(
+                    id: session.id,
+                    status: session.status
+                )
+            }
+            session.updatedAt = date
+            modelContext.delete(setLog)
+            try modelContext.save()
+        }
     }
 
     public func fetchCompletedExerciseHistory(

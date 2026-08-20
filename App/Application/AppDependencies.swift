@@ -18,6 +18,7 @@ final class AppDependencies: AppDependencyLoading {
     let trainingRepository: any TrainingRepository
     let foundationViewModel: FoundationProgramViewModel
     let phaseTransitionViewModel: PhaseTransitionViewModel
+    let trainingHistoryViewModel: TrainingHistoryViewModel
     let makeSessionViewModel: @MainActor () -> SessionViewModel
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
@@ -66,7 +67,7 @@ final class AppDependencies: AppDependencyLoading {
                 shouldLoadFoundation = false
             case .seeded, .fatalConfiguration, .sessionFlow, .sessionFamilies, .sessionResume,
                  .progressionMissingRIR, .weeklyPallof, .ohpSafety, .deloadScheduled,
-                 .deloadReactive, .phaseTransition:
+                 .deloadReactive, .phaseTransition, .trainingHistory:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -79,8 +80,17 @@ final class AppDependencies: AppDependencyLoading {
         shouldLoadFoundation = true
         #endif
 
-        foundationViewModel = FoundationProgramViewModel(repository: trainingRepository)
-        phaseTransitionViewModel = PhaseTransitionViewModel(repository: trainingRepository)
+        let foundationModel = FoundationProgramViewModel(repository: trainingRepository)
+        let phaseModel = PhaseTransitionViewModel(repository: trainingRepository)
+        foundationViewModel = foundationModel
+        phaseTransitionViewModel = phaseModel
+        trainingHistoryViewModel = TrainingHistoryViewModel(
+            repository: trainingRepository,
+            onHistoryChanged: { [weak foundationModel, weak phaseModel] in
+                await foundationModel?.load()
+                await phaseModel?.load()
+            }
+        )
         let sessionRepository = trainingRepository
         makeSessionViewModel = {
             SessionViewModel(repository: sessionRepository)
@@ -119,6 +129,24 @@ private enum UITestSessionFixture {
     private static let ohpPriorSessionID = uuid("00000000-0000-4000-8000-00000000f050")
     private static let ohpCurrentSessionID = uuid("00000000-0000-4000-8000-00000000f051")
     private static let ohpCurrentProgressID = uuid("00000000-0000-4000-8000-00000000f052")
+    private static let historyNewestSessionID = uuid(
+        "00000000-0000-4000-8000-00000000f070"
+    )
+    private static let historyNewestSetID = uuid(
+        "00000000-0000-4000-8000-00000000f071"
+    )
+    private static let historyMissingSessionID = uuid(
+        "00000000-0000-4000-8000-00000000f072"
+    )
+    private static let historyMissingSetID = uuid(
+        "00000000-0000-4000-8000-00000000f073"
+    )
+    private static let historyMissingDayID = uuid(
+        "00000000-0000-4000-8000-00000000f074"
+    )
+    private static let historyMissingExerciseID = uuid(
+        "00000000-0000-4000-8000-00000000f075"
+    )
     private static let deloadScheduledSessionID = uuid(
         "00000000-0000-4000-8000-00000000f060"
     )
@@ -148,9 +176,68 @@ private enum UITestSessionFixture {
             try installDeload(scheduled: false, in: modelContext)
         case .phaseTransition:
             try installPhaseTransition(in: modelContext)
+        case .trainingHistory:
+            try installTrainingHistory(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow:
             return
         }
+    }
+
+    private static func installTrainingHistory(in modelContext: ModelContext) throws {
+        guard let gobletSquat = try modelContext.fetch(FetchDescriptor<ExerciseTemplate>())
+            .first(where: { $0.id == SeedIdentifiers.gobletSquat }) else {
+            throw UITestSessionFixtureError.missingSeededProgram
+        }
+        let newestDate = Date.now.addingTimeInterval(-3_600)
+        let newest = WorkoutSession(
+            id: historyNewestSessionID,
+            createdAt: newestDate,
+            updatedAt: newestDate,
+            date: newestDate,
+            status: .completed,
+            workoutDayTemplateId: SeedIdentifiers.dayA,
+            perceivedRecovery: 8,
+            note: "Kontrollü tamamlandı"
+        )
+        modelContext.insert(newest)
+        modelContext.insert(
+            SetLog(
+                id: historyNewestSetID,
+                createdAt: newestDate,
+                updatedAt: newestDate,
+                exerciseTemplateId: gobletSquat.id,
+                setIndex: 1,
+                weightKg: 10,
+                reps: 8,
+                rir: 2,
+                completedAt: newestDate,
+                workoutSession: newest
+            )
+        )
+
+        let missingDate = newestDate.addingTimeInterval(-86_400)
+        let missing = WorkoutSession(
+            id: historyMissingSessionID,
+            createdAt: missingDate,
+            updatedAt: missingDate,
+            date: missingDate,
+            status: .completed,
+            workoutDayTemplateId: historyMissingDayID
+        )
+        modelContext.insert(missing)
+        modelContext.insert(
+            SetLog(
+                id: historyMissingSetID,
+                createdAt: missingDate,
+                updatedAt: missingDate,
+                exerciseTemplateId: historyMissingExerciseID,
+                setIndex: 1,
+                reps: 7,
+                completedAt: missingDate,
+                workoutSession: missing
+            )
+        )
+        try modelContext.save()
     }
 
     private static func installPhaseTransition(in modelContext: ModelContext) throws {
