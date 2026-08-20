@@ -5,7 +5,7 @@ import XCTest
 
 @MainActor
 final class ModelContainerFactoryTests: XCTestCase {
-    func testV1SchemaHasApprovedVersionAndExactModelInventory() {
+    func testVersionedSchemasPreserveV1AndAddOnlyV2ProgressModel() {
         XCTAssertEqual(HealthTrackingSchemaV1.versionIdentifier, Schema.Version(1, 0, 0))
         XCTAssertEqual(HealthTrackingSchemaV1.models.count, 23)
         XCTAssertEqual(
@@ -18,8 +18,10 @@ final class ModelContainerFactoryTests: XCTestCase {
                 "MealEntry", "AppReminder", "AppSetting"
             ]
         )
-        XCTAssertEqual(HealthTrackingMigrationPlan.schemas.count, 1)
-        XCTAssertTrue(HealthTrackingMigrationPlan.stages.isEmpty)
+        XCTAssertEqual(HealthTrackingSchemaV2.versionIdentifier, Schema.Version(1, 1, 0))
+        XCTAssertEqual(HealthTrackingSchemaV2.models.count, 24)
+        XCTAssertEqual(HealthTrackingMigrationPlan.schemas.count, 2)
+        XCTAssertEqual(HealthTrackingMigrationPlan.stages.count, 1)
     }
 
     func testDescriptorsExpressEachPersistenceMode() throws {

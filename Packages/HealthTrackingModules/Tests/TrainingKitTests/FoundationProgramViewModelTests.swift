@@ -533,6 +533,50 @@ private final class FakeTrainingRepository: TrainingRepository {
         throw FakeRepositoryError.unexpectedCall("saveSet")
     }
 
+    func createWorkoutSession(
+        _ request: WorkoutSessionCreateRequest
+    ) async throws -> WorkoutSessionSnapshot {
+        throw FakeRepositoryError.unexpectedCall("createWorkoutSession")
+    }
+
+    func fetchInProgressWorkoutSession() async throws -> WorkoutSessionSnapshot? {
+        throw FakeRepositoryError.unexpectedCall("fetchInProgressWorkoutSession")
+    }
+
+    func transitionWorkoutSession(
+        id: UUID,
+        to status: WorkoutSessionStatus,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot {
+        throw FakeRepositoryError.unexpectedCall("transitionWorkoutSession")
+    }
+
+    func fetchWorkoutSessionProgress(
+        sessionID: UUID
+    ) async throws -> WorkoutSessionProgressSnapshot? {
+        throw FakeRepositoryError.unexpectedCall("fetchWorkoutSessionProgress")
+    }
+
+    func saveWorkoutSessionProgress(
+        _ update: WorkoutSessionProgressUpdate
+    ) async throws -> WorkoutSessionProgressSnapshot {
+        throw FakeRepositoryError.unexpectedCall("saveWorkoutSessionProgress")
+    }
+
+    func fetchSessionExercises(
+        workoutDayID: UUID
+    ) async throws -> [SessionExerciseSnapshot] {
+        throw FakeRepositoryError.unexpectedCall("fetchSessionExercises")
+    }
+
+    func fetchSetLogs(workoutSessionID: UUID) async throws -> [SetLogSnapshot] {
+        throw FakeRepositoryError.unexpectedCall("fetchSetLogs")
+    }
+
+    func deleteWorkoutSession(id: UUID) async throws {
+        throw FakeRepositoryError.unexpectedCall("deleteWorkoutSession")
+    }
+
     private static func dequeue<Value>(
         _ responses: inout [QueuedResponse<Value>],
         method: String

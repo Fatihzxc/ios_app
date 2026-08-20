@@ -148,6 +148,50 @@ private final class UITestFoundationRepository: TrainingRepository {
     func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot {
         try await repository.saveSet(request)
     }
+
+    func createWorkoutSession(
+        _ request: WorkoutSessionCreateRequest
+    ) async throws -> WorkoutSessionSnapshot {
+        try await repository.createWorkoutSession(request)
+    }
+
+    func fetchInProgressWorkoutSession() async throws -> WorkoutSessionSnapshot? {
+        try await repository.fetchInProgressWorkoutSession()
+    }
+
+    func transitionWorkoutSession(
+        id: UUID,
+        to status: WorkoutSessionStatus,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot {
+        try await repository.transitionWorkoutSession(id: id, to: status, at: date)
+    }
+
+    func fetchWorkoutSessionProgress(
+        sessionID: UUID
+    ) async throws -> WorkoutSessionProgressSnapshot? {
+        try await repository.fetchWorkoutSessionProgress(sessionID: sessionID)
+    }
+
+    func saveWorkoutSessionProgress(
+        _ update: WorkoutSessionProgressUpdate
+    ) async throws -> WorkoutSessionProgressSnapshot {
+        try await repository.saveWorkoutSessionProgress(update)
+    }
+
+    func fetchSessionExercises(
+        workoutDayID: UUID
+    ) async throws -> [SessionExerciseSnapshot] {
+        try await repository.fetchSessionExercises(workoutDayID: workoutDayID)
+    }
+
+    func fetchSetLogs(workoutSessionID: UUID) async throws -> [SetLogSnapshot] {
+        try await repository.fetchSetLogs(workoutSessionID: workoutSessionID)
+    }
+
+    func deleteWorkoutSession(id: UUID) async throws {
+        try await repository.deleteWorkoutSession(id: id)
+    }
 }
 
 private enum UITestFoundationRepositoryError: Error {

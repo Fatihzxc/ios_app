@@ -52,7 +52,7 @@ expected_models = [
     "AppReminder", "AppSetting", "BloodworkResult", "BodyMetric", "CooldownItem", "DailyNutritionLog",
     "ExerciseTemplate", "Food", "HealthCheckReminder", "MealEntry", "MoodLog", "PostureMetric", "Program",
     "ProgramPhase", "ProgramState", "ProgressPhoto", "Recipe", "SetLog", "SleepLog", "UserProfile",
-    "WarmupItem", "WorkoutDayTemplate", "WorkoutSession",
+    "WarmupItem", "WorkoutDayTemplate", "WorkoutSession", "WorkoutSessionProgress",
 ]
 models = []
 if model_directory.is_dir():
@@ -215,7 +215,7 @@ self_test() {
     cp "$repo_root/.gitignore" "$fixture/.gitignore"
     git -C "$fixture" init --quiet
     touch "$fixture/README.md" "$fixture/docs/evidence/M0/acceptance.md"
-    for model in AppReminder AppSetting BloodworkResult BodyMetric CooldownItem DailyNutritionLog ExerciseTemplate Food HealthCheckReminder MealEntry MoodLog PostureMetric Program ProgramPhase ProgramState ProgressPhoto Recipe SetLog SleepLog UserProfile WarmupItem WorkoutDayTemplate WorkoutSession; do
+    for model in AppReminder AppSetting BloodworkResult BodyMetric CooldownItem DailyNutritionLog ExerciseTemplate Food HealthCheckReminder MealEntry MoodLog PostureMetric Program ProgramPhase ProgramState ProgressPhoto Recipe SetLog SleepLog UserProfile WarmupItem WorkoutDayTemplate WorkoutSession WorkoutSessionProgress; do
         printf '@Model\npublic final class %s {}\n' "$model" > "$fixture/Packages/HealthTrackingModules/Sources/CoreModels/Models/$model.swift"
     done
     verify_repo "$fixture"

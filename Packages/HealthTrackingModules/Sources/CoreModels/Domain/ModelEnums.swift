@@ -32,6 +32,19 @@ public enum WorkoutSessionStatus: String, Codable, CaseIterable, Sendable {
     case skipped
 }
 
+public enum WorkoutSessionProgressStage: String, Codable, CaseIterable, Sendable {
+    case warmup
+    case movement
+    case cooldown
+    case summary
+}
+
+public enum WorkoutChecklistDisposition: String, Codable, CaseIterable, Sendable {
+    case pending
+    case completed
+    case skipped
+}
+
 public enum WarmupPhase: String, Codable, CaseIterable, Sendable {
     case raise
     case activate

@@ -53,7 +53,7 @@ public enum ModelContainerFactory {
             preconditionFailure("A non-memory persistence descriptor requires a store URL.")
         }
 
-        let schema = Schema(versionedSchema: HealthTrackingSchemaV1.self)
+        let schema = Schema(versionedSchema: HealthTrackingSchemaV2.self)
         return try ModelContainer(
             for: schema,
             migrationPlan: HealthTrackingMigrationPlan.self,

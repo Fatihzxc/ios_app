@@ -13,4 +13,22 @@ public protocol TrainingRepository: AnyObject {
     func fetchHealthCheckReminders() async throws -> [HealthCheckReminder]
     func fetchProgramState(programID: UUID) async throws -> ProgramState?
     func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot
+    func createWorkoutSession(
+        _ request: WorkoutSessionCreateRequest
+    ) async throws -> WorkoutSessionSnapshot
+    func fetchInProgressWorkoutSession() async throws -> WorkoutSessionSnapshot?
+    func transitionWorkoutSession(
+        id: UUID,
+        to status: WorkoutSessionStatus,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot
+    func fetchWorkoutSessionProgress(
+        sessionID: UUID
+    ) async throws -> WorkoutSessionProgressSnapshot?
+    func saveWorkoutSessionProgress(
+        _ update: WorkoutSessionProgressUpdate
+    ) async throws -> WorkoutSessionProgressSnapshot
+    func fetchSessionExercises(workoutDayID: UUID) async throws -> [SessionExerciseSnapshot]
+    func fetchSetLogs(workoutSessionID: UUID) async throws -> [SetLogSnapshot]
+    func deleteWorkoutSession(id: UUID) async throws
 }
