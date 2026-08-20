@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import GuidanceKit
 import Observation
 
 @MainActor
@@ -21,6 +22,8 @@ public final class SessionViewModel {
     private let now: @MainActor () -> Date
     @ObservationIgnored
     private var pendingSetRequest: SetLogSaveRequest?
+    @ObservationIgnored
+    private var completedHistoryByExerciseID: [UUID: [CompletedExerciseHistorySnapshot]] = [:]
 
     public init(
         repository: any TrainingRepository,
@@ -40,6 +43,7 @@ public final class SessionViewModel {
         summaryRecovery = nil
         summaryNote = ""
         pendingSetRequest = nil
+        completedHistoryByExerciseID = [:]
 
         do {
             let existing = try await repository.fetchInProgressWorkoutSession()
@@ -61,6 +65,12 @@ public final class SessionViewModel {
             let progress = restored?.state ?? SessionProgressState(stage: .warmup)
             let source = restored?.source ?? .inferredMissingProgress
             let sets = try await repository.fetchSetLogs(workoutSessionID: session.id)
+            var completedHistory: [UUID: [CompletedExerciseHistorySnapshot]] = [:]
+            for exercise in plan.exercises {
+                completedHistory[exercise.id] = try await repository
+                    .fetchCompletedExerciseHistory(exerciseTemplateID: exercise.id)
+            }
+            completedHistoryByExerciseID = completedHistory
             state = .active(
                 SessionPresentation(
                     session: session,
@@ -436,6 +446,14 @@ public final class SessionViewModel {
         let completedSets = presentation.completedWorkingSetsForCurrentExercise
         let nextSetIndex = (completedSets.map(\.setIndex).max() ?? 0) + 1
         let sameSessionPrevious = completedSets.last?.measurement
+        let latestHistory = completedHistoryByExerciseID[exercise.id]?.first
+        let priorSessionSameIndex = latestHistory?.setLogs.first(where: {
+            !$0.isWarmupSet && $0.setIndex == nextSetIndex
+        })?.measurement
+        let progressionGuidance = Self.doubleProgressionGuidance(
+            for: exercise,
+            history: latestHistory
+        )
         let seed = Self.templateSeed(for: exercise)
         currentSetDraft = SetDraft(
             workoutSessionID: presentation.session.id,
@@ -443,12 +461,20 @@ public final class SessionViewModel {
             setIndex: nextSetIndex,
             measurementKind: exercise.measurementKind,
             isWarmupSet: false,
+            guidance: progressionGuidance?.measurement,
             sameSessionPrevious: sameSessionPrevious,
+            priorSessionSameIndex: priorSessionSameIndex,
             seed: seed
         )
-        recommendationReason = sameSessionPrevious == nil
-            ? .templateStartingValues
-            : .sameSessionPrevious
+        if let progressionGuidance {
+            recommendationReason = progressionGuidance.reason
+        } else if sameSessionPrevious != nil {
+            recommendationReason = .sameSessionPrevious
+        } else if priorSessionSameIndex != nil {
+            recommendationReason = .priorSessionSameIndex
+        } else {
+            recommendationReason = .templateStartingValues
+        }
         if case .saving = setSaveState {
             return
         }
@@ -478,6 +504,70 @@ public final class SessionViewModel {
             )
         case .quality:
             return SetMeasurementInput()
+        }
+    }
+
+    private static func doubleProgressionGuidance(
+        for exercise: SessionExerciseSnapshot,
+        history: CompletedExerciseHistorySnapshot?
+    ) -> (measurement: SetMeasurementInput, reason: SessionRecommendationReason)? {
+        guard exercise.progressionRule == .doubleProgression,
+              let repLow = exercise.repLow,
+              let history else {
+            return nil
+        }
+        let suggestion = DoubleProgression.suggest(
+            DoubleProgression.Input(
+                repLow: repLow,
+                repHigh: exercise.repHigh,
+                rirLow: exercise.rirLow,
+                sets: history.setLogs.map {
+                    DoubleProgression.WorkingSet(
+                        setIndex: $0.setIndex,
+                        weightKg: $0.measurement.weightKg,
+                        reps: $0.measurement.reps,
+                        rir: $0.measurement.rir,
+                        isWarmupSet: $0.isWarmupSet
+                    )
+                }
+            )
+        )
+        return (
+            SetMeasurementInput(
+                weightKg: suggestion.proposedMeasurement.weightKg,
+                reps: suggestion.proposedMeasurement.reps
+            ),
+            recommendationReason(for: suggestion.reason)
+        )
+    }
+
+    private static func recommendationReason(
+        for reason: DoubleProgression.Reason
+    ) -> SessionRecommendationReason {
+        switch reason {
+        case .increase:
+            return .doubleProgressionIncrease
+        case let .hold(holdReason):
+            return .doubleProgressionHold(holdReason.sessionReason)
+        }
+    }
+}
+
+private extension DoubleProgression.HoldReason {
+    var sessionReason: SessionDoubleProgressionHoldReason {
+        switch self {
+        case .noWorkingSets:
+            .noWorkingSets
+        case .missingRepCeiling:
+            .missingRepCeiling
+        case .repetitionsBelowCeiling:
+            .repetitionsBelowCeiling
+        case .missingRIR:
+            .missingRIR
+        case .rirAboveThreshold:
+            .rirAboveThreshold
+        case .missingExternalWeight:
+            .missingExternalWeight
         }
     }
 }

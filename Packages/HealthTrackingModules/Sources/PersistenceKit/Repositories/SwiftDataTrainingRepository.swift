@@ -446,6 +446,47 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
             .map { Self.snapshot($0, workoutSessionID: workoutSessionID) }
     }
 
+    public func fetchCompletedExerciseHistory(
+        exerciseTemplateID: UUID
+    ) async throws -> [CompletedExerciseHistorySnapshot] {
+        let completedSessions = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
+            .filter { $0.status == .completed }
+            .sorted { lhs, rhs in
+                if lhs.date != rhs.date {
+                    return lhs.date > rhs.date
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+        let matchingSets = try modelContext.fetch(FetchDescriptor<SetLog>())
+            .filter { $0.exerciseTemplateId == exerciseTemplateID }
+        var setsBySessionID: [UUID: [SetLog]] = [:]
+        for setLog in matchingSets {
+            guard let sessionID = setLog.workoutSession?.id else { continue }
+            setsBySessionID[sessionID, default: []].append(setLog)
+        }
+
+        return completedSessions.compactMap { session in
+            guard let sessionSets = setsBySessionID[session.id], !sessionSets.isEmpty else {
+                return nil
+            }
+            let snapshots = sessionSets
+                .sorted { lhs, rhs in
+                    if lhs.setIndex != rhs.setIndex {
+                        return lhs.setIndex < rhs.setIndex
+                    }
+                    if lhs.completedAt != rhs.completedAt {
+                        return lhs.completedAt < rhs.completedAt
+                    }
+                    return lhs.id.uuidString < rhs.id.uuidString
+                }
+                .map { Self.snapshot($0, workoutSessionID: session.id) }
+            return CompletedExerciseHistorySnapshot(
+                session: Self.sessionSnapshot(session),
+                setLogs: snapshots
+            )
+        }
+    }
+
     public func updateWorkoutSessionSummary(
         id: UUID,
         perceivedRecovery: Int?,

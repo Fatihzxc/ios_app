@@ -173,8 +173,33 @@ public struct ExerciseStageView: View {
             return localized("session.recommendation.template")
         case .sameSessionPrevious:
             return localized("session.recommendation.sameSession")
+        case .priorSessionSameIndex:
+            return localized("session.recommendation.priorSession")
+        case .doubleProgressionIncrease:
+            return localized("session.recommendation.doubleProgression.increase")
+        case let .doubleProgressionHold(reason):
+            return doubleProgressionHoldText(reason)
         case .noPrefill:
             return localized("session.recommendation.none")
+        }
+    }
+
+    private func doubleProgressionHoldText(
+        _ reason: SessionDoubleProgressionHoldReason
+    ) -> String {
+        switch reason {
+        case .noWorkingSets:
+            localized("session.recommendation.doubleProgression.hold.noWorkingSets")
+        case .missingRepCeiling:
+            localized("session.recommendation.doubleProgression.hold.missingRepCeiling")
+        case .repetitionsBelowCeiling:
+            localized("session.recommendation.doubleProgression.hold.repetitionsBelowCeiling")
+        case .missingRIR:
+            localized("session.recommendation.doubleProgression.hold.missingRIR")
+        case .rirAboveThreshold:
+            localized("session.recommendation.doubleProgression.hold.rirAboveThreshold")
+        case .missingExternalWeight:
+            localized("session.recommendation.doubleProgression.hold.missingExternalWeight")
         }
     }
 

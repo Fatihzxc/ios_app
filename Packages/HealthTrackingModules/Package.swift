@@ -26,7 +26,7 @@ let package = Package(
         ),
         .target(
             name: "TrainingKit",
-            dependencies: ["CoreModels", "DesignSystem"],
+            dependencies: ["CoreModels", "DesignSystem", "GuidanceKit"],
             resources: [.process("Resources")],
             swiftSettings: strictConcurrency
         ),

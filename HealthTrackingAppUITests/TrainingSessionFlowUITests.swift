@@ -242,6 +242,29 @@ final class TrainingSessionFlowUITests: XCTestCase {
         attachScreenshot(named: "session-resume-after-relaunch")
     }
 
+    func testMissingRIRHistoryNeverDisplaysALoadIncrease() {
+        let app = launchApp(scenario: "progression-missing-rir", appearance: .light)
+        requireFoundationContent("root.today.content", in: app)
+        tapAction(
+            "today.session.open",
+            in: app,
+            message: "The progression fixture must use the real Today route."
+        )
+        tapAction(
+            "session.warmup.skip",
+            in: app,
+            message: "The progression fixture must enter the real exercise deck."
+        )
+
+        let recommendation = requireElement(
+            app.staticTexts["session.exercise.recommendation"],
+            "Missing RIR needs an explicit hold reason."
+        )
+        XCTAssertTrue(recommendation.label.contains("RIR"))
+        XCTAssertFalse(recommendation.label.contains("+2,5"))
+        attachScreenshot(named: "session-progression-missing-rir-light")
+    }
+
     private func assertExercise(
         named expectedName: String,
         family: String,

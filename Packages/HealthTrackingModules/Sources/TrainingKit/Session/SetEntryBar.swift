@@ -47,6 +47,7 @@ public struct SetEntryBar: View {
                         systemImage: "arrow.down.to.line",
                         style: .info
                     )
+                    .accessibilityIdentifier("session.set.recommendation")
                 }
 
                 measurementControls
@@ -345,6 +346,12 @@ public struct SetEntryBar: View {
             return localized("session.recommendation.template.short")
         case .sameSessionPrevious:
             return localized("session.recommendation.sameSession.short")
+        case .priorSessionSameIndex:
+            return localized("session.recommendation.priorSession.short")
+        case .doubleProgressionIncrease:
+            return localized("session.recommendation.doubleProgression.increase.short")
+        case .doubleProgressionHold:
+            return localized("session.recommendation.doubleProgression.hold.short")
         case .noPrefill:
             return localized("session.recommendation.none.short")
         }

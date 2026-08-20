@@ -63,7 +63,8 @@ final class AppDependencies: AppDependencyLoading {
             case .loading:
                 trainingRepository = repository
                 shouldLoadFoundation = false
-            case .seeded, .fatalConfiguration, .sessionFlow, .sessionFamilies, .sessionResume:
+            case .seeded, .fatalConfiguration, .sessionFlow, .sessionFamilies, .sessionResume,
+                 .progressionMissingRIR:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -109,6 +110,7 @@ private enum UITestSessionFixture {
     private static let familyCooldownID = uuid("00000000-0000-4000-8000-00000000f003")
     private static let resumeSessionID = uuid("00000000-0000-4000-8000-00000000f020")
     private static let resumeProgressID = uuid("00000000-0000-4000-8000-00000000f021")
+    private static let progressionSessionID = uuid("00000000-0000-4000-8000-00000000f030")
     private static let installedAt = Date(timeIntervalSince1970: 1_700_000_000)
 
     static func install(scenario: AppUITestScenario, in modelContext: ModelContext) throws {
@@ -117,6 +119,8 @@ private enum UITestSessionFixture {
             try installMeasurementFamilies(in: modelContext)
         case .sessionResume:
             try installResumeProgress(in: modelContext)
+        case .progressionMissingRIR:
+            try installMissingRIRHistory(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow:
             return
         }
@@ -267,6 +271,47 @@ private enum UITestSessionFixture {
         try modelContext.save()
     }
 
+    private static func installMissingRIRHistory(in modelContext: ModelContext) throws {
+        let existingSessions = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
+        guard !existingSessions.contains(where: { $0.id == progressionSessionID }) else {
+            return
+        }
+
+        let session = WorkoutSession(
+            id: progressionSessionID,
+            createdAt: installedAt,
+            updatedAt: installedAt,
+            date: installedAt,
+            status: .completed,
+            workoutDayTemplateId: SeedIdentifiers.dayA
+        )
+        modelContext.insert(session)
+        let setIDs = [
+            uuid("00000000-0000-4000-8000-00000000f031"),
+            uuid("00000000-0000-4000-8000-00000000f032"),
+            uuid("00000000-0000-4000-8000-00000000f033"),
+        ]
+        let rirs: [Int?] = [0, nil, 0]
+        for (offset, rir) in rirs.enumerated() {
+            modelContext.insert(
+                SetLog(
+                    id: setIDs[offset],
+                    createdAt: installedAt,
+                    updatedAt: installedAt,
+                    exerciseTemplateId: SeedIdentifiers.gobletSquat,
+                    setIndex: offset + 1,
+                    weightKg: 10,
+                    reps: 25,
+                    rir: rir,
+                    isWarmupSet: false,
+                    completedAt: installedAt,
+                    workoutSession: session
+                )
+            )
+        }
+        try modelContext.save()
+    }
+
     private static func uuid(_ value: String) -> UUID {
         UUID(uuidString: value)!
     }
@@ -395,6 +440,14 @@ private final class UITestFoundationRepository: TrainingRepository {
 
     func fetchSetLogs(workoutSessionID: UUID) async throws -> [SetLogSnapshot] {
         try await repository.fetchSetLogs(workoutSessionID: workoutSessionID)
+    }
+
+    func fetchCompletedExerciseHistory(
+        exerciseTemplateID: UUID
+    ) async throws -> [CompletedExerciseHistorySnapshot] {
+        try await repository.fetchCompletedExerciseHistory(
+            exerciseTemplateID: exerciseTemplateID
+        )
     }
 
     func updateWorkoutSessionSummary(

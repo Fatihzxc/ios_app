@@ -222,6 +222,86 @@ final class SessionViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.recommendationReason, .sameSessionPrevious)
     }
 
+    func testStrictDoubleProgressionMapsCompletedHistoryToGuidanceWithoutWriting() async {
+        let plan = makePlan()
+        let repository = FakeSessionRepository(plan: plan)
+        let exercise = plan.exercises[0]
+        repository.completedExerciseHistory[exercise.id] = [
+            makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                measurements: [
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 0),
+                ]
+            ),
+        ]
+        let viewModel = makeViewModel(repository)
+
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+
+        XCTAssertEqual(viewModel.currentSetDraft?.prefillSource, .guidance)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.weightKg, 12.5)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.reps, 8)
+        XCTAssertEqual(viewModel.recommendationReason, .doubleProgressionIncrease)
+        XCTAssertTrue(repository.saveSetRequests.isEmpty)
+    }
+
+    func testMissingRIRMapsToSpecificHoldReasonAndNeverAddsLoad() async {
+        let plan = makePlan()
+        let repository = FakeSessionRepository(plan: plan)
+        let exercise = plan.exercises[0]
+        repository.completedExerciseHistory[exercise.id] = [
+            makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                measurements: [
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: nil),
+                ]
+            ),
+        ]
+        let viewModel = makeViewModel(repository)
+
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+
+        XCTAssertEqual(viewModel.currentSetDraft?.prefillSource, .guidance)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.weightKg, 10)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.reps, 12)
+        XCTAssertEqual(
+            viewModel.recommendationReason,
+            .doubleProgressionHold(.missingRIR)
+        )
+        XCTAssertTrue(repository.saveSetRequests.isEmpty)
+    }
+
+    func testNonDoubleProgressionFallsBackToPriorSessionSameSetIndex() async {
+        let plan = makePlan()
+        let repository = FakeSessionRepository(plan: plan)
+        let exercise = plan.exercises[1]
+        repository.completedExerciseHistory[exercise.id] = [
+            makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                measurements: [
+                    .init(reps: 9, performedVariant: "Nötr tutuş", rir: 2),
+                ]
+            ),
+        ]
+        let viewModel = makeViewModel(repository)
+
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        await viewModel.advanceExercise()
+
+        XCTAssertEqual(viewModel.currentSetDraft?.prefillSource, .priorSessionSameIndex)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.reps, 9)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.performedVariant, "Nötr tutuş")
+        XCTAssertEqual(viewModel.recommendationReason, .priorSessionSameIndex)
+    }
+
     func testSummaryValuesStayNilUntilChosenAndSaveOnlyExplicitInput() async {
         let repository = FakeSessionRepository(plan: makePlan())
         let viewModel = makeViewModel(repository)
@@ -390,6 +470,39 @@ final class SessionViewModelTests: XCTestCase {
         )
     }
 
+    private func makeCompletedHistory(
+        dayID: UUID,
+        exerciseID: UUID,
+        measurements: [SetMeasurementInput]
+    ) -> CompletedExerciseHistorySnapshot {
+        let completedAt = now.addingTimeInterval(-3_600)
+        let session = WorkoutSessionSnapshot(
+            id: uuid("00000000-0000-0000-0000-000000000730"),
+            date: completedAt,
+            status: .completed,
+            workoutDayTemplateID: dayID
+        )
+        let setLogs = measurements.enumerated().map { offset, measurement in
+            SetLogSnapshot(
+                id: UUID(
+                    uuidString: String(
+                        format: "00000000-0000-0000-0000-%012d",
+                        731 + offset
+                    )
+                )!,
+                createdAt: completedAt,
+                updatedAt: completedAt,
+                workoutSessionID: session.id,
+                exerciseTemplateID: exerciseID,
+                setIndex: offset + 1,
+                measurement: measurement,
+                isWarmupSet: false,
+                completedAt: completedAt
+            )
+        }
+        return CompletedExerciseHistorySnapshot(session: session, setLogs: setLogs)
+    }
+
     private func makeSession(dayID: UUID) -> WorkoutSessionSnapshot {
         WorkoutSessionSnapshot(
             id: uuid("00000000-0000-0000-0000-000000000720"),
@@ -440,6 +553,7 @@ private final class FakeSessionRepository: TrainingRepository {
     var inProgressSession: WorkoutSessionSnapshot?
     var progress: WorkoutSessionProgressSnapshot?
     var setLogs: [SetLogSnapshot] = []
+    var completedExerciseHistory: [UUID: [CompletedExerciseHistorySnapshot]] = [:]
     var saveSetOutcomes: [Result<Void, Error>] = []
     var fetchPlanError: Error?
 
@@ -542,6 +656,12 @@ private final class FakeSessionRepository: TrainingRepository {
 
     func fetchSetLogs(workoutSessionID: UUID) async throws -> [SetLogSnapshot] {
         setLogs
+    }
+
+    func fetchCompletedExerciseHistory(
+        exerciseTemplateID: UUID
+    ) async throws -> [CompletedExerciseHistorySnapshot] {
+        completedExerciseHistory[exerciseTemplateID, default: []]
     }
 
     func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot {

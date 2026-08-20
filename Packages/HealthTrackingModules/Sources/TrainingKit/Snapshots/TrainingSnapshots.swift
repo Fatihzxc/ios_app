@@ -63,6 +63,19 @@ public struct SetLogSnapshot: Equatable, Sendable, Identifiable {
     }
 }
 
+public struct CompletedExerciseHistorySnapshot: Equatable, Sendable {
+    public let session: WorkoutSessionSnapshot
+    public let setLogs: [SetLogSnapshot]
+
+    public init(
+        session: WorkoutSessionSnapshot,
+        setLogs: [SetLogSnapshot]
+    ) {
+        self.session = session
+        self.setLogs = setLogs
+    }
+}
+
 public struct WorkoutSessionCreateRequest: Equatable, Sendable {
     public let id: UUID
     public let date: Date
@@ -409,5 +422,17 @@ public enum SessionSetSaveState: Equatable, Sendable {
 public enum SessionRecommendationReason: Equatable, Sendable {
     case templateStartingValues
     case sameSessionPrevious
+    case priorSessionSameIndex
+    case doubleProgressionIncrease
+    case doubleProgressionHold(SessionDoubleProgressionHoldReason)
     case noPrefill
+}
+
+public enum SessionDoubleProgressionHoldReason: Equatable, Sendable {
+    case noWorkingSets
+    case missingRepCeiling
+    case repetitionsBelowCeiling
+    case missingRIR
+    case rirAboveThreshold
+    case missingExternalWeight
 }

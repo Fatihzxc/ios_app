@@ -11,6 +11,7 @@ enum AppUITestScenario: String {
     case sessionFlow = "session-flow"
     case sessionFamilies = "session-families"
     case sessionResume = "session-resume"
+    case progressionMissingRIR = "progression-missing-rir"
 }
 
 struct AppUITestLaunchConfiguration {

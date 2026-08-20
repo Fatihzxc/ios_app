@@ -35,6 +35,9 @@ final class TrainingRepositoryContractTests: XCTestCase {
         let cooldowns = try await repository.fetchCooldownItems(workoutDayID: UUID())
         let reminders = try await repository.fetchHealthCheckReminders()
         let programState = try await repository.fetchProgramState(programID: UUID())
+        let completedHistory = try await repository.fetchCompletedExerciseHistory(
+            exerciseTemplateID: UUID()
+        )
 
         XCTAssertNil(profile)
         XCTAssertNil(program)
@@ -45,6 +48,7 @@ final class TrainingRepositoryContractTests: XCTestCase {
         XCTAssertEqual(cooldowns, [])
         XCTAssertEqual(reminders, [])
         XCTAssertNil(programState)
+        XCTAssertEqual(completedHistory, [])
     }
 
     func testSeededM1CatalogRoundTripsThroughRepositoryInStableOrder() async throws {
@@ -330,6 +334,112 @@ final class TrainingRepositoryContractTests: XCTestCase {
                 .duplicateProgramStates(programID: programID, count: 2)
             )
         }
+    }
+
+    func testCompletedExerciseHistoryIsImmutableDeterministicAndExcludesActiveSessions() async throws {
+        let container = try ModelContainerFactory.make(for: .inMemory)
+        let context = ModelContext(container)
+        let exerciseID = UUID(uuidString: "00000000-0000-0000-0000-000000000090")!
+        let newestDate = Date(timeIntervalSinceReferenceDate: 3_000)
+        let olderDate = Date(timeIntervalSinceReferenceDate: 2_000)
+        let newestFirst = WorkoutSession(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000091")!,
+            date: newestDate,
+            status: .completed
+        )
+        let newestSecond = WorkoutSession(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000092")!,
+            date: newestDate,
+            status: .completed
+        )
+        let older = WorkoutSession(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000093")!,
+            date: olderDate,
+            status: .completed
+        )
+        let active = WorkoutSession(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000094")!,
+            date: Date(timeIntervalSinceReferenceDate: 4_000),
+            status: .inProgress
+        )
+        [newestFirst, newestSecond, older, active].forEach(context.insert)
+
+        let newestSecondSet = SetLog(
+            exerciseTemplateId: exerciseID,
+            setIndex: 2,
+            weightKg: 12.5,
+            reps: 8,
+            rir: 1,
+            workoutSession: newestFirst
+        )
+        let logs = [
+            newestSecondSet,
+            SetLog(
+                exerciseTemplateId: exerciseID,
+                setIndex: 1,
+                weightKg: 10,
+                reps: 12,
+                rir: 0,
+                workoutSession: newestFirst
+            ),
+            SetLog(
+                exerciseTemplateId: exerciseID,
+                setIndex: 0,
+                reps: 5,
+                isWarmupSet: true,
+                workoutSession: newestFirst
+            ),
+            SetLog(
+                exerciseTemplateId: exerciseID,
+                setIndex: 1,
+                weightKg: 10,
+                reps: 12,
+                rir: 1,
+                workoutSession: newestSecond
+            ),
+            SetLog(
+                exerciseTemplateId: exerciseID,
+                setIndex: 1,
+                weightKg: 7.5,
+                reps: 10,
+                rir: 1,
+                workoutSession: older
+            ),
+            SetLog(
+                exerciseTemplateId: exerciseID,
+                setIndex: 1,
+                weightKg: 20,
+                reps: 12,
+                rir: 0,
+                workoutSession: active
+            ),
+            SetLog(
+                exerciseTemplateId: UUID(),
+                setIndex: 1,
+                weightKg: 99,
+                reps: 99,
+                rir: 0,
+                workoutSession: newestFirst
+            ),
+        ]
+        logs.forEach(context.insert)
+        try context.save()
+        let repository = SwiftDataTrainingRepository(modelContext: ModelContext(container))
+
+        let history = try await repository.fetchCompletedExerciseHistory(
+            exerciseTemplateID: exerciseID
+        )
+
+        XCTAssertEqual(
+            history.map(\.session.id),
+            [newestFirst.id, newestSecond.id, older.id]
+        )
+        XCTAssertEqual(history[0].setLogs.map(\.setIndex), [0, 1, 2])
+        XCTAssertEqual(history[0].setLogs.map(\.isWarmupSet), [true, false, false])
+        XCTAssertEqual(history[0].setLogs.last?.measurement.weightKg, 12.5)
+        newestSecondSet.weightKg = 99
+        XCTAssertEqual(history[0].setLogs.last?.measurement.weightKg, 12.5)
+        assertEquatableSendable(history[0])
     }
 
     func testSaveSetRevalidatesAndReturnsAnImmutableSnapshot() async throws {

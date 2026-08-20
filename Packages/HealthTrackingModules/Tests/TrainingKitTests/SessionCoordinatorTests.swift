@@ -306,6 +306,12 @@ private final class FakeLifecycleRepository: TrainingRepository {
         return setLogs
     }
 
+    func fetchCompletedExerciseHistory(
+        exerciseTemplateID: UUID
+    ) async throws -> [CompletedExerciseHistorySnapshot] {
+        []
+    }
+
     func updateWorkoutSessionSummary(
         id: UUID,
         perceivedRecovery: Int?,

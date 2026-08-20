@@ -579,6 +579,12 @@ private final class FakeTrainingRepository: TrainingRepository {
         throw FakeRepositoryError.unexpectedCall("fetchSetLogs")
     }
 
+    func fetchCompletedExerciseHistory(
+        exerciseTemplateID: UUID
+    ) async throws -> [CompletedExerciseHistorySnapshot] {
+        throw FakeRepositoryError.unexpectedCall("fetchCompletedExerciseHistory")
+    }
+
     func updateWorkoutSessionSummary(
         id: UUID,
         perceivedRecovery: Int?,
