@@ -8,6 +8,7 @@ import TrainingKit
 @MainActor
 struct AppRootView: View {
     let foundationViewModel: FoundationProgramViewModel
+    let phaseTransitionViewModel: PhaseTransitionViewModel
     let makeSessionViewModel: @MainActor () -> SessionViewModel
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
@@ -35,6 +36,7 @@ struct AppRootView: View {
             guard shouldLoadFoundation, !hasStartedFoundationLoad else { return }
             hasStartedFoundationLoad = true
             await foundationViewModel.load()
+            await phaseTransitionViewModel.load()
         }
         .fullScreenCover(item: $sessionRoute) { route in
             TrainingSessionView(
@@ -42,7 +44,10 @@ struct AppRootView: View {
                 workoutDayID: route.workoutDayID,
                 onClose: {
                     sessionRoute = nil
-                    Task { await foundationViewModel.load() }
+                    Task {
+                        await foundationViewModel.load()
+                        await phaseTransitionViewModel.load()
+                    }
                 }
             )
         }
@@ -79,11 +84,13 @@ struct AppRootView: View {
         case .today:
             FoundationTodayView(
                 viewModel: foundationViewModel,
+                phaseTransitionViewModel: phaseTransitionViewModel,
                 onOpenSession: openSession
             )
         case .training:
             FoundationProgramView(
                 viewModel: foundationViewModel,
+                phaseTransitionViewModel: phaseTransitionViewModel,
                 onOpenSession: openSession
             )
         case .nutrition:
@@ -91,7 +98,10 @@ struct AppRootView: View {
         case .progress:
             ReportsFoundationView()
         case .settings:
-            SettingsFoundationView(persistencePresentation: persistencePresentation)
+            SettingsFoundationView(
+                persistencePresentation: persistencePresentation,
+                phaseTransitionViewModel: phaseTransitionViewModel
+            )
         }
     }
 

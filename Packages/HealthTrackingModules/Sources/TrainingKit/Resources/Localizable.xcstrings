@@ -163,7 +163,20 @@
     "session.title" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Antrenman seansı" } } } },
     "session.warmup.complete" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Isınmayı tamamla" } } } },
     "session.warmup.skip" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Isınmayı atla" } } } },
-    "session.warmup.title" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Isınma" } } } }
+    "session.warmup.title" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Isınma" } } } },
+    "phase.transition.review.status" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Faz kararı" } } } },
+    "phase.transition.upcoming.status" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yaklaşan faz" } } } },
+    "phase.transition.next.format" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "%@ fazına geçiş" } } } },
+    "phase.transition.estimate.format" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Takvim tahmini: %@" } } } },
+    "phase.transition.checklist.heading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Kaynak checklist" } } } },
+    "phase.transition.checklist.empty" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Bu faz için kaynak kriter veya kilometre taşı tanımlanmamış." } } } },
+    "phase.transition.confirm" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yeni faza geç" } } } },
+    "phase.transition.stay" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Şimdilik kal" } } } },
+    "phase.selection.empty" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Seçilebilecek bir program fazı bulunamadı." } } } },
+    "phase.selection.error" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Faz bilgisi yüklenemedi." } } } },
+    "phase.selection.explanation" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Manuel seçim aktif fazı ve başlangıç tarihini hemen günceller." } } } },
+    "phase.selection.current" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Aktif" } } } },
+    "phase.selection.title" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Program fazı" } } } }
   },
   "version" : "1.0"
 }

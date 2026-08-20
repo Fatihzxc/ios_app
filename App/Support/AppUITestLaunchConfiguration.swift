@@ -16,6 +16,7 @@ enum AppUITestScenario: String {
     case ohpSafety = "ohp-safety"
     case deloadScheduled = "deload-scheduled"
     case deloadReactive = "deload-reactive"
+    case phaseTransition = "phase-transition"
 }
 
 struct AppUITestLaunchConfiguration {

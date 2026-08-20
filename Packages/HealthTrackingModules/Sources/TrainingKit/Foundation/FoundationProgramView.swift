@@ -10,13 +10,16 @@ public struct FoundationProgramView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     private let viewModel: FoundationProgramViewModel
+    private let phaseTransitionViewModel: PhaseTransitionViewModel?
     private let onOpenSession: (@MainActor (UUID) -> Void)?
 
     public init(
         viewModel: FoundationProgramViewModel,
+        phaseTransitionViewModel: PhaseTransitionViewModel? = nil,
         onOpenSession: (@MainActor (UUID) -> Void)? = nil
     ) {
         self.viewModel = viewModel
+        self.phaseTransitionViewModel = phaseTransitionViewModel
         self.onOpenSession = onOpenSession
     }
 
@@ -87,6 +90,13 @@ public struct FoundationProgramView: View {
                     .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("training.program.name")
+            }
+
+            if let phaseTransitionViewModel {
+                PhaseTransitionCardView(
+                    viewModel: phaseTransitionViewModel,
+                    showsOnlyPriority: false
+                )
             }
 
             sectionHeading(localized("foundation.phases.heading"))

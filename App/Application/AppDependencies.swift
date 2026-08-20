@@ -17,6 +17,7 @@ final class AppDependencies: AppDependencyLoading {
     private let installUITestFixture: @MainActor () throws -> Void
     let trainingRepository: any TrainingRepository
     let foundationViewModel: FoundationProgramViewModel
+    let phaseTransitionViewModel: PhaseTransitionViewModel
     let makeSessionViewModel: @MainActor () -> SessionViewModel
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
@@ -65,7 +66,7 @@ final class AppDependencies: AppDependencyLoading {
                 shouldLoadFoundation = false
             case .seeded, .fatalConfiguration, .sessionFlow, .sessionFamilies, .sessionResume,
                  .progressionMissingRIR, .weeklyPallof, .ohpSafety, .deloadScheduled,
-                 .deloadReactive:
+                 .deloadReactive, .phaseTransition:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -79,6 +80,7 @@ final class AppDependencies: AppDependencyLoading {
         #endif
 
         foundationViewModel = FoundationProgramViewModel(repository: trainingRepository)
+        phaseTransitionViewModel = PhaseTransitionViewModel(repository: trainingRepository)
         let sessionRepository = trainingRepository
         makeSessionViewModel = {
             SessionViewModel(repository: sessionRepository)
@@ -144,9 +146,29 @@ private enum UITestSessionFixture {
             try installDeload(scheduled: true, in: modelContext)
         case .deloadReactive:
             try installDeload(scheduled: false, in: modelContext)
+        case .phaseTransition:
+            try installPhaseTransition(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow:
             return
         }
+    }
+
+    private static func installPhaseTransition(in modelContext: ModelContext) throws {
+        guard let profile = try modelContext.fetch(FetchDescriptor<UserProfile>()).first,
+              let state = try modelContext.fetch(FetchDescriptor<ProgramState>())
+                .first(where: { $0.programId == SeedIdentifiers.program }) else {
+            throw UITestSessionFixtureError.missingSeededProgram
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Istanbul")!
+        let now = Date.now
+        let programStartDate = calendar.date(byAdding: .month, value: -3, to: now)!
+        profile.programStartDate = programStartDate
+        profile.updatedAt = now
+        state.currentPhaseId = SeedIdentifiers.phase1
+        state.phaseStartedAt = programStartDate
+        state.updatedAt = now
+        try modelContext.save()
     }
 
     private static func installMeasurementFamilies(in modelContext: ModelContext) throws {

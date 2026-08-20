@@ -22,6 +22,7 @@ struct AppBootstrapView: View {
             return AnyView(
                 AppRootView(
                     foundationViewModel: dependencies.foundationViewModel,
+                    phaseTransitionViewModel: dependencies.phaseTransitionViewModel,
                     makeSessionViewModel: dependencies.makeSessionViewModel,
                     shouldLoadFoundation: dependencies.shouldLoadFoundation,
                     persistencePresentation: dependencies.persistencePresentation

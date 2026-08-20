@@ -58,7 +58,7 @@ let package = Package(
         ),
         .target(
             name: "SettingsKit",
-            dependencies: ["DesignSystem"],
+            dependencies: ["DesignSystem", "TrainingKit"],
             resources: [.process("Resources")],
             swiftSettings: strictConcurrency
         ),

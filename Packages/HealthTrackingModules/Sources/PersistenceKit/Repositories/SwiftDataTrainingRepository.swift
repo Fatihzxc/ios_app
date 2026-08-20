@@ -36,6 +36,7 @@ public enum TrainingRepositoryMutationError: Error, Equatable, Sendable {
         from: WorkoutSessionStatus,
         to: WorkoutSessionStatus
     )
+    case phaseNotFound(programID: UUID, phaseID: UUID)
 }
 
 @MainActor
@@ -245,6 +246,35 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
             state.deloadUpdatedAt = date
             state.lastDeloadSkippedAt = action == .accepted ? nil : date
             state.lastDeloadAction = action
+            state.updatedAt = date
+            try modelContext.save()
+            updatedState = state
+        }
+        guard let updatedState else {
+            throw TrainingRepositoryIntegrityError.missingProgramState(programID: programID)
+        }
+        return updatedState
+    }
+
+    public func setActiveProgramPhase(
+        programID: UUID,
+        phaseID: UUID,
+        at date: Date
+    ) async throws -> ProgramState {
+        var updatedState: ProgramState?
+        try modelContext.transaction {
+            let state = try requiredProgramState(programID: programID)
+            let matchingPhases = try modelContext.fetch(FetchDescriptor<ProgramPhase>())
+                .filter { $0.id == phaseID && $0.program?.id == programID }
+            guard matchingPhases.count == 1 else {
+                throw TrainingRepositoryMutationError.phaseNotFound(
+                    programID: programID,
+                    phaseID: phaseID
+                )
+            }
+
+            state.currentPhaseId = phaseID
+            state.phaseStartedAt = date
             state.updatedAt = date
             try modelContext.save()
             updatedState = state

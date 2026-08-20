@@ -1,5 +1,6 @@
 import DesignSystem
 import SwiftUI
+import TrainingKit
 
 public enum FoundationPersistencePresentation: Equatable, Sendable {
     case uiTestingInMemory
@@ -10,14 +11,20 @@ public enum FoundationPersistencePresentation: Equatable, Sendable {
 public struct SettingsFoundationView: View {
     private enum Route: Hashable {
         case designSystemGallery
+        case programPhase
     }
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var path: [Route] = []
     private let persistencePresentation: FoundationPersistencePresentation
+    private let phaseTransitionViewModel: PhaseTransitionViewModel?
 
-    public init(persistencePresentation: FoundationPersistencePresentation) {
+    public init(
+        persistencePresentation: FoundationPersistencePresentation,
+        phaseTransitionViewModel: PhaseTransitionViewModel? = nil
+    ) {
         self.persistencePresentation = persistencePresentation
+        self.phaseTransitionViewModel = phaseTransitionViewModel
     }
 
     public var body: some View {
@@ -51,6 +58,26 @@ public struct SettingsFoundationView: View {
                         .accessibilityIdentifier("settings.gallery-link")
                         .accessibilityHint(String(localized: "settings.gallery.hint", bundle: .module))
                     }
+
+                    if phaseTransitionViewModel != nil {
+                        AppCard {
+                            NavigationLink(value: Route.programPhase) {
+                                Label(
+                                    String(localized: "settings.phase.title", bundle: .module),
+                                    systemImage: "arrow.triangle.2.circlepath"
+                                )
+                                .font(AppTypography.label)
+                                .foregroundStyle(
+                                    AppColors.color(.accentAction, scheme: colorScheme)
+                                )
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            }
+                            .accessibilityIdentifier("settings.phase-link")
+                            .accessibilityHint(
+                                String(localized: "settings.phase.hint", bundle: .module)
+                            )
+                        }
+                    }
                 }
                 .padding(.horizontal, AppSpacing.screenHorizontal)
                 .padding(.vertical, AppSpacing.large)
@@ -63,6 +90,10 @@ public struct SettingsFoundationView: View {
                 case .designSystemGallery:
                     DesignSystemGalleryView()
                         .navigationTitle(String(localized: "settings.foundation.title", bundle: .module))
+                case .programPhase:
+                    if let phaseTransitionViewModel {
+                        ManualPhaseSelectionView(viewModel: phaseTransitionViewModel)
+                    }
                 }
             }
         }

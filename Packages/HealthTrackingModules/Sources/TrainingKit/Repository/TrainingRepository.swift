@@ -23,6 +23,11 @@ public protocol TrainingRepository: AnyObject {
         action: DeloadAction,
         at date: Date
     ) async throws -> ProgramState
+    func setActiveProgramPhase(
+        programID: UUID,
+        phaseID: UUID,
+        at date: Date
+    ) async throws -> ProgramState
     func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot
     func createWorkoutSession(
         _ request: WorkoutSessionCreateRequest
@@ -80,6 +85,14 @@ public extension TrainingRepository {
         programID _: UUID,
         reason _: DeloadReason,
         action _: DeloadAction,
+        at _: Date
+    ) async throws -> ProgramState {
+        throw TrainingRepositoryCapabilityError.programStateMutationUnavailable
+    }
+
+    func setActiveProgramPhase(
+        programID _: UUID,
+        phaseID _: UUID,
         at _: Date
     ) async throws -> ProgramState {
         throw TrainingRepositoryCapabilityError.programStateMutationUnavailable

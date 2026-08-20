@@ -478,7 +478,144 @@ final class FoundationProgramViewModelTests: XCTestCase {
         assertCallCounts(repository, profile: 2, program: 1, phases: 1, days: 1)
     }
 
-    private func makeProfile(displayName: String = "Ada") -> UserProfile {
+    func testPhaseTransitionCardShowsSourceChecklistAndStayOnlyDismissesPriority() async {
+        let repository = FakeTrainingRepository()
+        let program = makeProgram()
+        let phase1 = ProgramPhase(
+            id: uuid("00000000-0000-4000-8000-000000000a11"),
+            name: "Temel",
+            orderIndex: 1,
+            monthStart: 1,
+            monthEnd: 1
+        )
+        let phase2 = ProgramPhase(
+            id: uuid("00000000-0000-4000-8000-000000000a12"),
+            name: "İnşa",
+            orderIndex: 2,
+            monthStart: 2,
+            monthEnd: 4,
+            milestone: "Temel faz tamamlandı",
+            entryCriteria: "Teknik rahat ve rutin sürdürülebilir"
+        )
+        let boundary = date(2026, 2, 1, 9)
+        repository.userProfileResponses = [
+            .success(makeProfile(programStartDate: date(2026, 1, 1, 9)))
+        ]
+        repository.activeProgramResponses = [.success(program)]
+        repository.programPhaseResponses = [.success([phase2, phase1])]
+        repository.programState = ProgramState(
+            programId: program.id,
+            currentPhaseId: phase1.id,
+            phaseStartedAt: date(2026, 1, 1, 9)
+        )
+        let viewModel = PhaseTransitionViewModel(repository: repository, calendar: calendar)
+
+        await viewModel.load(at: boundary)
+
+        guard case let .content(snapshot) = viewModel.state else {
+            XCTFail("Expected a phase-transition presentation.")
+            return
+        }
+        XCTAssertEqual(snapshot.currentPhaseID, phase1.id)
+        XCTAssertTrue(snapshot.isPriority)
+        XCTAssertFalse(snapshot.isFinalPhase)
+        XCTAssertEqual(snapshot.review?.nextPhaseID, phase2.id)
+        XCTAssertEqual(snapshot.review?.nextPhaseName, "İnşa")
+        XCTAssertEqual(snapshot.review?.estimatedStart, boundary)
+        XCTAssertEqual(
+            snapshot.review?.checklist.map(\.text),
+            ["Teknik rahat ve rutin sürdürülebilir", "Temel faz tamamlandı"]
+        )
+        XCTAssertTrue(repository.activePhaseSelectionRequests.isEmpty)
+
+        viewModel.stayInCurrentPhase()
+
+        guard case let .content(stayed) = viewModel.state else {
+            XCTFail("Staying must keep phase detail accessible.")
+            return
+        }
+        XCTAssertFalse(stayed.isPriority)
+        XCTAssertEqual(stayed.currentPhaseID, phase1.id)
+        XCTAssertEqual(stayed.review, snapshot.review)
+        XCTAssertTrue(repository.activePhaseSelectionRequests.isEmpty)
+    }
+
+    func testPhaseConfirmationAndManualSelectionAreTheOnlyRepositoryMutations() async {
+        let repository = FakeTrainingRepository()
+        let program = makeProgram()
+        let phase1 = ProgramPhase(
+            id: uuid("00000000-0000-4000-8000-000000000a21"),
+            name: "Temel",
+            orderIndex: 1,
+            monthStart: 1,
+            monthEnd: 1
+        )
+        let phase2 = ProgramPhase(
+            id: uuid("00000000-0000-4000-8000-000000000a22"),
+            name: "İnşa",
+            orderIndex: 2,
+            monthStart: 2,
+            monthEnd: 4,
+            entryCriteria: "Temel tamamlandı"
+        )
+        let phase3 = ProgramPhase(
+            id: uuid("00000000-0000-4000-8000-000000000a23"),
+            name: "Konsolidasyon",
+            orderIndex: 3,
+            monthStart: 5,
+            monthEnd: 8
+        )
+        let programStart = date(2026, 1, 1, 9)
+        repository.userProfileResponses = [
+            .success(makeProfile(programStartDate: programStart))
+        ]
+        repository.activeProgramResponses = [.success(program)]
+        repository.programPhaseResponses = [.success([phase3, phase1, phase2])]
+        repository.programState = ProgramState(
+            programId: program.id,
+            currentPhaseId: phase1.id,
+            phaseStartedAt: programStart
+        )
+        let viewModel = PhaseTransitionViewModel(repository: repository, calendar: calendar)
+        let confirmedAt = date(2026, 2, 2, 10)
+
+        await viewModel.load(at: confirmedAt)
+        await viewModel.confirmTransition(at: confirmedAt)
+
+        XCTAssertEqual(
+            repository.activePhaseSelectionRequests,
+            [.init(programID: program.id, phaseID: phase2.id, at: confirmedAt)]
+        )
+        guard case let .content(confirmed) = viewModel.state else {
+            XCTFail("Expected content after confirmation.")
+            return
+        }
+        XCTAssertEqual(confirmed.currentPhaseID, phase2.id)
+        XCTAssertFalse(confirmed.isPriority)
+
+        let manuallySelectedAt = date(2026, 2, 3, 11)
+        await viewModel.selectPhaseManually(id: phase3.id, at: manuallySelectedAt)
+
+        XCTAssertEqual(
+            repository.activePhaseSelectionRequests,
+            [
+                .init(programID: program.id, phaseID: phase2.id, at: confirmedAt),
+                .init(programID: program.id, phaseID: phase3.id, at: manuallySelectedAt),
+            ]
+        )
+        guard case let .content(manual) = viewModel.state else {
+            XCTFail("Expected content after manual selection.")
+            return
+        }
+        XCTAssertEqual(manual.currentPhaseID, phase3.id)
+        XCTAssertTrue(manual.isFinalPhase)
+        XCTAssertEqual(repository.programState?.phaseStartedAt, manuallySelectedAt)
+    }
+
+    private func makeProfile(
+        displayName: String = "Ada",
+        programStartDate: Date = .now
+    ) -> UserProfile {
         UserProfile(
             id: uuid("00000000-0000-4000-8000-000000000901"),
             displayName: displayName,
@@ -486,6 +623,7 @@ final class FoundationProgramViewModelTests: XCTestCase {
             startWeightKg: 100,
             targetWeightKg: 90,
             proteinTargetG: 110,
+            programStartDate: programStartDate,
             weeklyWorkoutTarget: 3
         )
     }
@@ -540,6 +678,28 @@ final class FoundationProgramViewModelTests: XCTestCase {
         UUID(uuidString: value)!
     }
 
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Istanbul")!
+        return calendar
+    }
+
+    private func date(
+        _ year: Int,
+        _ month: Int,
+        _ day: Int,
+        _ hour: Int
+    ) -> Date {
+        calendar.date(
+            from: DateComponents(
+                year: year,
+                month: month,
+                day: day,
+                hour: hour
+            )
+        )!
+    }
+
     private func assertEquatableSendable<Value: Equatable & Sendable>(_: Value) {}
 
     private func assertCallCounts(
@@ -567,6 +727,7 @@ private final class FakeTrainingRepository: TrainingRepository {
     var programState: ProgramState?
     var exerciseTemplatesByDayID: [UUID: [ExerciseTemplate]] = [:]
     var completedHistoryByExerciseID: [UUID: [CompletedExerciseHistorySnapshot]] = [:]
+    private(set) var activePhaseSelectionRequests: [ActivePhaseSelectionRequest] = []
 
     private(set) var fetchUserProfileCallCount = 0
     private(set) var fetchActiveProgramCallCount = 0
@@ -631,6 +792,23 @@ private final class FakeTrainingRepository: TrainingRepository {
 
     func fetchProgramState(programID: UUID) async throws -> ProgramState? {
         programState?.programId == programID ? programState : nil
+    }
+
+    func setActiveProgramPhase(
+        programID: UUID,
+        phaseID: UUID,
+        at date: Date
+    ) async throws -> ProgramState {
+        activePhaseSelectionRequests.append(
+            .init(programID: programID, phaseID: phaseID, at: date)
+        )
+        guard let programState, programState.programId == programID else {
+            throw FakeRepositoryError.unexpectedCall("setActiveProgramPhase")
+        }
+        programState.currentPhaseId = phaseID
+        programState.phaseStartedAt = date
+        programState.updatedAt = date
+        return programState
     }
 
     func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot {
@@ -727,6 +905,12 @@ private final class FakeTrainingRepository: TrainingRepository {
         }
         return responses.removeFirst()
     }
+}
+
+private struct ActivePhaseSelectionRequest: Equatable {
+    let programID: UUID
+    let phaseID: UUID
+    let at: Date
 }
 
 private struct QueuedResponse<Value> {

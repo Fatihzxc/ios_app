@@ -7,13 +7,16 @@ import TrainingKit
 struct FoundationTodayView: View {
     @Environment(\.colorScheme) private var colorScheme
     let viewModel: FoundationProgramViewModel
+    let phaseTransitionViewModel: PhaseTransitionViewModel?
     let onOpenSession: @MainActor (UUID) -> Void
 
     init(
         viewModel: FoundationProgramViewModel,
+        phaseTransitionViewModel: PhaseTransitionViewModel? = nil,
         onOpenSession: @escaping @MainActor (UUID) -> Void = { _ in }
     ) {
         self.viewModel = viewModel
+        self.phaseTransitionViewModel = phaseTransitionViewModel
         self.onOpenSession = onOpenSession
     }
 
@@ -94,6 +97,11 @@ struct FoundationTodayView: View {
 
             if let deload = snapshot.deload {
                 deloadCard(deload)
+            } else if let phaseTransitionViewModel {
+                PhaseTransitionCardView(
+                    viewModel: phaseTransitionViewModel,
+                    showsOnlyPriority: true
+                )
             }
 
             if let workoutDay = snapshot.workoutDays.first {
