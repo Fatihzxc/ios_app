@@ -9,6 +9,7 @@ public enum TrainingRepositoryIntegrityError: Error, Equatable, Sendable {
     case duplicateProgramStates(programID: UUID, count: Int)
     case missingWorkoutSession(id: UUID)
     case duplicateWorkoutSessions(id: UUID, count: Int)
+    case duplicateWorkoutDayTemplates(id: UUID, count: Int)
     case missingExerciseTemplate(id: UUID)
     case duplicateExerciseTemplates(id: UUID, count: Int)
     case inProgressSessionAlreadyExists(existingID: UUID)
@@ -26,6 +27,8 @@ public enum TrainingRepositoryIntegrityError: Error, Equatable, Sendable {
 
 public enum TrainingRepositoryMutationError: Error, Equatable, Sendable {
     case workoutSessionNotFound(id: UUID)
+    case invalidPerceivedRecovery(Int)
+    case summaryRequiresCompletedSession(id: UUID, status: WorkoutSessionStatus)
     case illegalWorkoutSessionTransition(
         id: UUID,
         from: WorkoutSessionStatus,
@@ -375,13 +378,57 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
                 }
                 return lhs.id.uuidString < rhs.id.uuidString
             }
+            .map(Self.exerciseSnapshot)
+    }
+
+    public func fetchSessionPlan(
+        workoutDayID: UUID
+    ) async throws -> SessionWorkoutPlanSnapshot? {
+        let matchingDays = try modelContext.fetch(FetchDescriptor<WorkoutDayTemplate>())
+            .filter { $0.id == workoutDayID }
+        guard matchingDays.count <= 1 else {
+            throw TrainingRepositoryIntegrityError.duplicateWorkoutDayTemplates(
+                id: workoutDayID,
+                count: matchingDays.count
+            )
+        }
+        guard let day = matchingDays.first else {
+            return nil
+        }
+
+        let warmups = try modelContext.fetch(FetchDescriptor<WarmupItem>())
+            .filter { $0.workoutDayTemplate?.id == workoutDayID }
+            .sorted(by: Self.orderChecklistItems)
             .map {
-                SessionExerciseSnapshot(
+                SessionChecklistItemSnapshot(
                     id: $0.id,
-                    orderIndex: $0.orderIndex,
-                    targetSets: $0.targetSets
+                    title: $0.movement,
+                    detail: $0.dose,
+                    orderIndex: $0.orderIndex
                 )
             }
+        let exercises = try await fetchSessionExercises(workoutDayID: workoutDayID)
+        let cooldowns = try modelContext.fetch(FetchDescriptor<CooldownItem>())
+            .filter { $0.workoutDayTemplate?.id == workoutDayID }
+            .sorted(by: Self.orderChecklistItems)
+            .map {
+                SessionChecklistItemSnapshot(
+                    id: $0.id,
+                    title: $0.movement,
+                    detail: $0.dose,
+                    note: $0.note,
+                    orderIndex: $0.orderIndex
+                )
+            }
+
+        return SessionWorkoutPlanSnapshot(
+            workoutDayID: day.id,
+            name: day.name,
+            focus: day.focus,
+            warmupItems: warmups,
+            exercises: exercises,
+            cooldownItems: cooldowns
+        )
     }
 
     public func fetchSetLogs(workoutSessionID: UUID) async throws -> [SetLogSnapshot] {
@@ -397,6 +444,48 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
                 return lhs.id.uuidString < rhs.id.uuidString
             }
             .map { Self.snapshot($0, workoutSessionID: workoutSessionID) }
+    }
+
+    public func updateWorkoutSessionSummary(
+        id: UUID,
+        perceivedRecovery: Int?,
+        note: String?,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot {
+        if let perceivedRecovery, !(1...10).contains(perceivedRecovery) {
+            throw TrainingRepositoryMutationError.invalidPerceivedRecovery(perceivedRecovery)
+        }
+
+        var savedSnapshot: WorkoutSessionSnapshot?
+        try modelContext.transaction {
+            let matches = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
+                .filter { $0.id == id }
+            guard let session = matches.first else {
+                throw TrainingRepositoryMutationError.workoutSessionNotFound(id: id)
+            }
+            guard matches.count == 1 else {
+                throw TrainingRepositoryIntegrityError.duplicateWorkoutSessions(
+                    id: id,
+                    count: matches.count
+                )
+            }
+            guard session.status == .completed else {
+                throw TrainingRepositoryMutationError.summaryRequiresCompletedSession(
+                    id: id,
+                    status: session.status
+                )
+            }
+
+            session.perceivedRecovery = perceivedRecovery
+            session.note = note
+            session.updatedAt = date
+            try modelContext.save()
+            savedSnapshot = Self.sessionSnapshot(session)
+        }
+        guard let savedSnapshot else {
+            throw TrainingRepositoryIntegrityError.transactionDidNotProduceSessionSnapshot
+        }
+        return savedSnapshot
     }
 
     public func deleteWorkoutSession(id: UUID) async throws {
@@ -531,6 +620,47 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
             ohpSymptomResponse: session.ohpSymptomResponse,
             ohpSymptomCheckedAt: session.ohpSymptomCheckedAt
         )
+    }
+
+    private static func exerciseSnapshot(
+        _ exercise: ExerciseTemplate
+    ) -> SessionExerciseSnapshot {
+        SessionExerciseSnapshot(
+            id: exercise.id,
+            name: exercise.name,
+            orderIndex: exercise.orderIndex,
+            targetSets: exercise.targetSets,
+            repLow: exercise.repLow,
+            repHigh: exercise.repHigh,
+            rirLow: exercise.rirLow,
+            rirHigh: exercise.rirHigh,
+            allowFailure: exercise.allowFailure,
+            cues: exercise.cues,
+            safetyNote: exercise.safetyNote,
+            startingWeightKg: exercise.startingWeightKg,
+            progressionRule: exercise.progressionRule,
+            measurementKind: exercise.measurementKind
+        )
+    }
+
+    private static func orderChecklistItems(
+        _ lhs: WarmupItem,
+        _ rhs: WarmupItem
+    ) -> Bool {
+        if lhs.orderIndex != rhs.orderIndex {
+            return lhs.orderIndex < rhs.orderIndex
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private static func orderChecklistItems(
+        _ lhs: CooldownItem,
+        _ rhs: CooldownItem
+    ) -> Bool {
+        if lhs.orderIndex != rhs.orderIndex {
+            return lhs.orderIndex < rhs.orderIndex
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
     }
 
     private static func progressSnapshot(

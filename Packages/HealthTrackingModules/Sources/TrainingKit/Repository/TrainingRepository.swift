@@ -29,6 +29,15 @@ public protocol TrainingRepository: AnyObject {
         _ update: WorkoutSessionProgressUpdate
     ) async throws -> WorkoutSessionProgressSnapshot
     func fetchSessionExercises(workoutDayID: UUID) async throws -> [SessionExerciseSnapshot]
+    func fetchSessionPlan(
+        workoutDayID: UUID
+    ) async throws -> SessionWorkoutPlanSnapshot?
     func fetchSetLogs(workoutSessionID: UUID) async throws -> [SetLogSnapshot]
+    func updateWorkoutSessionSummary(
+        id: UUID,
+        perceivedRecovery: Int?,
+        note: String?,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot
     func deleteWorkoutSession(id: UUID) async throws
 }

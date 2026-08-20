@@ -1,0 +1,630 @@
+import CoreModels
+import Foundation
+import TrainingKit
+import XCTest
+
+@MainActor
+final class SessionViewModelTests: XCTestCase {
+    private let now = Date(timeIntervalSinceReferenceDate: 40_000)
+
+    func testStartCreatesAndPersistsWarmupForANewSession() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        let viewModel = makeViewModel(repository)
+
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+
+        let presentation = requireActive(viewModel.state)
+        XCTAssertEqual(presentation.session.status, .inProgress)
+        XCTAssertEqual(presentation.plan, repository.plan)
+        XCTAssertEqual(presentation.progress.stage, .warmup)
+        XCTAssertEqual(presentation.restoreSource, .inferredMissingProgress)
+        XCTAssertEqual(repository.createRequests.count, 1)
+        XCTAssertEqual(repository.transitions.map(\.status), [.inProgress])
+        XCTAssertEqual(repository.progressUpdates.map(\.state.stage), [.warmup])
+    }
+
+    func testStartResumesStoredExerciseWithoutCreatingAnotherSession() async {
+        let plan = makePlan()
+        let repository = FakeSessionRepository(plan: plan)
+        let session = makeSession(dayID: plan.workoutDayID)
+        repository.inProgressSession = session
+        repository.progress = WorkoutSessionProgressSnapshot(
+            id: uuid("00000000-0000-0000-0000-000000000701"),
+            createdAt: now,
+            updatedAt: now,
+            workoutSessionID: session.id,
+            stage: .movement,
+            currentExerciseTemplateID: plan.exercises[1].id,
+            completedWarmupItemIDs: Set(plan.warmupItems.map(\.id)),
+            warmupDisposition: .completed
+        )
+        let viewModel = makeViewModel(repository)
+
+        await viewModel.start(workoutDayID: UUID())
+
+        let presentation = requireActive(viewModel.state)
+        XCTAssertEqual(presentation.session, session)
+        XCTAssertEqual(presentation.progress.stage, .movement)
+        XCTAssertEqual(presentation.currentExercise?.id, plan.exercises[1].id)
+        XCTAssertEqual(presentation.restoreSource, .stored)
+        XCTAssertTrue(repository.createRequests.isEmpty)
+        XCTAssertTrue(repository.transitions.isEmpty)
+        XCTAssertTrue(repository.progressUpdates.isEmpty)
+    }
+
+    func testWarmupExerciseCooldownAndSummaryNavigationPersistsEveryStage() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+
+        await viewModel.toggleWarmupItem(id: repository.plan.warmupItems[0].id)
+        XCTAssertEqual(
+            requireActive(viewModel.state).progress.completedWarmupItemIDs,
+            [repository.plan.warmupItems[0].id]
+        )
+
+        await viewModel.completeWarmup()
+        var presentation = requireActive(viewModel.state)
+        XCTAssertEqual(presentation.progress.stage, .movement)
+        XCTAssertEqual(presentation.currentExercise?.id, repository.plan.exercises[0].id)
+        XCTAssertEqual(presentation.progress.warmupDisposition, .completed)
+
+        await viewModel.advanceExercise()
+        presentation = requireActive(viewModel.state)
+        XCTAssertEqual(presentation.currentExercise?.id, repository.plan.exercises[1].id)
+
+        await viewModel.goBack()
+        presentation = requireActive(viewModel.state)
+        XCTAssertEqual(presentation.currentExercise?.id, repository.plan.exercises[0].id)
+
+        await viewModel.advanceExercise()
+        await viewModel.advanceExercise()
+        presentation = requireActive(viewModel.state)
+        XCTAssertEqual(presentation.progress.stage, .cooldown)
+
+        await viewModel.toggleCooldownItem(id: repository.plan.cooldownItems[0].id)
+        await viewModel.completeCooldown()
+        presentation = requireActive(viewModel.state)
+        XCTAssertEqual(presentation.progress.stage, .summary)
+        XCTAssertEqual(presentation.progress.cooldownDisposition, .completed)
+        XCTAssertEqual(presentation.session.status, .completed)
+        XCTAssertEqual(
+            repository.progressUpdates.map(\.state.stage),
+            [.warmup, .warmup, .movement, .movement, .movement, .movement, .cooldown, .cooldown, .summary]
+        )
+        XCTAssertEqual(repository.transitions.map(\.status), [.inProgress, .completed])
+    }
+
+    func testSkipIntentsPersistExplicitChecklistDispositions() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+
+        await viewModel.skipWarmup()
+        var presentation = requireActive(viewModel.state)
+        XCTAssertEqual(presentation.progress.stage, .movement)
+        XCTAssertEqual(presentation.progress.warmupDisposition, .skipped)
+
+        await viewModel.advanceExercise()
+        await viewModel.advanceExercise()
+        await viewModel.skipCooldown()
+        presentation = requireActive(viewModel.state)
+        XCTAssertEqual(presentation.progress.stage, .summary)
+        XCTAssertEqual(presentation.progress.cooldownDisposition, .skipped)
+        XCTAssertEqual(presentation.session.status, .completed)
+    }
+
+    func testIncompleteFinishKeepsValidSetsAndNeverCreatesPlaceholderSets() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+        await viewModel.skipWarmup()
+
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.weightKg, 10)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.reps, 8)
+        await viewModel.saveCurrentSet()
+        XCTAssertEqual(repository.saveSetRequests.count, 1)
+        XCTAssertEqual(requireActive(viewModel.state).setLogs.count, 1)
+
+        await viewModel.finishIncomplete()
+
+        let presentation = requireActive(viewModel.state)
+        XCTAssertEqual(presentation.progress.stage, .summary)
+        XCTAssertEqual(presentation.session.status, .completed)
+        XCTAssertEqual(presentation.setLogs.count, 1)
+        XCTAssertEqual(repository.saveSetRequests.count, 1)
+    }
+
+    func testDeleteRequiresExplicitConfirmationAndIsIdempotentAtViewModelBoundary() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+        let sessionID = requireActive(viewModel.state).session.id
+
+        viewModel.requestDeletion()
+        XCTAssertTrue(viewModel.isDeleteConfirmationPresented)
+        XCTAssertTrue(repository.deletedSessionIDs.isEmpty)
+
+        viewModel.cancelDeletion()
+        XCTAssertFalse(viewModel.isDeleteConfirmationPresented)
+        viewModel.requestDeletion()
+        await viewModel.confirmDeletion()
+
+        XCTAssertEqual(repository.deletedSessionIDs, [sessionID])
+        XCTAssertEqual(viewModel.state, .dismissed)
+        XCTAssertFalse(viewModel.isDeleteConfirmationPresented)
+    }
+
+    func testSetSaveFailurePreservesDraftAndRetriesTheExactRequest() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        repository.saveSetOutcomes = [.failure(FakeSessionError.save), .success(())]
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let originalMeasurement = viewModel.currentSetDraft?.measurement
+
+        await viewModel.saveCurrentSet()
+
+        XCTAssertEqual(viewModel.setSaveState, .repositoryFailed)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement, originalMeasurement)
+        XCTAssertEqual(repository.saveSetRequests.count, 1)
+        let failedRequest = repository.saveSetRequests[0]
+
+        await viewModel.retrySetSave()
+
+        XCTAssertEqual(viewModel.setSaveState, .saved(setID: failedRequest.id))
+        XCTAssertEqual(repository.saveSetRequests.count, 2)
+        XCTAssertEqual(repository.saveSetRequests[0], repository.saveSetRequests[1])
+        XCTAssertEqual(requireActive(viewModel.state).setLogs.map(\.id), [failedRequest.id])
+    }
+
+    func testDraftAndRecommendationAdaptAcrossEveryMeasurementFamily() async {
+        let plan = makeMeasurementFamilyPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+
+        let expected: [(ExerciseMeasurementKind, Set<SetDraft.Field>)] = [
+            (.weightReps, [.weightKg, .reps, .performedVariant, .rir]),
+            (.reps, [.weightKg, .reps, .performedVariant, .rir]),
+            (.duration, [.durationSec, .performedVariant, .rir]),
+            (.steps, [.weightKg, .distanceSteps, .performedVariant, .rir]),
+            (.quality, [.reps, .durationSec, .performedVariant, .rir]),
+        ]
+
+        for (index, expectation) in expected.enumerated() {
+            let presentation = requireActive(viewModel.state)
+            XCTAssertEqual(presentation.currentExercise?.measurementKind, expectation.0)
+            XCTAssertEqual(viewModel.currentSetDraft?.enabledFields, expectation.1)
+            XCTAssertEqual(viewModel.recommendationReason, .templateStartingValues)
+            if index < expected.count - 1 {
+                await viewModel.advanceExercise()
+            }
+        }
+    }
+
+    func testSameSessionSetBecomesNextDraftPrefillWithSpecificReason() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+        await viewModel.skipWarmup()
+        viewModel.currentSetDraft?.measurement.weightKg = 12.5
+        viewModel.currentSetDraft?.measurement.reps = 9
+        viewModel.currentSetDraft?.selectRIR(2)
+
+        await viewModel.saveCurrentSet()
+
+        XCTAssertEqual(viewModel.currentSetDraft?.setIndex, 2)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.weightKg, 12.5)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.reps, 9)
+        XCTAssertEqual(viewModel.currentSetDraft?.measurement.rir, 2)
+        XCTAssertEqual(viewModel.recommendationReason, .sameSessionPrevious)
+    }
+
+    func testSummaryValuesStayNilUntilChosenAndSaveOnlyExplicitInput() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+        await viewModel.skipWarmup()
+        await viewModel.finishIncomplete()
+
+        XCTAssertNil(viewModel.summaryRecovery)
+        XCTAssertEqual(viewModel.summaryNote, "")
+        XCTAssertTrue(repository.summaryUpdates.isEmpty)
+
+        await viewModel.saveSummary()
+        XCTAssertEqual(repository.summaryUpdates.count, 1)
+        XCTAssertNil(repository.summaryUpdates[0].recovery)
+        XCTAssertNil(repository.summaryUpdates[0].note)
+        XCTAssertEqual(viewModel.state, .dismissed)
+
+        let secondRepository = FakeSessionRepository(plan: makePlan())
+        let secondViewModel = makeViewModel(secondRepository)
+        await secondViewModel.start(workoutDayID: secondRepository.plan.workoutDayID)
+        await secondViewModel.skipWarmup()
+        await secondViewModel.finishIncomplete()
+        secondViewModel.selectRecovery(4)
+        secondViewModel.updateSummaryNote("  Güçlü hissettim  ")
+        await secondViewModel.saveSummary()
+
+        XCTAssertEqual(secondRepository.summaryUpdates.count, 1)
+        XCTAssertEqual(secondRepository.summaryUpdates[0].recovery, 4)
+        XCTAssertEqual(secondRepository.summaryUpdates[0].note, "Güçlü hissettim")
+    }
+
+    func testRecoveryAcceptsDocumentedOneToTenRangeAndRejectsOutsideValues() {
+        let repository = FakeSessionRepository(plan: makePlan())
+        let viewModel = makeViewModel(repository)
+
+        viewModel.selectRecovery(10)
+        XCTAssertEqual(viewModel.summaryRecovery, 10)
+
+        viewModel.selectRecovery(11)
+        XCTAssertEqual(viewModel.summaryRecovery, 10)
+
+        viewModel.selectRecovery(0)
+        XCTAssertEqual(viewModel.summaryRecovery, 10)
+
+        viewModel.selectRecovery(nil)
+        XCTAssertNil(viewModel.summaryRecovery)
+    }
+
+    func testLoadAndProgressFailuresHaveStableRecoverableStates() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        repository.fetchPlanError = FakeSessionError.load
+        let viewModel = makeViewModel(repository)
+
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+        XCTAssertEqual(viewModel.state, .failed(.load))
+
+        repository.fetchPlanError = nil
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+        XCTAssertNotNil(activePresentation(from: viewModel.state))
+    }
+
+    private func makeViewModel(_ repository: FakeSessionRepository) -> SessionViewModel {
+        SessionViewModel(repository: repository, now: { self.now })
+    }
+
+    private func makePlan() -> SessionWorkoutPlanSnapshot {
+        let dayID = uuid("00000000-0000-0000-0000-000000000710")
+        return SessionWorkoutPlanSnapshot(
+            workoutDayID: dayID,
+            name: "Gün A",
+            focus: "Tam vücut",
+            warmupItems: [
+                .init(
+                    id: uuid("00000000-0000-0000-0000-000000000711"),
+                    title: "İp / koşu",
+                    detail: "60–90 sn",
+                    orderIndex: 1
+                ),
+                .init(
+                    id: uuid("00000000-0000-0000-0000-000000000712"),
+                    title: "Band pull-apart",
+                    detail: "15",
+                    orderIndex: 2
+                ),
+            ],
+            exercises: [
+                .init(
+                    id: uuid("00000000-0000-0000-0000-000000000713"),
+                    name: "DB Floor Press",
+                    orderIndex: 1,
+                    targetSets: 3,
+                    repLow: 8,
+                    repHigh: 12,
+                    rirLow: 1,
+                    rirHigh: 2,
+                    allowFailure: true,
+                    cues: "Dirsek 45°",
+                    safetyNote: "Yerde kontrollü dur",
+                    startingWeightKg: 10,
+                    progressionRule: .doubleProgression,
+                    measurementKind: .weightReps
+                ),
+                .init(
+                    id: uuid("00000000-0000-0000-0000-000000000714"),
+                    name: "Chin-up",
+                    orderIndex: 2,
+                    targetSets: 2,
+                    repLow: 6,
+                    repHigh: 12,
+                    rirLow: 1,
+                    rirHigh: 2,
+                    allowFailure: false,
+                    cues: "Boyun nötr",
+                    safetyNote: "Faile gitme",
+                    startingWeightKg: nil,
+                    progressionRule: .bodyweightProgression,
+                    measurementKind: .reps
+                ),
+            ],
+            cooldownItems: [
+                .init(
+                    id: uuid("00000000-0000-0000-0000-000000000715"),
+                    title: "Pektoral germe",
+                    detail: "30 sn × 2/taraf",
+                    note: nil,
+                    orderIndex: 1
+                ),
+            ]
+        )
+    }
+
+    private func makeMeasurementFamilyPlan() -> SessionWorkoutPlanSnapshot {
+        let base = makePlan()
+        let kinds: [(String, ExerciseMeasurementKind, Double?, Int?)] = [
+            ("Ağırlık + tekrar", .weightReps, 10, 8),
+            ("Tekrar", .reps, nil, 10),
+            ("Süre", .duration, nil, 30),
+            ("Adım", .steps, 20, 40),
+            ("Kalite", .quality, nil, nil),
+        ]
+        let exercises = kinds.enumerated().map { index, value in
+            SessionExerciseSnapshot(
+                id: UUID(),
+                name: value.0,
+                orderIndex: index + 1,
+                targetSets: 1,
+                repLow: value.3,
+                repHigh: value.3,
+                rirLow: 0,
+                rirHigh: 2,
+                allowFailure: false,
+                cues: "",
+                safetyNote: "Güvenli teknik",
+                startingWeightKg: value.2,
+                progressionRule: .timeQuality,
+                measurementKind: value.1
+            )
+        }
+        return SessionWorkoutPlanSnapshot(
+            workoutDayID: base.workoutDayID,
+            name: "Ölçüm aileleri",
+            focus: "UI sözleşmesi",
+            warmupItems: base.warmupItems,
+            exercises: exercises,
+            cooldownItems: base.cooldownItems
+        )
+    }
+
+    private func makeSession(dayID: UUID) -> WorkoutSessionSnapshot {
+        WorkoutSessionSnapshot(
+            id: uuid("00000000-0000-0000-0000-000000000720"),
+            date: now,
+            status: .inProgress,
+            workoutDayTemplateID: dayID
+        )
+    }
+
+    private func requireActive(
+        _ state: SessionViewState,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> SessionPresentation {
+        guard let presentation = activePresentation(from: state) else {
+            XCTFail("Expected active session, got \(state)", file: file, line: line)
+            return SessionPresentation.placeholder
+        }
+        return presentation
+    }
+
+    private func activePresentation(from state: SessionViewState) -> SessionPresentation? {
+        guard case let .active(presentation) = state else { return nil }
+        return presentation
+    }
+
+    private func uuid(_ value: String) -> UUID {
+        UUID(uuidString: value)!
+    }
+}
+
+@MainActor
+private final class FakeSessionRepository: TrainingRepository {
+    struct Transition: Equatable {
+        let id: UUID
+        let status: WorkoutSessionStatus
+        let date: Date
+    }
+
+    struct SummaryUpdate: Equatable {
+        let id: UUID
+        let recovery: Int?
+        let note: String?
+        let date: Date
+    }
+
+    let plan: SessionWorkoutPlanSnapshot
+    var inProgressSession: WorkoutSessionSnapshot?
+    var progress: WorkoutSessionProgressSnapshot?
+    var setLogs: [SetLogSnapshot] = []
+    var saveSetOutcomes: [Result<Void, Error>] = []
+    var fetchPlanError: Error?
+
+    private(set) var createRequests: [WorkoutSessionCreateRequest] = []
+    private(set) var transitions: [Transition] = []
+    private(set) var progressUpdates: [WorkoutSessionProgressUpdate] = []
+    private(set) var saveSetRequests: [SetLogSaveRequest] = []
+    private(set) var deletedSessionIDs: [UUID] = []
+    private(set) var summaryUpdates: [SummaryUpdate] = []
+
+    init(plan: SessionWorkoutPlanSnapshot) {
+        self.plan = plan
+    }
+
+    func fetchUserProfile() async throws -> UserProfile? { nil }
+    func fetchActiveProgram() async throws -> Program? { nil }
+    func fetchProgramPhases(programID: UUID) async throws -> [ProgramPhase] { [] }
+    func fetchWorkoutDays(programID: UUID) async throws -> [WorkoutDayTemplate] { [] }
+    func fetchExerciseTemplates(workoutDayID: UUID) async throws -> [ExerciseTemplate] { [] }
+    func fetchWarmupItems(workoutDayID: UUID) async throws -> [WarmupItem] { [] }
+    func fetchCooldownItems(workoutDayID: UUID) async throws -> [CooldownItem] { [] }
+    func fetchHealthCheckReminders() async throws -> [HealthCheckReminder] { [] }
+    func fetchProgramState(programID: UUID) async throws -> ProgramState? { nil }
+
+    func createWorkoutSession(
+        _ request: WorkoutSessionCreateRequest
+    ) async throws -> WorkoutSessionSnapshot {
+        createRequests.append(request)
+        return WorkoutSessionSnapshot(
+            id: request.id,
+            date: request.date,
+            status: .planned,
+            workoutDayTemplateID: request.workoutDayTemplateID
+        )
+    }
+
+    func fetchInProgressWorkoutSession() async throws -> WorkoutSessionSnapshot? {
+        inProgressSession
+    }
+
+    func transitionWorkoutSession(
+        id: UUID,
+        to status: WorkoutSessionStatus,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot {
+        transitions.append(.init(id: id, status: status, date: date))
+        let source = inProgressSession ?? WorkoutSessionSnapshot(
+            id: id,
+            date: date,
+            status: .planned,
+            workoutDayTemplateID: plan.workoutDayID
+        )
+        let updated = WorkoutSessionSnapshot(
+            id: source.id,
+            createdAt: source.createdAt,
+            updatedAt: date,
+            date: source.date,
+            status: status,
+            workoutDayTemplateID: source.workoutDayTemplateID,
+            perceivedRecovery: source.perceivedRecovery,
+            note: source.note,
+            ohpSymptomResponse: source.ohpSymptomResponse,
+            ohpSymptomCheckedAt: source.ohpSymptomCheckedAt
+        )
+        inProgressSession = status == .inProgress ? updated : nil
+        return updated
+    }
+
+    func fetchWorkoutSessionProgress(
+        sessionID: UUID
+    ) async throws -> WorkoutSessionProgressSnapshot? {
+        progress
+    }
+
+    func saveWorkoutSessionProgress(
+        _ update: WorkoutSessionProgressUpdate
+    ) async throws -> WorkoutSessionProgressSnapshot {
+        progressUpdates.append(update)
+        let snapshot = WorkoutSessionProgressSnapshot(
+            id: progress?.id ?? update.id,
+            createdAt: progress?.createdAt ?? update.updatedAt,
+            updatedAt: update.updatedAt,
+            workoutSessionID: update.workoutSessionID,
+            stage: update.state.stage,
+            currentExerciseTemplateID: update.state.currentExerciseTemplateID,
+            completedWarmupItemIDs: update.state.completedWarmupItemIDs,
+            completedCooldownItemIDs: update.state.completedCooldownItemIDs,
+            warmupDisposition: update.state.warmupDisposition,
+            cooldownDisposition: update.state.cooldownDisposition
+        )
+        progress = snapshot
+        return snapshot
+    }
+
+    func fetchSessionExercises(
+        workoutDayID: UUID
+    ) async throws -> [SessionExerciseSnapshot] {
+        plan.exercises
+    }
+
+    func fetchSetLogs(workoutSessionID: UUID) async throws -> [SetLogSnapshot] {
+        setLogs
+    }
+
+    func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot {
+        saveSetRequests.append(request)
+        if !saveSetOutcomes.isEmpty {
+            try saveSetOutcomes.removeFirst().get()
+        }
+        let snapshot = SetLogSnapshot(
+            id: request.id,
+            createdAt: request.completedAt,
+            updatedAt: request.completedAt,
+            workoutSessionID: request.workoutSessionID,
+            exerciseTemplateID: request.exerciseTemplateID,
+            setIndex: request.setIndex,
+            measurement: request.measurement,
+            isWarmupSet: request.isWarmupSet,
+            completedAt: request.completedAt
+        )
+        setLogs.append(snapshot)
+        return snapshot
+    }
+
+    func deleteWorkoutSession(id: UUID) async throws {
+        deletedSessionIDs.append(id)
+        inProgressSession = nil
+        progress = nil
+        setLogs.removeAll { $0.workoutSessionID == id }
+    }
+
+    func fetchSessionPlan(
+        workoutDayID: UUID
+    ) async throws -> SessionWorkoutPlanSnapshot? {
+        if let fetchPlanError { throw fetchPlanError }
+        return plan.workoutDayID == workoutDayID ? plan : nil
+    }
+
+    func updateWorkoutSessionSummary(
+        id: UUID,
+        perceivedRecovery: Int?,
+        note: String?,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot {
+        summaryUpdates.append(
+            .init(id: id, recovery: perceivedRecovery, note: note, date: date)
+        )
+        return WorkoutSessionSnapshot(
+            id: id,
+            date: date,
+            status: .completed,
+            workoutDayTemplateID: plan.workoutDayID,
+            perceivedRecovery: perceivedRecovery,
+            note: note
+        )
+    }
+}
+
+private enum FakeSessionError: Error {
+    case load
+    case save
+}
+
+private extension SessionPresentation {
+    static var placeholder: SessionPresentation {
+        let date = Date(timeIntervalSinceReferenceDate: 0)
+        let dayID = UUID()
+        return SessionPresentation(
+            session: WorkoutSessionSnapshot(
+                id: UUID(),
+                date: date,
+                status: .inProgress,
+                workoutDayTemplateID: dayID
+            ),
+            plan: SessionWorkoutPlanSnapshot(
+                workoutDayID: dayID,
+                name: "",
+                focus: "",
+                warmupItems: [],
+                exercises: [],
+                cooldownItems: []
+            ),
+            progress: SessionProgressState(stage: .warmup),
+            setLogs: [],
+            restoreSource: .inferredMissingProgress
+        )
+    }
+}

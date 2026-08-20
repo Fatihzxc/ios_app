@@ -1,3 +1,4 @@
+import Foundation
 import NutritionKit
 import ReportsKit
 import SettingsKit
@@ -7,11 +8,13 @@ import TrainingKit
 @MainActor
 struct AppRootView: View {
     let foundationViewModel: FoundationProgramViewModel
+    let makeSessionViewModel: @MainActor () -> SessionViewModel
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
 
     @State private var selectedTab = AppTab.today
     @State private var hasStartedFoundationLoad = false
+    @State private var sessionRoute: SessionRoute?
 
     var body: some View {
         Group {
@@ -32,6 +35,13 @@ struct AppRootView: View {
             guard shouldLoadFoundation, !hasStartedFoundationLoad else { return }
             hasStartedFoundationLoad = true
             await foundationViewModel.load()
+        }
+        .fullScreenCover(item: $sessionRoute) { route in
+            TrainingSessionView(
+                viewModel: route.viewModel,
+                workoutDayID: route.workoutDayID,
+                onClose: { sessionRoute = nil }
+            )
         }
     }
 
@@ -64,9 +74,15 @@ struct AppRootView: View {
     private func tabContent(for tab: AppTab) -> some View {
         switch tab {
         case .today:
-            FoundationTodayView(viewModel: foundationViewModel)
+            FoundationTodayView(
+                viewModel: foundationViewModel,
+                onOpenSession: openSession
+            )
         case .training:
-            FoundationProgramView(viewModel: foundationViewModel)
+            FoundationProgramView(
+                viewModel: foundationViewModel,
+                onOpenSession: openSession
+            )
         case .nutrition:
             NutritionFoundationView()
         case .progress:
@@ -85,4 +101,17 @@ struct AppRootView: View {
             .accessibilityIdentifier(tab.tabIdentifier)
             .accessibilityHint(tab.hint)
     }
+
+    private func openSession(workoutDayID: UUID) {
+        sessionRoute = SessionRoute(
+            workoutDayID: workoutDayID,
+            viewModel: makeSessionViewModel()
+        )
+    }
+}
+
+private struct SessionRoute: Identifiable {
+    let id = UUID()
+    let workoutDayID: UUID
+    let viewModel: SessionViewModel
 }

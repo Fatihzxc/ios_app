@@ -8,6 +8,9 @@ enum AppUITestScenario: String {
     case errorOnce = "error-once"
     case loading
     case fatalConfiguration = "fatal-configuration"
+    case sessionFlow = "session-flow"
+    case sessionFamilies = "session-families"
+    case sessionResume = "session-resume"
 }
 
 struct AppUITestLaunchConfiguration {

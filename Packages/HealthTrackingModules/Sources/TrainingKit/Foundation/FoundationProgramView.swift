@@ -10,9 +10,14 @@ public struct FoundationProgramView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     private let viewModel: FoundationProgramViewModel
+    private let onOpenSession: (@MainActor (UUID) -> Void)?
 
-    public init(viewModel: FoundationProgramViewModel) {
+    public init(
+        viewModel: FoundationProgramViewModel,
+        onOpenSession: (@MainActor (UUID) -> Void)? = nil
+    ) {
         self.viewModel = viewModel
+        self.onOpenSession = onOpenSession
     }
 
     public var body: some View {
@@ -178,7 +183,30 @@ public struct FoundationProgramView: View {
         .accessibilityIdentifier("training.phase-row.\(index)")
     }
 
+    @ViewBuilder
     private func dayRow(_ day: FoundationWorkoutDaySummary, index: Int) -> some View {
+        if let onOpenSession {
+            Button {
+                onOpenSession(day.id)
+            } label: {
+                dayCard(day)
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(day.name))
+            .accessibilityValue(Text(day.focus))
+            .accessibilityHint(Text(localized("session.open.day.hint")))
+            .accessibilityIdentifier("training.day-row.\(index)")
+        } else {
+            dayCard(day)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(day.name))
+                .accessibilityValue(Text(day.focus))
+                .accessibilityIdentifier("training.day-row.\(index)")
+        }
+    }
+
+    private func dayCard(_ day: FoundationWorkoutDaySummary) -> some View {
         AppCard {
             HStack(alignment: .top, spacing: AppSpacing.standard) {
                 Image(systemName: "dumbbell")
@@ -195,10 +223,6 @@ public struct FoundationProgramView: View {
                 }
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(day.name))
-        .accessibilityValue(Text(day.focus))
-        .accessibilityIdentifier("training.day-row.\(index)")
     }
 
     private func sectionHeading(_ title: String) -> some View {

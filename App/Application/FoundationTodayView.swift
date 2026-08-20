@@ -7,6 +7,15 @@ import TrainingKit
 struct FoundationTodayView: View {
     @Environment(\.colorScheme) private var colorScheme
     let viewModel: FoundationProgramViewModel
+    let onOpenSession: @MainActor (UUID) -> Void
+
+    init(
+        viewModel: FoundationProgramViewModel,
+        onOpenSession: @escaping @MainActor (UUID) -> Void = { _ in }
+    ) {
+        self.viewModel = viewModel
+        self.onOpenSession = onOpenSession
+    }
 
     var body: some View {
         NavigationStack {
@@ -33,7 +42,6 @@ struct FoundationTodayView: View {
                 .accessibilityIdentifier("foundation.state.loading")
         case let .content(snapshot):
             loadedContent(snapshot)
-                .accessibilityIdentifier("root.today.content")
         case .empty:
             FeatureStateView(
                 state: .empty(
@@ -64,6 +72,7 @@ struct FoundationTodayView: View {
     private func loadedContent(_ snapshot: FoundationProgramSnapshot) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.large) {
             sectionHeading(String(localized: "today.foundation.heading"))
+                .accessibilityIdentifier("root.today.content")
             AppCard {
                 VStack(alignment: .leading, spacing: AppSpacing.standard) {
                     Text(snapshot.program.name)
@@ -81,6 +90,17 @@ struct FoundationTodayView: View {
                         .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+
+            if let workoutDay = snapshot.workoutDays.first {
+                PrimaryActionButton(
+                    title: String(localized: "today.session.open"),
+                    accessibilityLabel: String(localized: "today.session.open")
+                ) {
+                    onOpenSession(workoutDay.id)
+                }
+                .accessibilityIdentifier("today.session.open")
+                .accessibilityHint(String(localized: "today.session.open.hint"))
             }
 
             sectionHeading(String(localized: "today.soon.heading"))

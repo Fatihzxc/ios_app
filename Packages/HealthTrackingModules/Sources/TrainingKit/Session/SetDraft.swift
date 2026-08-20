@@ -1,7 +1,9 @@
 import CoreModels
 import Foundation
+import Observation
 
 @MainActor
+@Observable
 public final class SetDraft {
     public enum PrefillSource: Equatable, Sendable {
         case guidance

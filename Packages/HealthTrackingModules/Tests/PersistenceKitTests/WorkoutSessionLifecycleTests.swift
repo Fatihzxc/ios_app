@@ -312,6 +312,49 @@ final class WorkoutSessionLifecycleTests: XCTestCase {
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<WorkoutSessionProgress>()), 0)
     }
 
+    func testCompletedSessionSummaryPersistsDocumentedRecoveryRange() async throws {
+        let fixture = try makeSessionFixture()
+        let completedAt = Date(timeIntervalSinceReferenceDate: 26_000)
+        _ = try await fixture.repository.transitionWorkoutSession(
+            id: fixture.sessionID,
+            to: .completed,
+            at: completedAt
+        )
+
+        let summary = try await fixture.repository.updateWorkoutSessionSummary(
+            id: fixture.sessionID,
+            perceivedRecovery: 10,
+            note: "İyi toparlanma",
+            at: completedAt.addingTimeInterval(1)
+        )
+
+        XCTAssertEqual(summary.perceivedRecovery, 10)
+        XCTAssertEqual(summary.note, "İyi toparlanma")
+
+        do {
+            _ = try await fixture.repository.updateWorkoutSessionSummary(
+                id: fixture.sessionID,
+                perceivedRecovery: 11,
+                note: nil,
+                at: completedAt.addingTimeInterval(2)
+            )
+            XCTFail("Expected recovery outside 1...10 to fail")
+        } catch {
+            XCTAssertEqual(
+                error as? TrainingRepositoryMutationError,
+                .invalidPerceivedRecovery(11)
+            )
+        }
+
+        let persisted = try XCTUnwrap(
+            try ModelContext(fixture.container)
+                .fetch(FetchDescriptor<WorkoutSession>())
+                .first(where: { $0.id == fixture.sessionID })
+        )
+        XCTAssertEqual(persisted.perceivedRecovery, 10)
+        XCTAssertEqual(persisted.note, "İyi toparlanma")
+    }
+
     private func assertTransitionError(
         _ repository: SwiftDataTrainingRepository,
         id: UUID,

@@ -569,8 +569,23 @@ private final class FakeTrainingRepository: TrainingRepository {
         throw FakeRepositoryError.unexpectedCall("fetchSessionExercises")
     }
 
+    func fetchSessionPlan(
+        workoutDayID: UUID
+    ) async throws -> SessionWorkoutPlanSnapshot? {
+        throw FakeRepositoryError.unexpectedCall("fetchSessionPlan")
+    }
+
     func fetchSetLogs(workoutSessionID: UUID) async throws -> [SetLogSnapshot] {
         throw FakeRepositoryError.unexpectedCall("fetchSetLogs")
+    }
+
+    func updateWorkoutSessionSummary(
+        id: UUID,
+        perceivedRecovery: Int?,
+        note: String?,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot {
+        throw FakeRepositoryError.unexpectedCall("updateWorkoutSessionSummary")
     }
 
     func deleteWorkoutSession(id: UUID) async throws {

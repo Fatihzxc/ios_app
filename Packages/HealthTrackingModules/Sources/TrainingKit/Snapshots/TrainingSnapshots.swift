@@ -118,13 +118,97 @@ public struct WorkoutSessionSnapshot: Equatable, Sendable, Identifiable {
 
 public struct SessionExerciseSnapshot: Equatable, Sendable, Identifiable {
     public let id: UUID
+    public let name: String
     public let orderIndex: Int
     public let targetSets: Int
+    public let repLow: Int?
+    public let repHigh: Int?
+    public let rirLow: Int
+    public let rirHigh: Int
+    public let allowFailure: Bool
+    public let cues: String
+    public let safetyNote: String?
+    public let startingWeightKg: Double?
+    public let progressionRule: ProgressionRule
+    public let measurementKind: ExerciseMeasurementKind
 
-    public init(id: UUID, orderIndex: Int, targetSets: Int) {
+    public init(
+        id: UUID,
+        name: String = "",
+        orderIndex: Int,
+        targetSets: Int,
+        repLow: Int? = nil,
+        repHigh: Int? = nil,
+        rirLow: Int = 0,
+        rirHigh: Int = 0,
+        allowFailure: Bool = false,
+        cues: String = "",
+        safetyNote: String? = nil,
+        startingWeightKg: Double? = nil,
+        progressionRule: ProgressionRule = .doubleProgression,
+        measurementKind: ExerciseMeasurementKind = .weightReps
+    ) {
         self.id = id
+        self.name = name
         self.orderIndex = orderIndex
         self.targetSets = targetSets
+        self.repLow = repLow
+        self.repHigh = repHigh
+        self.rirLow = rirLow
+        self.rirHigh = rirHigh
+        self.allowFailure = allowFailure
+        self.cues = cues
+        self.safetyNote = safetyNote
+        self.startingWeightKg = startingWeightKg
+        self.progressionRule = progressionRule
+        self.measurementKind = measurementKind
+    }
+}
+
+public struct SessionChecklistItemSnapshot: Equatable, Sendable, Identifiable {
+    public let id: UUID
+    public let title: String
+    public let detail: String
+    public let note: String?
+    public let orderIndex: Int
+
+    public init(
+        id: UUID,
+        title: String,
+        detail: String,
+        note: String? = nil,
+        orderIndex: Int
+    ) {
+        self.id = id
+        self.title = title
+        self.detail = detail
+        self.note = note
+        self.orderIndex = orderIndex
+    }
+}
+
+public struct SessionWorkoutPlanSnapshot: Equatable, Sendable {
+    public let workoutDayID: UUID
+    public let name: String
+    public let focus: String
+    public let warmupItems: [SessionChecklistItemSnapshot]
+    public let exercises: [SessionExerciseSnapshot]
+    public let cooldownItems: [SessionChecklistItemSnapshot]
+
+    public init(
+        workoutDayID: UUID,
+        name: String,
+        focus: String,
+        warmupItems: [SessionChecklistItemSnapshot],
+        exercises: [SessionExerciseSnapshot],
+        cooldownItems: [SessionChecklistItemSnapshot]
+    ) {
+        self.workoutDayID = workoutDayID
+        self.name = name
+        self.focus = focus
+        self.warmupItems = warmupItems
+        self.exercises = exercises
+        self.cooldownItems = cooldownItems
     }
 }
 
@@ -246,4 +330,84 @@ public struct RestoredWorkoutSession: Equatable, Sendable {
         self.state = state
         self.source = source
     }
+}
+
+public struct SessionPresentation: Equatable, Sendable {
+    public let session: WorkoutSessionSnapshot
+    public let plan: SessionWorkoutPlanSnapshot
+    public let progress: SessionProgressState
+    public let setLogs: [SetLogSnapshot]
+    public let restoreSource: SessionRestoreSource
+
+    public init(
+        session: WorkoutSessionSnapshot,
+        plan: SessionWorkoutPlanSnapshot,
+        progress: SessionProgressState,
+        setLogs: [SetLogSnapshot],
+        restoreSource: SessionRestoreSource
+    ) {
+        self.session = session
+        self.plan = plan
+        self.progress = progress
+        self.setLogs = setLogs
+        self.restoreSource = restoreSource
+    }
+
+    public var currentExercise: SessionExerciseSnapshot? {
+        guard progress.stage == .movement,
+              let currentExerciseTemplateID = progress.currentExerciseTemplateID else {
+            return nil
+        }
+        return plan.exercises.first { $0.id == currentExerciseTemplateID }
+    }
+
+    public var currentExerciseIndex: Int? {
+        guard let currentExercise else { return nil }
+        return plan.exercises.firstIndex { $0.id == currentExercise.id }
+    }
+
+    public var completedWorkingSetsForCurrentExercise: [SetLogSnapshot] {
+        guard let currentExercise else { return [] }
+        return setLogs
+            .filter {
+                !$0.isWarmupSet &&
+                    $0.exerciseTemplateID == currentExercise.id
+            }
+            .sorted { lhs, rhs in
+                if lhs.setIndex != rhs.setIndex {
+                    return lhs.setIndex < rhs.setIndex
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+    }
+}
+
+public enum SessionViewFailure: Equatable, Sendable {
+    case load
+    case progress
+    case completion
+    case deletion
+    case summary
+}
+
+public enum SessionViewState: Equatable, Sendable {
+    case idle
+    case loading
+    case active(SessionPresentation)
+    case failed(SessionViewFailure)
+    case dismissed
+}
+
+public enum SessionSetSaveState: Equatable, Sendable {
+    case idle
+    case saving
+    case saved(setID: UUID)
+    case validationFailed
+    case repositoryFailed
+}
+
+public enum SessionRecommendationReason: Equatable, Sendable {
+    case templateStartingValues
+    case sameSessionPrevious
+    case noPrefill
 }

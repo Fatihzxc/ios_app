@@ -295,9 +295,24 @@ private final class FakeLifecycleRepository: TrainingRepository {
         exercises
     }
 
+    func fetchSessionPlan(
+        workoutDayID: UUID
+    ) async throws -> SessionWorkoutPlanSnapshot? {
+        throw FakeLifecycleError.unexpectedCall("fetchSessionPlan")
+    }
+
     func fetchSetLogs(workoutSessionID: UUID) async throws -> [SetLogSnapshot] {
         fetchSetLogsCallCount += 1
         return setLogs
+    }
+
+    func updateWorkoutSessionSummary(
+        id: UUID,
+        perceivedRecovery: Int?,
+        note: String?,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot {
+        throw FakeLifecycleError.unexpectedCall("updateWorkoutSessionSummary")
     }
 
     func deleteWorkoutSession(id: UUID) async throws {

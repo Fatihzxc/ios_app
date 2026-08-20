@@ -14,8 +14,10 @@ protocol AppDependencyLoading: AnyObject {
 final class AppDependencies: AppDependencyLoading {
     private let modelContainer: ModelContainer
     private let seedLoader: SwiftDataSeedLoader
+    private let installUITestFixture: @MainActor () throws -> Void
     let trainingRepository: any TrainingRepository
     let foundationViewModel: FoundationProgramViewModel
+    let makeSessionViewModel: @MainActor () -> SessionViewModel
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
 
@@ -61,7 +63,7 @@ final class AppDependencies: AppDependencyLoading {
             case .loading:
                 trainingRepository = repository
                 shouldLoadFoundation = false
-            case .seeded, .fatalConfiguration:
+            case .seeded, .fatalConfiguration, .sessionFlow, .sessionFamilies, .sessionResume:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -75,14 +77,214 @@ final class AppDependencies: AppDependencyLoading {
         #endif
 
         foundationViewModel = FoundationProgramViewModel(repository: trainingRepository)
+        let sessionRepository = trainingRepository
+        makeSessionViewModel = {
+            SessionViewModel(repository: sessionRepository)
+        }
+
+        #if DEBUG
+        let scenario = environment == .uiTesting
+            ? AppUITestLaunchConfiguration.resolve()?.scenario
+            : nil
+        installUITestFixture = {
+            guard let scenario else { return }
+            try UITestSessionFixture.install(scenario: scenario, in: mainContext)
+        }
+        #else
+        installUITestFixture = {}
+        #endif
     }
 
     func load() throws {
         try seedLoader.seedIfNeeded(installedAt: .now)
+        try installUITestFixture()
     }
 }
 
 #if DEBUG
+@MainActor
+private enum UITestSessionFixture {
+    private static let familyDayID = uuid("00000000-0000-4000-8000-00000000f001")
+    private static let familyWarmupID = uuid("00000000-0000-4000-8000-00000000f002")
+    private static let familyCooldownID = uuid("00000000-0000-4000-8000-00000000f003")
+    private static let resumeSessionID = uuid("00000000-0000-4000-8000-00000000f020")
+    private static let resumeProgressID = uuid("00000000-0000-4000-8000-00000000f021")
+    private static let installedAt = Date(timeIntervalSince1970: 1_700_000_000)
+
+    static func install(scenario: AppUITestScenario, in modelContext: ModelContext) throws {
+        switch scenario {
+        case .sessionFamilies:
+            try installMeasurementFamilies(in: modelContext)
+        case .sessionResume:
+            try installResumeProgress(in: modelContext)
+        case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow:
+            return
+        }
+    }
+
+    private static func installMeasurementFamilies(in modelContext: ModelContext) throws {
+        let existingDays = try modelContext.fetch(FetchDescriptor<WorkoutDayTemplate>())
+        guard !existingDays.contains(where: { $0.id == familyDayID }) else { return }
+        guard let program = try modelContext.fetch(FetchDescriptor<Program>())
+            .first(where: { $0.id == SeedIdentifiers.program }) else {
+            throw UITestSessionFixtureError.missingSeededProgram
+        }
+
+        let day = WorkoutDayTemplate(
+            id: familyDayID,
+            createdAt: installedAt,
+            updatedAt: installedAt,
+            name: "Ölçüm aileleri",
+            orderIndex: 0,
+            focus: "Beş kayıt ailesinin gerçek akışı",
+            program: program
+        )
+        modelContext.insert(day)
+
+        modelContext.insert(
+            WarmupItem(
+                id: familyWarmupID,
+                createdAt: installedAt,
+                updatedAt: installedAt,
+                phase: .raise,
+                movement: "Hafif yürüyüş",
+                dose: "2 dakika",
+                orderIndex: 1,
+                workoutDayTemplate: day
+            )
+        )
+
+        let exerciseFixtures: [ExerciseFixture] = [
+            .init(
+                id: uuid("00000000-0000-4000-8000-00000000f010"),
+                name: "Ağırlık + tekrar",
+                orderIndex: 1,
+                repTarget: 8,
+                startingWeightKg: 10,
+                measurementKind: .weightReps
+            ),
+            .init(
+                id: uuid("00000000-0000-4000-8000-00000000f011"),
+                name: "Tekrar",
+                orderIndex: 2,
+                repTarget: 10,
+                startingWeightKg: nil,
+                measurementKind: .reps
+            ),
+            .init(
+                id: uuid("00000000-0000-4000-8000-00000000f012"),
+                name: "Süre",
+                orderIndex: 3,
+                repTarget: 30,
+                startingWeightKg: nil,
+                measurementKind: .duration
+            ),
+            .init(
+                id: uuid("00000000-0000-4000-8000-00000000f013"),
+                name: "Adım",
+                orderIndex: 4,
+                repTarget: 40,
+                startingWeightKg: 20,
+                measurementKind: .steps
+            ),
+            .init(
+                id: uuid("00000000-0000-4000-8000-00000000f014"),
+                name: "Kalite",
+                orderIndex: 5,
+                repTarget: nil,
+                startingWeightKg: nil,
+                measurementKind: .quality
+            ),
+        ]
+        for fixture in exerciseFixtures {
+            modelContext.insert(
+                ExerciseTemplate(
+                    id: fixture.id,
+                    createdAt: installedAt,
+                    updatedAt: installedAt,
+                    name: fixture.name,
+                    orderIndex: fixture.orderIndex,
+                    targetSets: 1,
+                    repLow: fixture.repTarget,
+                    repHigh: fixture.repTarget,
+                    rirLow: 0,
+                    rirHigh: 2,
+                    category: .accessory,
+                    allowFailure: false,
+                    cues: "Kontrollü ve ağrısız uygula.",
+                    safetyNote: "Güvenli tekniği koru.",
+                    startingWeightKg: fixture.startingWeightKg,
+                    progressionRule: .timeQuality,
+                    measurementKind: fixture.measurementKind,
+                    workoutDayTemplate: day
+                )
+            )
+        }
+
+        modelContext.insert(
+            CooldownItem(
+                id: familyCooldownID,
+                createdAt: installedAt,
+                updatedAt: installedAt,
+                movement: "Rahat nefes",
+                dose: "1 dakika",
+                note: "Nabzın sakinleşsin.",
+                orderIndex: 1,
+                workoutDayTemplate: day
+            )
+        )
+        try modelContext.save()
+    }
+
+    private static func installResumeProgress(in modelContext: ModelContext) throws {
+        let existingSessions = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
+        guard !existingSessions.contains(where: { $0.id == resumeSessionID }) else { return }
+
+        modelContext.insert(
+            WorkoutSession(
+                id: resumeSessionID,
+                createdAt: installedAt,
+                updatedAt: installedAt,
+                date: installedAt,
+                status: .inProgress,
+                workoutDayTemplateId: SeedIdentifiers.dayA
+            )
+        )
+        modelContext.insert(
+            WorkoutSessionProgress(
+                id: resumeProgressID,
+                createdAt: installedAt,
+                updatedAt: installedAt,
+                workoutSessionId: resumeSessionID,
+                stage: .movement,
+                currentExerciseTemplateId: SeedIdentifiers.plankPallof,
+                completedWarmupItemIdsData: WorkoutSessionProgressCodec.emptyPayload,
+                completedCooldownItemIdsData: WorkoutSessionProgressCodec.emptyPayload,
+                warmupDisposition: .completed,
+                cooldownDisposition: .pending
+            )
+        )
+        try modelContext.save()
+    }
+
+    private static func uuid(_ value: String) -> UUID {
+        UUID(uuidString: value)!
+    }
+
+    private struct ExerciseFixture {
+        let id: UUID
+        let name: String
+        let orderIndex: Int
+        let repTarget: Int?
+        let startingWeightKg: Double?
+        let measurementKind: ExerciseMeasurementKind
+    }
+}
+
+private enum UITestSessionFixtureError: Error {
+    case missingSeededProgram
+}
+
 @MainActor
 private final class UITestFoundationRepository: TrainingRepository {
     enum InitialOutcome: Equatable {
@@ -185,8 +387,28 @@ private final class UITestFoundationRepository: TrainingRepository {
         try await repository.fetchSessionExercises(workoutDayID: workoutDayID)
     }
 
+    func fetchSessionPlan(
+        workoutDayID: UUID
+    ) async throws -> SessionWorkoutPlanSnapshot? {
+        try await repository.fetchSessionPlan(workoutDayID: workoutDayID)
+    }
+
     func fetchSetLogs(workoutSessionID: UUID) async throws -> [SetLogSnapshot] {
         try await repository.fetchSetLogs(workoutSessionID: workoutSessionID)
+    }
+
+    func updateWorkoutSessionSummary(
+        id: UUID,
+        perceivedRecovery: Int?,
+        note: String?,
+        at date: Date
+    ) async throws -> WorkoutSessionSnapshot {
+        try await repository.updateWorkoutSessionSummary(
+            id: id,
+            perceivedRecovery: perceivedRecovery,
+            note: note,
+            at: date
+        )
     }
 
     func deleteWorkoutSession(id: UUID) async throws {
