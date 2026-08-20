@@ -135,6 +135,37 @@ final class SessionViewModelTests: XCTestCase {
         XCTAssertEqual(repository.saveSetRequests.count, 1)
     }
 
+    func testFinishingSessionMapsOnlyATrueRecordIntoTheSummaryPresentation() async {
+        let plan = makePlan()
+        let repository = FakeSessionRepository(plan: plan)
+        let exercise = plan.exercises[0]
+        repository.completedExerciseHistory[exercise.id] = [
+            makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                measurements: [.init(weightKg: 10, reps: 10, rir: 1)]
+            )
+        ]
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        viewModel.currentSetDraft?.measurement.weightKg = 20
+        viewModel.currentSetDraft?.measurement.reps = 10
+
+        await viewModel.saveCurrentSet()
+        await viewModel.finishIncomplete()
+
+        let summary = requireActive(viewModel.state)
+        XCTAssertEqual(summary.progress.stage, .summary)
+        XCTAssertEqual(summary.personalRecords.records.count, 1)
+        XCTAssertEqual(summary.personalRecords.records.first?.exerciseID, exercise.id)
+        XCTAssertEqual(
+            summary.personalRecords.records.first?.kind,
+            .weightedEstimatedOneRepMax
+        )
+        XCTAssertTrue(summary.personalRecords.shouldEmitSuccessFeedback)
+    }
+
     func testDeleteRequiresExplicitConfirmationAndIsIdempotentAtViewModelBoundary() async {
         let repository = FakeSessionRepository(plan: makePlan())
         let viewModel = makeViewModel(repository)

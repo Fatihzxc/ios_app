@@ -699,7 +699,8 @@ public final class SessionViewModel {
                 plan: presentation.plan,
                 progress: presentation.progress,
                 setLogs: presentation.setLogs,
-                restoreSource: presentation.restoreSource
+                restoreSource: presentation.restoreSource,
+                personalRecords: presentation.personalRecords
             )
         )
     }
@@ -743,6 +744,11 @@ public final class SessionViewModel {
         )
         await persistProgress(summaryProgress)
         guard let progressed = activePresentation else { return }
+        let personalRecords = PersonalRecordPresentationMapper.make(
+            plan: progressed.plan,
+            currentSetLogs: progressed.setLogs,
+            priorHistoryByExerciseID: completedHistoryByExerciseID
+        )
 
         do {
             let completed = try await repository.transitionWorkoutSession(
@@ -756,7 +762,8 @@ public final class SessionViewModel {
                     plan: progressed.plan,
                     progress: progressed.progress,
                     setLogs: progressed.setLogs,
-                    restoreSource: progressed.restoreSource
+                    restoreSource: progressed.restoreSource,
+                    personalRecords: personalRecords
                 )
             )
             configureDraft()
@@ -787,7 +794,8 @@ public final class SessionViewModel {
                     plan: presentation.plan,
                     progress: snapshot.state,
                     setLogs: presentation.setLogs,
-                    restoreSource: presentation.restoreSource
+                    restoreSource: presentation.restoreSource,
+                    personalRecords: presentation.personalRecords
                 )
             )
             configureDraft()
@@ -821,7 +829,8 @@ public final class SessionViewModel {
                     plan: presentation.plan,
                     progress: presentation.progress,
                     setLogs: sets,
-                    restoreSource: presentation.restoreSource
+                    restoreSource: presentation.restoreSource,
+                    personalRecords: presentation.personalRecords
                 )
             )
             pendingSetRequest = nil

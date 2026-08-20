@@ -51,6 +51,8 @@ public struct SessionSummaryView: View {
                     }
                 }
 
+                personalRecordsSection
+
                 recoveryPicker
 
                 VStack(alignment: .leading, spacing: AppSpacing.compact) {
@@ -85,6 +87,43 @@ public struct SessionSummaryView: View {
             .padding(.vertical, AppSpacing.large)
         }
         .accessibilityIdentifier("session.stage.summary")
+    }
+
+    @ViewBuilder
+    private var personalRecordsSection: some View {
+        if !presentation.personalRecords.records.isEmpty {
+            AppCard {
+                VStack(alignment: .leading, spacing: AppSpacing.compact) {
+                    HStack(spacing: AppSpacing.compact) {
+                        Image(systemName: "arrow.up.right")
+                            .accessibilityHidden(true)
+                        Text(localized("session.summary.personalRecord.title"))
+                            .font(AppTypography.titleMedium)
+                    }
+                    .foregroundStyle(AppColors.color(.stateSuccess, scheme: colorScheme))
+
+                    ForEach(presentation.personalRecords.records) { record in
+                        VStack(alignment: .leading, spacing: AppSpacing.small) {
+                            Text(record.exerciseName)
+                                .font(AppTypography.label)
+                                .foregroundStyle(
+                                    AppColors.color(.inkPrimary, scheme: colorScheme)
+                                )
+                            Text(personalRecordValue(record))
+                                .font(AppTypography.numericRow)
+                                .foregroundStyle(
+                                    AppColors.color(.inkSecondary, scheme: colorScheme)
+                                )
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier(
+                            "session.summary.personalRecord.\(record.exerciseID.uuidString)"
+                        )
+                    }
+                }
+            }
+            .accessibilityIdentifier("session.summary.personalRecords")
+        }
     }
 
     private var recoveryPicker: some View {
@@ -158,6 +197,36 @@ public struct SessionSummaryView: View {
         case .skipped:
             localized("session.summary.checklist.skipped")
         }
+    }
+
+    private func personalRecordValue(_ record: SessionPersonalRecordSummary) -> String {
+        let previous = formatted(record.previousBest)
+        let current = formatted(record.newBest)
+        let key: String.LocalizationValue
+        switch record.kind {
+        case .weightedEstimatedOneRepMax:
+            key = "session.summary.personalRecord.weighted"
+        case .repetitions:
+            key = "session.summary.personalRecord.repetitions"
+        case .duration:
+            key = "session.summary.personalRecord.duration"
+        case .steps:
+            key = "session.summary.personalRecord.steps"
+        }
+        return String(
+            format: localized(key),
+            locale: .current,
+            previous,
+            current
+        )
+    }
+
+    private func formatted(_ value: Double) -> String {
+        value.formatted(
+            .number
+                .locale(.current)
+                .precision(.fractionLength(0...2))
+        )
     }
 
     private func localized(_ key: String.LocalizationValue) -> String {

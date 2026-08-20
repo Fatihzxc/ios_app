@@ -377,25 +377,77 @@ public struct RestoredWorkoutSession: Equatable, Sendable {
     }
 }
 
+public enum SessionPersonalRecordKind: Equatable, Sendable {
+    case weightedEstimatedOneRepMax
+    case repetitions
+    case duration
+    case steps
+}
+
+public struct SessionPersonalRecordSummary: Equatable, Sendable, Identifiable {
+    public let exerciseID: UUID
+    public let exerciseName: String
+    public let kind: SessionPersonalRecordKind
+    public let previousBest: Double
+    public let newBest: Double
+
+    public var id: UUID { exerciseID }
+
+    public init(
+        exerciseID: UUID,
+        exerciseName: String,
+        kind: SessionPersonalRecordKind,
+        previousBest: Double,
+        newBest: Double
+    ) {
+        self.exerciseID = exerciseID
+        self.exerciseName = exerciseName
+        self.kind = kind
+        self.previousBest = previousBest
+        self.newBest = newBest
+    }
+}
+
+public struct SessionPersonalRecordPresentation: Equatable, Sendable {
+    public let records: [SessionPersonalRecordSummary]
+    public let shouldEmitSuccessFeedback: Bool
+
+    public static let empty = SessionPersonalRecordPresentation(
+        records: [],
+        shouldEmitSuccessFeedback: false
+    )
+
+    public init(
+        records: [SessionPersonalRecordSummary],
+        shouldEmitSuccessFeedback: Bool
+    ) {
+        self.records = records
+        self.shouldEmitSuccessFeedback = shouldEmitSuccessFeedback
+    }
+}
+
 public struct SessionPresentation: Equatable, Sendable {
     public let session: WorkoutSessionSnapshot
     public let plan: SessionWorkoutPlanSnapshot
     public let progress: SessionProgressState
     public let setLogs: [SetLogSnapshot]
     public let restoreSource: SessionRestoreSource
+    public let personalRecords: SessionPersonalRecordPresentation
 
     public init(
         session: WorkoutSessionSnapshot,
         plan: SessionWorkoutPlanSnapshot,
         progress: SessionProgressState,
         setLogs: [SetLogSnapshot],
-        restoreSource: SessionRestoreSource
+        restoreSource: SessionRestoreSource,
+        personalRecords: SessionPersonalRecordPresentation = .empty
     ) {
         self.session = session
         self.plan = plan
         self.progress = progress
         self.setLogs = setLogs
         self.restoreSource = restoreSource
+        self.personalRecords = personalRecords
     }
 
     public var currentExercise: SessionExerciseSnapshot? {
