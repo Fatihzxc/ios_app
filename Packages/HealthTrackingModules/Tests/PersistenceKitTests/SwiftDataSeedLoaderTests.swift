@@ -21,7 +21,7 @@ final class SwiftDataSeedLoaderTests: XCTestCase {
         XCTAssertEqual(Set(programs.map(\.id)), [SeedIdentifiers.program])
         XCTAssertEqual(Set(phases.map(\.id)), [SeedIdentifiers.phase1, SeedIdentifiers.phase2, SeedIdentifiers.phase3, SeedIdentifiers.phase4])
         XCTAssertEqual(Set(days.map(\.id)), [SeedIdentifiers.dayA, SeedIdentifiers.dayB, SeedIdentifiers.dayC])
-        XCTAssertEqual(try markerValues(in: reader), ["1"])
+        XCTAssertEqual(try markerValues(in: reader), ["2"])
 
         let profile = try XCTUnwrap(profiles.first)
         XCTAssertEqual(profile.displayName, "")
@@ -146,7 +146,7 @@ final class SwiftDataSeedLoaderTests: XCTestCase {
         XCTAssertEqual(day.program?.id, SeedIdentifiers.program)
         XCTAssertEqual(try fetch(ProgramPhase.self, from: reader).count, 4)
         XCTAssertEqual(try fetch(WorkoutDayTemplate.self, from: reader).count, 3)
-        XCTAssertEqual(try markerValues(in: reader), ["1"])
+        XCTAssertEqual(try markerValues(in: reader), ["2"])
     }
 
     func testSingleStaleMarkerIsUpgradedInPlaceWithoutCreatingADuplicate() throws {
@@ -158,12 +158,12 @@ final class SwiftDataSeedLoaderTests: XCTestCase {
         try SwiftDataSeedLoader(modelContext: writer).seedIfNeeded(installedAt: .now)
 
         let reader = ModelContext(container)
-        XCTAssertEqual(try markerValues(in: reader), ["1"])
+        XCTAssertEqual(try markerValues(in: reader), ["2"])
         XCTAssertEqual(try fetch(AppSetting.self, from: reader).filter { $0.key == "seed.catalog.version" }.count, 1)
     }
 
     func testDuplicateMarkerRowsSurfaceTypedIntegrityError() throws {
-        for markerValues in [["1", "1"], ["0", "0"], ["1", "0"]] {
+        for markerValues in [["2", "2"], ["1", "1"], ["0", "0"], ["2", "1"]] {
             let container = try makeContainer()
             let writer = ModelContext(container)
             markerValues.forEach { writer.insert(AppSetting(key: "seed.catalog.version", value: $0)) }
@@ -193,7 +193,7 @@ final class SwiftDataSeedLoaderTests: XCTestCase {
                 observedPreparedGraphAtSaveBoundary = programs.count == 1
                     && phases.count == 4
                     && days.count == 3
-                    && markers == ["1"]
+                    && markers == ["2"]
                 throw TestSaveError.forced
             },
             rollback: {

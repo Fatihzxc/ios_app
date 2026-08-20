@@ -124,6 +124,26 @@ private final class UITestFoundationRepository: TrainingRepository {
     func fetchWorkoutDays(programID: UUID) async throws -> [WorkoutDayTemplate] {
         try await repository.fetchWorkoutDays(programID: programID)
     }
+
+    func fetchExerciseTemplates(workoutDayID: UUID) async throws -> [ExerciseTemplate] {
+        try await repository.fetchExerciseTemplates(workoutDayID: workoutDayID)
+    }
+
+    func fetchWarmupItems(workoutDayID: UUID) async throws -> [WarmupItem] {
+        try await repository.fetchWarmupItems(workoutDayID: workoutDayID)
+    }
+
+    func fetchCooldownItems(workoutDayID: UUID) async throws -> [CooldownItem] {
+        try await repository.fetchCooldownItems(workoutDayID: workoutDayID)
+    }
+
+    func fetchHealthCheckReminders() async throws -> [HealthCheckReminder] {
+        try await repository.fetchHealthCheckReminders()
+    }
+
+    func fetchProgramState(programID: UUID) async throws -> ProgramState? {
+        try await repository.fetchProgramState(programID: programID)
+    }
 }
 
 private enum UITestFoundationRepositoryError: Error {

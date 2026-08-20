@@ -6,6 +6,7 @@ import TrainingKit
 public enum TrainingRepositoryIntegrityError: Error, Equatable, Sendable {
     case duplicateUserProfiles(count: Int)
     case duplicateActivePrograms(count: Int)
+    case duplicateProgramStates(programID: UUID, count: Int)
 }
 
 @MainActor
@@ -86,5 +87,68 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
                 }
                 return lhs.id.uuidString < rhs.id.uuidString
             }
+    }
+
+    public func fetchExerciseTemplates(workoutDayID: UUID) async throws -> [ExerciseTemplate] {
+        let exercises = try modelContext.fetch(FetchDescriptor<ExerciseTemplate>())
+
+        return exercises
+            .filter { $0.workoutDayTemplate?.id == workoutDayID }
+            .sorted { lhs, rhs in
+                if lhs.orderIndex != rhs.orderIndex {
+                    return lhs.orderIndex < rhs.orderIndex
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+    }
+
+    public func fetchWarmupItems(workoutDayID: UUID) async throws -> [WarmupItem] {
+        let warmups = try modelContext.fetch(FetchDescriptor<WarmupItem>())
+
+        return warmups
+            .filter { $0.workoutDayTemplate?.id == workoutDayID }
+            .sorted { lhs, rhs in
+                if lhs.orderIndex != rhs.orderIndex {
+                    return lhs.orderIndex < rhs.orderIndex
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+    }
+
+    public func fetchCooldownItems(workoutDayID: UUID) async throws -> [CooldownItem] {
+        let cooldowns = try modelContext.fetch(FetchDescriptor<CooldownItem>())
+
+        return cooldowns
+            .filter { $0.workoutDayTemplate?.id == workoutDayID }
+            .sorted { lhs, rhs in
+                if lhs.orderIndex != rhs.orderIndex {
+                    return lhs.orderIndex < rhs.orderIndex
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+    }
+
+    public func fetchHealthCheckReminders() async throws -> [HealthCheckReminder] {
+        let reminders = try modelContext.fetch(FetchDescriptor<HealthCheckReminder>())
+
+        return reminders.sorted { lhs, rhs in
+            if lhs.dueDate != rhs.dueDate {
+                return lhs.dueDate < rhs.dueDate
+            }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
+
+    public func fetchProgramState(programID: UUID) async throws -> ProgramState? {
+        let states = try modelContext.fetch(FetchDescriptor<ProgramState>())
+            .filter { $0.programId == programID }
+
+        guard states.count <= 1 else {
+            throw TrainingRepositoryIntegrityError.duplicateProgramStates(
+                programID: programID,
+                count: states.count
+            )
+        }
+        return states.first
     }
 }

@@ -509,6 +509,26 @@ private final class FakeTrainingRepository: TrainingRepository {
         return try response.result.get()
     }
 
+    func fetchExerciseTemplates(workoutDayID: UUID) async throws -> [ExerciseTemplate] {
+        throw FakeRepositoryError.unexpectedCall("fetchExerciseTemplates")
+    }
+
+    func fetchWarmupItems(workoutDayID: UUID) async throws -> [WarmupItem] {
+        throw FakeRepositoryError.unexpectedCall("fetchWarmupItems")
+    }
+
+    func fetchCooldownItems(workoutDayID: UUID) async throws -> [CooldownItem] {
+        throw FakeRepositoryError.unexpectedCall("fetchCooldownItems")
+    }
+
+    func fetchHealthCheckReminders() async throws -> [HealthCheckReminder] {
+        throw FakeRepositoryError.unexpectedCall("fetchHealthCheckReminders")
+    }
+
+    func fetchProgramState(programID: UUID) async throws -> ProgramState? {
+        throw FakeRepositoryError.unexpectedCall("fetchProgramState")
+    }
+
     private static func dequeue<Value>(
         _ responses: inout [QueuedResponse<Value>],
         method: String

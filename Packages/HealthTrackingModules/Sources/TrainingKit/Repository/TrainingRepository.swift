@@ -7,4 +7,9 @@ public protocol TrainingRepository: AnyObject {
     func fetchActiveProgram() async throws -> Program?
     func fetchProgramPhases(programID: UUID) async throws -> [ProgramPhase]
     func fetchWorkoutDays(programID: UUID) async throws -> [WorkoutDayTemplate]
+    func fetchExerciseTemplates(workoutDayID: UUID) async throws -> [ExerciseTemplate]
+    func fetchWarmupItems(workoutDayID: UUID) async throws -> [WarmupItem]
+    func fetchCooldownItems(workoutDayID: UUID) async throws -> [CooldownItem]
+    func fetchHealthCheckReminders() async throws -> [HealthCheckReminder]
+    func fetchProgramState(programID: UUID) async throws -> ProgramState?
 }

@@ -5,7 +5,7 @@ import SwiftData
 @MainActor
 public final class SwiftDataSeedLoader: SeedLoading {
     private static let markerKey = "seed.catalog.version"
-    private static let markerValue = "1"
+    private static let markerValue = "2"
 
     private let modelContext: ModelContext
     private let saveOperation: @MainActor () throws -> Void
@@ -38,23 +38,119 @@ public final class SwiftDataSeedLoader: SeedLoading {
                 return
             }
 
+            let isVersionOneUpgrade = markers.first?.value == "1"
             let payload = M0SeedCatalog.make(installedAt: installedAt)
             try TrainingModelValidator.validateWeeklyWorkoutTarget(payload.profile.weeklyWorkoutTarget)
-            _ = try profile(for: payload.profile)
-            let program = try program(for: payload.program)
 
-            for phasePayload in payload.phases {
-                let phase = try phase(for: phasePayload)
-                if phase.program?.id != program.id {
-                    phase.program = program
+            var foundationProfile: UserProfile?
+            var foundationProgram: Program?
+            var phasesByID: [UUID: ProgramPhase] = [:]
+            var workoutDaysByID: [UUID: WorkoutDayTemplate] = [:]
+
+            if isVersionOneUpgrade {
+                foundationProfile = try modelContext.fetch(FetchDescriptor<UserProfile>())
+                    .first(where: { $0.id == payload.profile.id })
+                foundationProgram = try modelContext.fetch(FetchDescriptor<Program>())
+                    .first(where: { $0.id == payload.program.id })
+
+                let phaseIDs = Set(payload.phases.map(\.id))
+                for phase in try modelContext.fetch(FetchDescriptor<ProgramPhase>())
+                where phaseIDs.contains(phase.id) {
+                    phasesByID[phase.id] = phase
+                }
+
+                let workoutDayIDs = Set(payload.workoutDays.map(\.id))
+                for day in try modelContext.fetch(FetchDescriptor<WorkoutDayTemplate>())
+                where workoutDayIDs.contains(day.id) {
+                    workoutDaysByID[day.id] = day
+                }
+            } else {
+                let seededProfile = try profile(for: payload.profile)
+                let seededProgram = try program(for: payload.program)
+                foundationProfile = seededProfile
+                foundationProgram = seededProgram
+
+                for phasePayload in payload.phases {
+                    let phase = try phase(for: phasePayload)
+                    if phase.program?.id != seededProgram.id {
+                        phase.program = seededProgram
+                    }
+                    phasesByID[phase.id] = phase
+                }
+
+                for dayPayload in payload.workoutDays {
+                    let day = try workoutDay(for: dayPayload)
+                    if day.program?.id != seededProgram.id {
+                        day.program = seededProgram
+                    }
+                    workoutDaysByID[day.id] = day
                 }
             }
 
-            for dayPayload in payload.workoutDays {
-                let day = try workoutDay(for: dayPayload)
-                if day.program?.id != program.id {
-                    day.program = program
+            let m1Payload = M1SeedCatalog.make(
+                installedAt: foundationProfile?.createdAt ?? installedAt,
+                programStartDate: foundationProfile?.programStartDate ?? installedAt
+            )
+            try TrainingModelValidator.validateTrainingWeekIndex(
+                m1Payload.programState.trainingWeekIndex
+            )
+
+            let existingExercises = try modelContext.fetch(FetchDescriptor<ExerciseTemplate>())
+            for exercisePayload in m1Payload.exercises {
+                guard let day = workoutDaysByID[exercisePayload.workoutDayID] else {
+                    guard !isVersionOneUpgrade else { continue }
+                    throw SeedLoadingError.missingRequiredWorkoutDay(
+                        id: exercisePayload.workoutDayID
+                    )
                 }
+                let exercise = exercise(for: exercisePayload, existing: existingExercises)
+                if exercise.workoutDayTemplate?.id != day.id {
+                    exercise.workoutDayTemplate = day
+                }
+            }
+
+            let existingWarmups = try modelContext.fetch(FetchDescriptor<WarmupItem>())
+            for warmupPayload in m1Payload.warmups {
+                guard let day = workoutDaysByID[warmupPayload.workoutDayID] else {
+                    guard !isVersionOneUpgrade else { continue }
+                    throw SeedLoadingError.missingRequiredWorkoutDay(
+                        id: warmupPayload.workoutDayID
+                    )
+                }
+                let warmup = warmup(for: warmupPayload, existing: existingWarmups)
+                if warmup.workoutDayTemplate?.id != day.id {
+                    warmup.workoutDayTemplate = day
+                }
+            }
+
+            let existingCooldowns = try modelContext.fetch(FetchDescriptor<CooldownItem>())
+            for cooldownPayload in m1Payload.cooldowns {
+                guard let day = workoutDaysByID[cooldownPayload.workoutDayID] else {
+                    guard !isVersionOneUpgrade else { continue }
+                    throw SeedLoadingError.missingRequiredWorkoutDay(
+                        id: cooldownPayload.workoutDayID
+                    )
+                }
+                let cooldown = cooldown(for: cooldownPayload, existing: existingCooldowns)
+                if cooldown.workoutDayTemplate?.id != day.id {
+                    cooldown.workoutDayTemplate = day
+                }
+            }
+
+            let existingReminders = try modelContext.fetch(FetchDescriptor<HealthCheckReminder>())
+            for reminderPayload in m1Payload.reminders {
+                _ = reminder(for: reminderPayload, existing: existingReminders)
+            }
+
+            let canCreateProgramState = !isVersionOneUpgrade
+                || (
+                    foundationProgram?.id == m1Payload.programState.programID
+                        && phasesByID[m1Payload.programState.currentPhaseID]?.program?.id
+                            == m1Payload.programState.programID
+                )
+            if canCreateProgramState {
+                let existingProgramStates = try modelContext.fetch(FetchDescriptor<ProgramState>())
+                _ = programState(for: m1Payload.programState, existing: existingProgramStates)
             }
 
             if let existingMarker = markers.first {
@@ -155,5 +251,127 @@ public final class SwiftDataSeedLoader: SeedLoading {
         )
         modelContext.insert(day)
         return day
+    }
+
+    private func exercise(
+        for payload: M1SeedPayload.Exercise,
+        existing: [ExerciseTemplate]
+    ) -> ExerciseTemplate {
+        if let match = existing.first(where: { $0.id == payload.id }) {
+            return match
+        }
+
+        let exercise = ExerciseTemplate(
+            id: payload.id,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+            name: payload.name,
+            orderIndex: payload.orderIndex,
+            targetSets: payload.targetSets,
+            repLow: payload.repLow,
+            repHigh: payload.repHigh,
+            rirLow: payload.rirLow,
+            rirHigh: payload.rirHigh,
+            category: payload.category,
+            allowFailure: payload.allowFailure,
+            cues: payload.cues,
+            safetyNote: payload.safetyNote,
+            startingWeightKg: payload.startingWeightKg,
+            progressionRule: payload.progressionRule,
+            measurementKind: payload.measurementKind,
+            supersetGroupId: payload.supersetGroupID,
+            supersetOrder: payload.supersetOrder
+        )
+        modelContext.insert(exercise)
+        return exercise
+    }
+
+    private func warmup(
+        for payload: M1SeedPayload.Warmup,
+        existing: [WarmupItem]
+    ) -> WarmupItem {
+        if let match = existing.first(where: { $0.id == payload.id }) {
+            return match
+        }
+
+        let warmup = WarmupItem(
+            id: payload.id,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+            phase: payload.phase,
+            movement: payload.movement,
+            dose: payload.dose,
+            orderIndex: payload.orderIndex
+        )
+        modelContext.insert(warmup)
+        return warmup
+    }
+
+    private func cooldown(
+        for payload: M1SeedPayload.Cooldown,
+        existing: [CooldownItem]
+    ) -> CooldownItem {
+        if let match = existing.first(where: { $0.id == payload.id }) {
+            return match
+        }
+
+        let cooldown = CooldownItem(
+            id: payload.id,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+            movement: payload.movement,
+            dose: payload.dose,
+            note: payload.note,
+            orderIndex: payload.orderIndex
+        )
+        modelContext.insert(cooldown)
+        return cooldown
+    }
+
+    private func reminder(
+        for payload: M1SeedPayload.Reminder,
+        existing: [HealthCheckReminder]
+    ) -> HealthCheckReminder {
+        if let match = existing.first(where: { $0.id == payload.id }) {
+            return match
+        }
+
+        let reminder = HealthCheckReminder(
+            id: payload.id,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+            name: payload.name,
+            dueDate: payload.dueDate,
+            recurrence: payload.recurrence,
+            status: payload.status
+        )
+        modelContext.insert(reminder)
+        return reminder
+    }
+
+    private func programState(
+        for payload: M1SeedPayload.State,
+        existing: [ProgramState]
+    ) -> ProgramState {
+        if let match = existing.first(where: { $0.id == payload.id }) {
+            return match
+        }
+
+        let state = ProgramState(
+            id: payload.id,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+            programId: payload.programID,
+            currentPhaseId: payload.currentPhaseID,
+            phaseStartedAt: payload.phaseStartedAt,
+            trainingWeekIndex: payload.trainingWeekIndex,
+            deloadStatus: payload.deloadStatus,
+            deloadReason: payload.deloadReason,
+            deloadUpdatedAt: payload.deloadUpdatedAt,
+            lastDeloadSkippedAt: payload.lastDeloadSkippedAt,
+            lastDeloadAction: payload.lastDeloadAction
+        )
+        modelContext.insert(state)
+        return state
     }
 }
