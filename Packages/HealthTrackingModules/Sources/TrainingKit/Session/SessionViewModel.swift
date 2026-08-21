@@ -26,6 +26,8 @@ public final class SessionViewModel {
     @ObservationIgnored
     private let now: @MainActor () -> Date
     @ObservationIgnored
+    private let haptics: TrainingHapticController?
+    @ObservationIgnored
     private var pendingSetRequest: SetLogSaveRequest?
     @ObservationIgnored
     private var completedHistoryByExerciseID: [UUID: [CompletedExerciseHistorySnapshot]] = [:]
@@ -48,12 +50,14 @@ public final class SessionViewModel {
     public init(
         repository: any TrainingRepository,
         calendar: Calendar = .current,
-        now: @escaping @MainActor () -> Date = { .now }
+        now: @escaping @MainActor () -> Date = { .now },
+        haptics: TrainingHapticController? = nil
     ) {
         self.repository = repository
         coordinator = SessionCoordinator(repository: repository)
         self.calendar = calendar
         self.now = now
+        self.haptics = haptics
     }
 
     public func start(workoutDayID: UUID) async {
@@ -123,6 +127,7 @@ public final class SessionViewModel {
                 await persistProgress(progress)
             }
         } catch {
+            haptics?.handle(.repositoryError)
             state = .failed(.load)
             currentSetDraft = nil
             currentVariantOptions = []
@@ -221,6 +226,7 @@ public final class SessionViewModel {
             )
             configureDraft()
         } catch {
+            haptics?.handle(.repositoryError)
             state = .failed(.ohpSafety)
             currentSetDraft = nil
             currentVariantOptions = []
@@ -246,6 +252,7 @@ public final class SessionViewModel {
             )
             configureDraft()
         } catch {
+            haptics?.handle(.repositoryError)
             state = .failed(.ohpSafety)
             currentSetDraft = nil
             currentVariantOptions = []
@@ -274,6 +281,7 @@ public final class SessionViewModel {
             }
             configureDraft()
         } catch {
+            haptics?.handle(.repositoryError)
             state = .failed(.deload)
             currentSetDraft = nil
             currentVariantOptions = []
@@ -408,6 +416,7 @@ public final class SessionViewModel {
             await performSave(request)
         } catch {
             setSaveState = .validationFailed
+            haptics?.handle(.validationError)
         }
     }
 
@@ -433,6 +442,7 @@ public final class SessionViewModel {
             currentSetDraft = nil
             state = .dismissed
         } catch {
+            haptics?.handle(.repositoryError)
             isDeleteConfirmationPresented = false
             state = .failed(.deletion)
         }
@@ -448,6 +458,10 @@ public final class SessionViewModel {
     public func selectPerformedVariant(_ option: SessionVariantOption) {
         guard currentVariantOptions.contains(option) else { return }
         currentSetDraft?.selectPerformedVariant(option.rawValue)
+    }
+
+    public func stepperChanged() {
+        haptics?.handle(.stepperChanged)
     }
 
     public func updateSummaryNote(_ note: String) {
@@ -470,6 +484,7 @@ public final class SessionViewModel {
             currentSetDraft = nil
             state = .dismissed
         } catch {
+            haptics?.handle(.repositoryError)
             state = .failed(.summary)
         }
     }
@@ -582,11 +597,13 @@ public final class SessionViewModel {
                 reason: reason.sessionReason,
                 trainingWeekIndex: programState.trainingWeekIndex
             )
+            haptics?.handle(.deload)
         case let .active(reason):
             deloadState = .active(
                 reason: reason.sessionReason,
                 trainingWeekIndex: programState.trainingWeekIndex
             )
+            haptics?.handle(.deload)
         }
     }
 
@@ -626,6 +643,12 @@ public final class SessionViewModel {
         currentSession: WorkoutSessionSnapshot,
         previousSession: WorkoutSessionSnapshot?
     ) {
+        let wasStopped: Bool
+        if case .stopped = ohpSafetyState {
+            wasStopped = true
+        } else {
+            wasStopped = false
+        }
         let outcome = OHPSafetyGate.resolve(
             OHPSafetyGate.Input(
                 trainingWeekIndex: ohpTrainingWeekIndex,
@@ -645,6 +668,9 @@ public final class SessionViewModel {
         }
         ohpDecision = decision
         ohpSafetyState = sessionState(for: decision)
+        if !wasStopped, case .stopped = ohpSafetyState {
+            haptics?.handle(.safetyStop)
+        }
     }
 
     private func sessionState(
@@ -767,7 +793,11 @@ public final class SessionViewModel {
                 )
             )
             configureDraft()
+            haptics?.handle(
+                .personalRecord(isNew: personalRecords.shouldEmitSuccessFeedback)
+            )
         } catch {
+            haptics?.handle(.repositoryError)
             state = .failed(.completion)
             currentSetDraft = nil
         }
@@ -800,6 +830,7 @@ public final class SessionViewModel {
             )
             configureDraft()
         } catch {
+            haptics?.handle(.repositoryError)
             state = .failed(.progress)
             currentSetDraft = nil
         }
@@ -811,6 +842,7 @@ public final class SessionViewModel {
             let saved = try await repository.saveSet(request)
             guard let presentation = activePresentation else {
                 setSaveState = .repositoryFailed
+                haptics?.handle(.repositoryError)
                 return
             }
             let sets = (presentation.setLogs.filter { $0.id != saved.id } + [saved])
@@ -836,8 +868,10 @@ public final class SessionViewModel {
             pendingSetRequest = nil
             configureDraft()
             setSaveState = .saved(setID: saved.id)
+            haptics?.handle(.setSaved)
         } catch {
             setSaveState = .repositoryFailed
+            haptics?.handle(.repositoryError)
         }
     }
 

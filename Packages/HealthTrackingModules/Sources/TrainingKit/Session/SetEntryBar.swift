@@ -10,6 +10,7 @@ public struct SetEntryBar: View {
     private let recommendationReason: SessionRecommendationReason
     private let variantOptions: [SessionVariantOption]
     private let selectVariant: (SessionVariantOption) -> Void
+    private let selectionChanged: () -> Void
     private let save: () -> Void
     private let retry: () -> Void
 
@@ -19,6 +20,7 @@ public struct SetEntryBar: View {
         recommendationReason: SessionRecommendationReason,
         variantOptions: [SessionVariantOption],
         selectVariant: @escaping (SessionVariantOption) -> Void,
+        selectionChanged: @escaping () -> Void,
         save: @escaping () -> Void,
         retry: @escaping () -> Void
     ) {
@@ -27,6 +29,7 @@ public struct SetEntryBar: View {
         self.recommendationReason = recommendationReason
         self.variantOptions = variantOptions
         self.selectVariant = selectVariant
+        self.selectionChanged = selectionChanged
         self.save = save
         self.retry = retry
     }
@@ -326,7 +329,10 @@ public struct SetEntryBar: View {
                 .font(AppTypography.label)
                 .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
             Spacer()
-            Button(action: decrement) {
+            Button {
+                decrement()
+                selectionChanged()
+            } label: {
                 Image(systemName: "minus")
                     .frame(width: 44, height: 44)
             }
@@ -342,7 +348,10 @@ public struct SetEntryBar: View {
                 .font(AppTypography.numericRow)
                 .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
                 .frame(minWidth: 56)
-            Button(action: increment) {
+            Button {
+                increment()
+                selectionChanged()
+            } label: {
                 Image(systemName: "plus")
                     .frame(width: 44, height: 44)
             }

@@ -31,6 +31,7 @@ public struct ExerciseStageView: View {
                             recommendationReason: viewModel.recommendationReason,
                             variantOptions: viewModel.currentVariantOptions,
                             selectVariant: viewModel.selectPerformedVariant,
+                            selectionChanged: viewModel.stepperChanged,
                             save: {
                                 Task { await viewModel.saveCurrentSet() }
                             },

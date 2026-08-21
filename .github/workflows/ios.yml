@@ -65,6 +65,8 @@ jobs:
           scripts/verify-requirements.sh
           scripts/verify-today.sh --self-test
           scripts/verify-today.sh
+          scripts/verify-haptics.sh --self-test
+          scripts/verify-haptics.sh
 
       - name: Fresh-clone bootstrap idempotence
         timeout-minutes: 15

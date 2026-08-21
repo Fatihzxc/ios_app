@@ -109,6 +109,8 @@ public final class PhaseTransitionViewModel {
     @ObservationIgnored
     private let calendar: Calendar
     @ObservationIgnored
+    private var haptics: TrainingHapticController?
+    @ObservationIgnored
     private var programID: UUID?
     @ObservationIgnored
     private var programStartDate: Date?
@@ -119,10 +121,16 @@ public final class PhaseTransitionViewModel {
 
     public init(
         repository: any TrainingRepository,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        haptics: TrainingHapticController? = nil
     ) {
         self.repository = repository
         self.calendar = calendar
+        self.haptics = haptics
+    }
+
+    public func installHaptics(_ haptics: TrainingHapticController) {
+        self.haptics = haptics
     }
 
     public func load(at date: Date = .now) async {
@@ -147,6 +155,7 @@ public final class PhaseTransitionViewModel {
             programState = storedState
             state = makeState(currentPhaseID: storedState.currentPhaseId, evaluatedAt: date)
         } catch {
+            haptics?.handle(.repositoryError)
             state = .error
         }
     }
@@ -175,17 +184,21 @@ public final class PhaseTransitionViewModel {
               review.isDue else {
             return
         }
-        await selectPhase(id: review.nextPhaseID, at: date)
+        await selectPhase(id: review.nextPhaseID, at: date, isConfirmed: true)
     }
 
     public func selectPhaseManually(id phaseID: UUID, at date: Date = .now) async {
         guard phases.contains(where: { $0.id == phaseID }) else {
             return
         }
-        await selectPhase(id: phaseID, at: date)
+        await selectPhase(id: phaseID, at: date, isConfirmed: false)
     }
 
-    private func selectPhase(id phaseID: UUID, at date: Date) async {
+    private func selectPhase(
+        id phaseID: UUID,
+        at date: Date,
+        isConfirmed: Bool
+    ) async {
         guard let programID else { return }
         do {
             programState = try await repository.setActiveProgramPhase(
@@ -194,7 +207,9 @@ public final class PhaseTransitionViewModel {
                 at: date
             )
             state = makeState(currentPhaseID: phaseID, evaluatedAt: date)
+            haptics?.handle(.phaseTransition(isConfirmed: isConfirmed))
         } catch {
+            haptics?.handle(.repositoryError)
             state = .error
         }
     }

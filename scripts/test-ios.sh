@@ -53,6 +53,8 @@ fi
 "$script_dir/verify-requirements.sh"
 "$script_dir/verify-today.sh" --self-test
 "$script_dir/verify-today.sh"
+"$script_dir/verify-haptics.sh" --self-test
+"$script_dir/verify-haptics.sh"
 
 if [[ "$bootstrap_idempotence_only" == true ]]; then
     "$script_dir/verify-bootstrap-idempotence.sh"

@@ -12,6 +12,7 @@ struct AppRootView: View {
     let phaseTransitionViewModel: PhaseTransitionViewModel
     let trainingHistoryViewModel: TrainingHistoryViewModel
     let makeSessionViewModel: @MainActor () -> SessionViewModel
+    let trainingHapticController: TrainingHapticController?
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
 
@@ -107,7 +108,8 @@ struct AppRootView: View {
         case .settings:
             SettingsFoundationView(
                 persistencePresentation: persistencePresentation,
-                phaseTransitionViewModel: phaseTransitionViewModel
+                phaseTransitionViewModel: phaseTransitionViewModel,
+                trainingHapticController: trainingHapticController
             )
         }
     }

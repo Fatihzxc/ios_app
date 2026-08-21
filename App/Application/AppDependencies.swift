@@ -18,18 +18,25 @@ extension AppDependencyLoading {
 @MainActor
 final class AppDependencies: AppDependencyLoading {
     private let modelContainer: ModelContainer
+    private let mainContext: ModelContext
     private let seedLoader: SwiftDataSeedLoader
     private let installUITestFixture: @MainActor () throws -> Void
+    private let injectedHapticClient: (any TrainingHapticClient)?
+    private let hapticControllerReference: TrainingHapticControllerReference
     let trainingRepository: any TrainingRepository
     let todayViewModel: TodayViewModel
     let foundationViewModel: FoundationProgramViewModel
     let phaseTransitionViewModel: PhaseTransitionViewModel
     let trainingHistoryViewModel: TrainingHistoryViewModel
     let makeSessionViewModel: @MainActor () -> SessionViewModel
+    private(set) var trainingHapticController: TrainingHapticController?
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
 
-    init(environment: AppEnvironment) throws {
+    init(
+        environment: AppEnvironment,
+        hapticClient: (any TrainingHapticClient)? = nil
+    ) throws {
         let persistenceMode: PersistenceMode
         switch environment {
         case .uiTesting:
@@ -60,6 +67,11 @@ final class AppDependencies: AppDependencyLoading {
         let modelContainer = try ModelContainerFactory.make(for: persistenceMode)
         let mainContext = ModelContext(modelContainer)
         self.modelContainer = modelContainer
+        self.mainContext = mainContext
+        injectedHapticClient = hapticClient
+        trainingHapticController = nil
+        let hapticControllerReference = TrainingHapticControllerReference()
+        self.hapticControllerReference = hapticControllerReference
         seedLoader = SwiftDataSeedLoader(modelContext: mainContext)
         let repository = SwiftDataTrainingRepository(modelContext: mainContext)
 
@@ -133,7 +145,10 @@ final class AppDependencies: AppDependencyLoading {
         )
         let sessionRepository = trainingRepository
         makeSessionViewModel = {
-            SessionViewModel(repository: sessionRepository)
+            SessionViewModel(
+                repository: sessionRepository,
+                haptics: hapticControllerReference.value
+            )
         }
 
         #if DEBUG
@@ -155,8 +170,27 @@ final class AppDependencies: AppDependencyLoading {
     }
 
     func loadInitialContent() async {
-        guard shouldLoadFoundation else { return }
-        await todayViewModel.load()
+        if shouldLoadFoundation {
+            await todayViewModel.load()
+        }
+        let hapticController = ensureTrainingHapticController()
+        hapticController.loadPreference()
+    }
+
+    private func ensureTrainingHapticController() -> TrainingHapticController {
+        if let trainingHapticController {
+            return trainingHapticController
+        }
+        let controller = TrainingHapticController(
+            client: injectedHapticClient ?? UIKitTrainingHapticClient(),
+            preferenceStore: SwiftDataTrainingHapticPreferenceStore(
+                modelContext: mainContext
+            )
+        )
+        trainingHapticController = controller
+        hapticControllerReference.value = controller
+        phaseTransitionViewModel.installHaptics(controller)
+        return controller
     }
 
     #if DEBUG
@@ -188,6 +222,11 @@ final class AppDependencies: AppDependencyLoading {
         )
     }
     #endif
+}
+
+@MainActor
+private final class TrainingHapticControllerReference {
+    var value: TrainingHapticController?
 }
 
 #if DEBUG

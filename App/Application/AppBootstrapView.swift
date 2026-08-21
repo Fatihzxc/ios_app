@@ -26,6 +26,7 @@ struct AppBootstrapView: View {
                     phaseTransitionViewModel: dependencies.phaseTransitionViewModel,
                     trainingHistoryViewModel: dependencies.trainingHistoryViewModel,
                     makeSessionViewModel: dependencies.makeSessionViewModel,
+                    trainingHapticController: dependencies.trainingHapticController,
                     shouldLoadFoundation: dependencies.shouldLoadFoundation,
                     persistencePresentation: dependencies.persistencePresentation
                 )

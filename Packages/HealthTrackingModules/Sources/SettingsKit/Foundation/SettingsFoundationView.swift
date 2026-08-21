@@ -16,15 +16,19 @@ public struct SettingsFoundationView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var path: [Route] = []
+    @State private var hapticPreferenceSaveFailed = false
     private let persistencePresentation: FoundationPersistencePresentation
     private let phaseTransitionViewModel: PhaseTransitionViewModel?
+    private let trainingHapticController: TrainingHapticController?
 
     public init(
         persistencePresentation: FoundationPersistencePresentation,
-        phaseTransitionViewModel: PhaseTransitionViewModel? = nil
+        phaseTransitionViewModel: PhaseTransitionViewModel? = nil,
+        trainingHapticController: TrainingHapticController? = nil
     ) {
         self.persistencePresentation = persistencePresentation
         self.phaseTransitionViewModel = phaseTransitionViewModel
+        self.trainingHapticController = trainingHapticController
     }
 
     public var body: some View {
@@ -42,6 +46,70 @@ public struct SettingsFoundationView: View {
                                 .font(AppTypography.body)
                                 .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
                                 .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    if let trainingHapticController {
+                        AppCard {
+                            VStack(alignment: .leading, spacing: AppSpacing.compact) {
+                                Toggle(
+                                    isOn: Binding(
+                                        get: { trainingHapticController.isEnabled },
+                                        set: { isEnabled in
+                                            updateHaptics(
+                                                isEnabled,
+                                                controller: trainingHapticController
+                                            )
+                                        }
+                                    )
+                                ) {
+                                    VStack(alignment: .leading, spacing: AppSpacing.small) {
+                                        Text(
+                                            String(
+                                                localized: "settings.haptics.title",
+                                                bundle: .module
+                                            )
+                                        )
+                                        .font(AppTypography.label)
+                                        .foregroundStyle(
+                                            AppColors.color(.inkPrimary, scheme: colorScheme)
+                                        )
+                                        Text(
+                                            String(
+                                                localized: "settings.haptics.detail",
+                                                bundle: .module
+                                            )
+                                        )
+                                        .font(AppTypography.caption)
+                                        .foregroundStyle(
+                                            AppColors.color(.inkSecondary, scheme: colorScheme)
+                                        )
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                                .accessibilityIdentifier("settings.haptics-toggle")
+                                .accessibilityHint(
+                                    String(
+                                        localized: "settings.haptics.hint",
+                                        bundle: .module
+                                    )
+                                )
+
+                                if hapticPreferenceSaveFailed ||
+                                    trainingHapticController.preferenceState == .failed {
+                                    Text(
+                                        String(
+                                            localized: "settings.haptics.saveError",
+                                            bundle: .module
+                                        )
+                                    )
+                                    .font(AppTypography.caption)
+                                    .foregroundStyle(
+                                        AppColors.color(.stateDanger, scheme: colorScheme)
+                                    )
+                                    .accessibilityIdentifier("settings.haptics-error")
+                                }
+                            }
                         }
                     }
 
@@ -108,6 +176,18 @@ public struct SettingsFoundationView: View {
             String(localized: "settings.persistence.local", bundle: .module)
         case .iCloudConfigured:
             String(localized: "settings.persistence.iCloudConfigured", bundle: .module)
+        }
+    }
+
+    private func updateHaptics(
+        _ isEnabled: Bool,
+        controller: TrainingHapticController
+    ) {
+        do {
+            try controller.setEnabled(isEnabled)
+            hapticPreferenceSaveFailed = false
+        } catch {
+            hapticPreferenceSaveFailed = true
         }
     }
 }
