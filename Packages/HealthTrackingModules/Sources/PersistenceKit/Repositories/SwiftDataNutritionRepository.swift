@@ -3,6 +3,68 @@ import Foundation
 import NutritionKit
 import SwiftData
 
+public enum NutritionPersistenceDecimalError: Error, Equatable, Sendable {
+    case nonFinite(NutritionMacroField)
+    case negative(NutritionMacroField)
+    case notRepresentable(NutritionMacroField)
+}
+
+enum NutritionPersistenceDecimalMapper {
+    private static let posix = Locale(identifier: "en_US_POSIX")
+
+    static func decimal(
+        from value: Double,
+        field: NutritionMacroField
+    ) throws -> Decimal {
+        guard value.isFinite else {
+            throw NutritionPersistenceDecimalError.nonFinite(field)
+        }
+        guard value >= 0 else {
+            throw NutritionPersistenceDecimalError.negative(field)
+        }
+        guard let result = Decimal(string: String(value), locale: posix),
+              result.isFinite else {
+            throw NutritionPersistenceDecimalError.notRepresentable(field)
+        }
+        return result
+    }
+
+    static func target(
+        from value: Double?,
+        field: NutritionMacroField
+    ) throws -> Decimal? {
+        guard let value, value != 0 else { return nil }
+        return try decimal(from: value, field: field)
+    }
+
+    static func double(
+        from value: Decimal,
+        field: NutritionMacroField
+    ) throws -> Double {
+        guard value.isFinite else {
+            throw NutritionPersistenceDecimalError.nonFinite(field)
+        }
+        guard value >= 0 else {
+            throw NutritionPersistenceDecimalError.negative(field)
+        }
+        let decimalString = NSDecimalNumber(decimal: value).stringValue
+        guard let result = Double(decimalString) else {
+            throw NutritionPersistenceDecimalError.notRepresentable(field)
+        }
+        guard result.isFinite,
+              value == 0 || result != 0 else {
+            throw NutritionPersistenceDecimalError.notRepresentable(field)
+        }
+        guard let roundTrip = Decimal(string: String(result), locale: posix),
+              roundTrip.isFinite,
+              roundTrip >= 0,
+              roundTrip == value else {
+            throw NutritionPersistenceDecimalError.notRepresentable(field)
+        }
+        return result
+    }
+}
+
 @MainActor
 public final class SwiftDataNutritionRepository: NutritionDayRepository {
     private let modelContext: ModelContext
@@ -15,6 +77,9 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository {
     private let fetchEntriesOperation: @MainActor (
         FetchDescriptor<MealEntry>
     ) throws -> [MealEntry]
+    private let fetchProfilesOperation: @MainActor (
+        FetchDescriptor<UserProfile>
+    ) throws -> [UserProfile]
     private let saveOperation: @MainActor () throws -> Void
     private let rollbackOperation: @MainActor () -> Void
 
@@ -30,6 +95,7 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository {
         self.makeID = makeID
         fetchDaysOperation = { try modelContext.fetch($0) }
         fetchEntriesOperation = { try modelContext.fetch($0) }
+        fetchProfilesOperation = { try modelContext.fetch($0) }
         saveOperation = { try modelContext.save() }
         rollbackOperation = { modelContext.rollback() }
     }
@@ -48,6 +114,29 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository {
         self.makeID = makeID
         fetchDaysOperation = { try modelContext.fetch($0) }
         fetchEntriesOperation = { try modelContext.fetch($0) }
+        fetchProfilesOperation = { try modelContext.fetch($0) }
+        saveOperation = save
+        rollbackOperation = rollback
+    }
+
+    init(
+        modelContext: ModelContext,
+        calendar: Calendar,
+        now: @escaping @MainActor () -> Date,
+        makeID: @escaping @MainActor () -> UUID,
+        fetchProfiles: @escaping @MainActor (
+            FetchDescriptor<UserProfile>
+        ) throws -> [UserProfile],
+        save: @escaping @MainActor () throws -> Void,
+        rollback: @escaping @MainActor () -> Void
+    ) {
+        self.modelContext = modelContext
+        self.calendar = calendar
+        self.now = now
+        self.makeID = makeID
+        fetchDaysOperation = { try modelContext.fetch($0) }
+        fetchEntriesOperation = { try modelContext.fetch($0) }
+        fetchProfilesOperation = fetchProfiles
         saveOperation = save
         rollbackOperation = rollback
     }
@@ -72,8 +161,37 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository {
         self.makeID = makeID
         fetchDaysOperation = fetchDays
         fetchEntriesOperation = fetchEntries
+        fetchProfilesOperation = { try modelContext.fetch($0) }
         saveOperation = save
         rollbackOperation = rollback
+    }
+
+    public func fetchNutritionTargets() async throws -> NutritionMacroTargets? {
+        let profiles = try fetchProfiles(FetchDescriptor<UserProfile>())
+        guard profiles.count <= 1 else {
+            throw NutritionRepositoryIntegrityError.duplicateUserProfiles(
+                count: profiles.count
+            )
+        }
+        guard let profile = profiles.first else { return nil }
+        return NutritionMacroTargets(
+            calories: try NutritionPersistenceDecimalMapper.target(
+                from: profile.calorieTarget,
+                field: .calories
+            ),
+            proteinG: try NutritionPersistenceDecimalMapper.target(
+                from: profile.proteinTargetG,
+                field: .proteinG
+            ),
+            carbG: try NutritionPersistenceDecimalMapper.target(
+                from: profile.carbTargetG,
+                field: .carbG
+            ),
+            fatG: try NutritionPersistenceDecimalMapper.target(
+                from: profile.fatTargetG,
+                field: .fatG
+            )
+        )
     }
 
     public func fetchNutritionDay(
@@ -211,6 +329,16 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository {
     ) throws -> [MealEntry] {
         do {
             return try fetchEntriesOperation(descriptor)
+        } catch {
+            throw NutritionRepositoryOperationError.loadFailed
+        }
+    }
+
+    private func fetchProfiles(
+        _ descriptor: FetchDescriptor<UserProfile>
+    ) throws -> [UserProfile] {
+        do {
+            return try fetchProfilesOperation(descriptor)
         } catch {
             throw NutritionRepositoryOperationError.loadFailed
         }

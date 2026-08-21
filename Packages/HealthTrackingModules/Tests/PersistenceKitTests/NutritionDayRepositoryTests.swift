@@ -612,6 +612,131 @@ final class NutritionDayRepositoryTests: XCTestCase {
         XCTAssertEqual(try reader.fetchCount(FetchDescriptor<MealEntry>()), 1)
     }
 
+    func testPersistenceDecimalBoundaryUsesShortestPOSIXValuesWithoutBinaryDrift() throws {
+        XCTAssertEqual(
+            try NutritionPersistenceDecimalMapper.decimal(from: 0.1, field: .calories),
+            decimal("0.1")
+        )
+        XCTAssertEqual(
+            try NutritionPersistenceDecimalMapper.decimal(from: 0.2, field: .proteinG),
+            decimal("0.2")
+        )
+        XCTAssertEqual(
+            try NutritionPersistenceDecimalMapper.double(
+                from: decimal("1234.567891"),
+                field: .carbG
+            ),
+            1234.567891
+        )
+        assertEquatableSendable(
+            NutritionPersistenceDecimalError.nonFinite(.fatG)
+        )
+    }
+
+    func testPersistenceDecimalBoundaryRejectsNegativeNaNInfinityAndOverflow() {
+        assertPersistenceDecimalError(.negative(.calories)) {
+            _ = try NutritionPersistenceDecimalMapper.decimal(
+                from: -0.1,
+                field: .calories
+            )
+        }
+        for value in [Double.nan, Double.infinity, -Double.infinity] {
+            assertPersistenceDecimalError(.nonFinite(.proteinG)) {
+                _ = try NutritionPersistenceDecimalMapper.decimal(
+                    from: value,
+                    field: .proteinG
+                )
+            }
+        }
+        assertPersistenceDecimalError(.nonFinite(.carbG)) {
+            _ = try NutritionPersistenceDecimalMapper.double(
+                from: .nan,
+                field: .carbG
+            )
+        }
+        assertPersistenceDecimalError(.negative(.fatG)) {
+            _ = try NutritionPersistenceDecimalMapper.double(
+                from: -1,
+                field: .fatG
+            )
+        }
+        assertPersistenceDecimalError(.notRepresentable(.calories)) {
+            _ = try NutritionPersistenceDecimalMapper.decimal(
+                from: Double.greatestFiniteMagnitude,
+                field: .calories
+            )
+        }
+    }
+
+    func testProfileTargetsMapIndependentlyAndTreatPersistedZeroAsAbsent() async throws {
+        let fixture = try makeFixture(timeZoneID: "UTC")
+        let writer = ModelContext(fixture.container)
+        writer.insert(
+            UserProfile(
+                proteinTargetG: 120.1,
+                calorieTarget: nil,
+                carbTargetG: 0,
+                fatTargetG: 70.2
+            )
+        )
+        try writer.save()
+
+        let fetchedTargets = try await fixture.repository.fetchNutritionTargets()
+        let targets = try XCTUnwrap(fetchedTargets)
+
+        XCTAssertNil(targets.calories)
+        XCTAssertEqual(targets.proteinG, decimal("120.1"))
+        XCTAssertNil(targets.carbG)
+        XCTAssertEqual(targets.fatG, decimal("70.2"))
+        assertEquatableSendable(targets)
+    }
+
+    func testMissingProfileHasNoTargetsAndDuplicateProfilesFailClosed() async throws {
+        let fixture = try makeFixture(timeZoneID: "UTC")
+
+        let missingTargets = try await fixture.repository.fetchNutritionTargets()
+        XCTAssertNil(missingTargets)
+
+        let writer = ModelContext(fixture.container)
+        writer.insert(UserProfile(id: uuid("00000000-0000-4000-8000-000000000151")))
+        writer.insert(UserProfile(id: uuid("00000000-0000-4000-8000-000000000152")))
+        try writer.save()
+
+        do {
+            _ = try await fixture.repository.fetchNutritionTargets()
+            XCTFail("Expected duplicate profiles to fail closed.")
+        } catch {
+            XCTAssertEqual(
+                error as? NutritionRepositoryIntegrityError,
+                .duplicateUserProfiles(count: 2)
+            )
+        }
+    }
+
+    func testInvalidPersistedProfileTargetFailsAtTheDoubleBoundary() async throws {
+        let fixture = try makeFixture(timeZoneID: "UTC")
+        let invalidProfile = UserProfile(proteinTargetG: .nan)
+        let repository = SwiftDataNutritionRepository(
+            modelContext: ModelContext(fixture.container),
+            calendar: fixture.calendar,
+            now: { fixture.now },
+            makeID: { fixture.generatedID },
+            fetchProfiles: { _ in [invalidProfile] },
+            save: {},
+            rollback: {}
+        )
+
+        do {
+            _ = try await repository.fetchNutritionTargets()
+            XCTFail("Expected a nonfinite persisted protein target to fail closed.")
+        } catch {
+            XCTAssertEqual(
+                error as? NutritionPersistenceDecimalError,
+                .nonFinite(.proteinG)
+            )
+        }
+    }
+
     private func makeFixture(
         timeZoneID: String
     ) throws -> (
@@ -675,6 +800,26 @@ final class NutritionDayRepositoryTests: XCTestCase {
 
     private func uuid(_ value: String) -> UUID {
         UUID(uuidString: value)!
+    }
+
+    private func decimal(_ value: String) -> Decimal {
+        Decimal(string: value, locale: Locale(identifier: "en_US_POSIX"))!
+    }
+
+    private func assertPersistenceDecimalError(
+        _ expected: NutritionPersistenceDecimalError,
+        _ expression: () throws -> Void,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertThrowsError(try expression(), file: file, line: line) { error in
+            XCTAssertEqual(
+                error as? NutritionPersistenceDecimalError,
+                expected,
+                file: file,
+                line: line
+            )
+        }
     }
 
     private func assertEquatableSendable<Value: Equatable & Sendable>(_: Value) {}
