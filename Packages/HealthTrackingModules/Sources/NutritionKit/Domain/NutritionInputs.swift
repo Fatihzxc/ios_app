@@ -232,3 +232,101 @@ public struct RecipeInput: Equatable, Sendable {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
+
+public enum MealEntryRequestError: Error, Equatable, Sendable {
+    case emptyAdhocName
+    case nonFiniteQuantity
+    case nonPositiveQuantity
+    case invalidCategory
+}
+
+public enum MealEntrySourceRequest: Equatable, Sendable {
+    case recipe(id: UUID, consumedServings: Decimal)
+    case food(id: UUID, quantity: Decimal)
+    case adhoc(
+        name: String,
+        quantity: Decimal,
+        resolvedMacros: NutritionMacros
+    )
+}
+
+public struct MealEntryCreateRequest: Equatable, Sendable {
+    public let requestID: UUID
+    public let date: Date
+    public let category: MealCategory
+    public let source: MealEntrySourceRequest
+
+    public init(
+        requestID: UUID,
+        date: Date,
+        category: MealCategory,
+        source: MealEntrySourceRequest
+    ) throws {
+        self.requestID = requestID
+        self.date = date
+        self.category = try MealEntryRequestValidation.category(category)
+
+        switch source {
+        case let .recipe(id, consumedServings):
+            self.source = .recipe(
+                id: id,
+                consumedServings: try MealEntryRequestValidation.quantity(
+                    consumedServings
+                )
+            )
+        case let .food(id, quantity):
+            self.source = .food(
+                id: id,
+                quantity: try MealEntryRequestValidation.quantity(quantity)
+            )
+        case let .adhoc(name, quantity, resolvedMacros):
+            let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else {
+                throw MealEntryRequestError.emptyAdhocName
+            }
+            self.source = .adhoc(
+                name: name,
+                quantity: try MealEntryRequestValidation.quantity(quantity),
+                resolvedMacros: resolvedMacros
+            )
+        }
+    }
+}
+
+public struct MealEntryUpdate: Equatable, Sendable {
+    public let category: MealCategory
+    public let quantity: Decimal
+
+    public init(category: MealCategory, quantity: Decimal) throws {
+        self.category = try MealEntryRequestValidation.category(category)
+        self.quantity = try MealEntryRequestValidation.quantity(quantity)
+    }
+}
+
+private enum MealEntryRequestValidation {
+    static func category(_ value: MealCategory) throws -> MealCategory {
+        do {
+            return try MealCategory(
+                kind: value.kind,
+                customName: value.customName
+            )
+        } catch {
+            throw MealEntryRequestError.invalidCategory
+        }
+    }
+
+    static func quantity(_ value: Decimal) throws -> Decimal {
+        do {
+            return try NutritionQuantity(value).value
+        } catch let error as NutritionNumericError {
+            switch error {
+            case .nonFiniteQuantity:
+                throw MealEntryRequestError.nonFiniteQuantity
+            case .nonPositiveQuantity:
+                throw MealEntryRequestError.nonPositiveQuantity
+            default:
+                throw MealEntryRequestError.nonPositiveQuantity
+            }
+        }
+    }
+}

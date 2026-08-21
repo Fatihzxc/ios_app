@@ -1,3 +1,4 @@
+import CoreModels
 import Foundation
 
 public struct NutritionDaySnapshot: Equatable, Sendable {
@@ -97,5 +98,79 @@ public struct NutritionTargetSummary: Equatable, Sendable {
             consumed: consumed.fatG,
             target: targets.fatG
         )
+    }
+}
+
+public enum MealEntrySourceSnapshot: Equatable, Sendable {
+    case recipe(id: UUID, name: String?)
+    case food(id: UUID, name: String?)
+    case adhoc(name: String)
+}
+
+public struct MealEntrySnapshot: Equatable, Sendable, Identifiable {
+    public let id: UUID
+    public let createdAt: Date
+    public let updatedAt: Date
+    public let category: MealCategory
+    public let source: MealEntrySourceSnapshot
+    public let quantity: Decimal
+    public let resolvedMacros: NutritionMacros
+    public let loggedAt: Date
+    public let nutritionDayID: UUID
+
+    public init(
+        id: UUID,
+        createdAt: Date,
+        updatedAt: Date,
+        category: MealCategory,
+        source: MealEntrySourceSnapshot,
+        quantity: Decimal,
+        resolvedMacros: NutritionMacros,
+        loggedAt: Date,
+        nutritionDayID: UUID
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.category = category
+        self.source = source
+        self.quantity = quantity
+        self.resolvedMacros = resolvedMacros
+        self.loggedAt = loggedAt
+        self.nutritionDayID = nutritionDayID
+    }
+}
+
+public struct NutritionDayEntriesSnapshot: Equatable, Sendable {
+    public let day: NutritionDayKey
+    public let log: NutritionDaySnapshot?
+    public let entries: [MealEntrySnapshot]
+    public let totalMacros: NutritionMacros
+
+    public init(
+        day: NutritionDayKey,
+        log: NutritionDaySnapshot?,
+        entries: [MealEntrySnapshot]
+    ) throws {
+        self.day = day
+        self.log = log
+        self.entries = entries
+        totalMacros = try Self.totalMacros(in: entries)
+    }
+
+    public func totalMacros(
+        for category: MealCategory
+    ) throws -> NutritionMacros {
+        try Self.totalMacros(
+            in: entries.filter { $0.category == category }
+        )
+    }
+
+    private static func totalMacros(
+        in entries: [MealEntrySnapshot]
+    ) throws -> NutritionMacros {
+        try entries.reduce(.zero) { partial, entry in
+            try partial.adding(entry.resolvedMacros)
+        }
     }
 }

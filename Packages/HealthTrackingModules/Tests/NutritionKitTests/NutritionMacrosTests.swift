@@ -68,6 +68,29 @@ final class NutritionMacrosTests: XCTestCase {
         )
     }
 
+    func testCombinedScaleAndDivisionRoundsOnlyTheFinalResult() throws {
+        let macros = try NutritionMacros(
+            calories: 10,
+            proteinG: 20,
+            carbG: 30,
+            fatG: 40
+        )
+
+        XCTAssertEqual(
+            try macros.scaled(by: 1, dividedBy: 3),
+            try NutritionMacros(
+                calories: decimal("3.333333"),
+                proteinG: decimal("6.666667"),
+                carbG: 10,
+                fatG: decimal("13.333333")
+            )
+        )
+        XCTAssertEqual(
+            try macros.scaled(by: 3, dividedBy: 3),
+            macros
+        )
+    }
+
     func testNormalizedAdditionIsAssociativeForCanonicalInputs() throws {
         let first = try macros("0.100001")
         let second = try macros("0.200002")

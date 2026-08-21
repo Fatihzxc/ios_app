@@ -1,3 +1,4 @@
+import CoreModels
 import Foundation
 @testable import NutritionKit
 import XCTest
@@ -82,6 +83,93 @@ final class NutritionDayContractTests: XCTestCase {
         XCTAssertNotEqual(utcKey.start, losAngelesKey.start)
         XCTAssertTrue(utcKey.contains(instant))
         XCTAssertTrue(losAngelesKey.contains(instant))
+    }
+
+    func testEntryDaySnapshotDerivesExactDayAndCategoryTotalsFromEntries() throws {
+        let calendar = makeCalendar(timeZoneID: "Europe/Istanbul")
+        let date = makeDate(
+            year: 2026,
+            month: 8,
+            day: 21,
+            hour: 12,
+            calendar: calendar
+        )
+        let day = try NutritionDayKey(containing: date, calendar: calendar)
+        let dayID = uuid("00000000-0000-4000-8000-000000000721")
+        let firstID = uuid("00000000-0000-4000-8000-000000000722")
+        let secondID = uuid("00000000-0000-4000-8000-000000000723")
+        let first = try entry(
+            id: firstID,
+            category: MealCategory(kind: .breakfast),
+            value: "0.1",
+            dayID: dayID
+        )
+        let second = try entry(
+            id: secondID,
+            category: MealCategory(kind: .lunch),
+            value: "0.2",
+            dayID: dayID
+        )
+        let log = NutritionDaySnapshot(
+            id: dayID,
+            createdAt: Date(timeIntervalSinceReferenceDate: 100),
+            updatedAt: Date(timeIntervalSinceReferenceDate: 100),
+            day: day,
+            mealEntryIDs: [firstID, secondID]
+        )
+
+        let snapshot = try NutritionDayEntriesSnapshot(
+            day: day,
+            log: log,
+            entries: [first, second]
+        )
+
+        XCTAssertEqual(snapshot.totalMacros, try macros("0.3"))
+        XCTAssertEqual(
+            try snapshot.totalMacros(for: MealCategory(kind: .breakfast)),
+            try macros("0.1")
+        )
+        XCTAssertEqual(
+            try snapshot.totalMacros(for: MealCategory(kind: .dinner)),
+            .zero
+        )
+        assertEquatableSendable(snapshot)
+    }
+
+    private func entry(
+        id: UUID,
+        category: MealCategory,
+        value: String,
+        dayID: UUID
+    ) throws -> MealEntrySnapshot {
+        MealEntrySnapshot(
+            id: id,
+            createdAt: Date(timeIntervalSinceReferenceDate: 100),
+            updatedAt: Date(timeIntervalSinceReferenceDate: 100),
+            category: category,
+            source: .adhoc(name: "Kase"),
+            quantity: 1,
+            resolvedMacros: try macros(value),
+            loggedAt: Date(timeIntervalSinceReferenceDate: 100),
+            nutritionDayID: dayID
+        )
+    }
+
+    private func macros(_ value: String) throws -> NutritionMacros {
+        let value = Decimal(
+            string: value,
+            locale: Locale(identifier: "en_US_POSIX")
+        )!
+        return try NutritionMacros(
+            calories: value,
+            proteinG: value,
+            carbG: value,
+            fatG: value
+        )
+    }
+
+    private func uuid(_ value: String) -> UUID {
+        UUID(uuidString: value)!
     }
 
     private func makeCalendar(timeZoneID: String) -> Calendar {

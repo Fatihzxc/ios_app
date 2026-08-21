@@ -119,3 +119,44 @@ public struct NutritionMacros: Equatable, Sendable {
         fatG = canonicalFatG
     }
 }
+
+public enum MealEntryMacroResolver {
+    public static func recipe(
+        _ recipe: RecipeSnapshot,
+        consumedServings: Decimal
+    ) throws -> NutritionMacros {
+        _ = try NutritionQuantity(consumedServings)
+        return try recipe.resolvedMacros(
+            consumedServings: consumedServings
+        )
+    }
+
+    public static func food(
+        _ food: FoodSnapshot,
+        quantity: Decimal
+    ) throws -> NutritionMacros {
+        let quantity = try NutritionQuantity(quantity)
+        return try food.macros.scaled(by: quantity.value)
+    }
+
+    public static func adhoc(
+        resolvedMacros: NutritionMacros,
+        quantity: Decimal
+    ) throws -> NutritionMacros {
+        _ = try NutritionQuantity(quantity)
+        return resolvedMacros
+    }
+
+    public static func rescaleSnapshot(
+        _ macros: NutritionMacros,
+        from oldQuantity: Decimal,
+        to newQuantity: Decimal
+    ) throws -> NutritionMacros {
+        let oldQuantity = try NutritionQuantity(oldQuantity)
+        let newQuantity = try NutritionQuantity(newQuantity)
+        return try macros.scaled(
+            by: newQuantity.value,
+            dividedBy: oldQuantity.value
+        )
+    }
+}

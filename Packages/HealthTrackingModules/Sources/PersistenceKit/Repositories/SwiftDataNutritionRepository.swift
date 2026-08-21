@@ -148,9 +148,7 @@ private struct RecipePersistenceValues {
 
 @MainActor
 public final class SwiftDataNutritionRepository:
-    NutritionDayRepository,
-    FoodLibraryRepository,
-    RecipeLibraryRepository {
+    NutritionRepository {
     private let modelContext: ModelContext
     private let calendar: Calendar
     private let now: @MainActor () -> Date
@@ -1013,5 +1011,563 @@ public final class SwiftDataNutritionRepository:
             rollbackOperation()
             throw operationError
         }
+    }
+}
+
+private struct ResolvedMealEntrySource {
+    let recipeID: UUID?
+    let foodID: UUID?
+    let adhocName: String?
+    let quantity: Decimal
+    let macros: NutritionMacros
+}
+
+private struct MealEntryPersistenceValues {
+    let quantity: Double
+    let calories: Double
+    let proteinG: Double
+    let carbG: Double
+    let fatG: Double
+}
+
+extension SwiftDataNutritionRepository {
+    public func fetchMealEntries(
+        containing date: Date
+    ) async throws -> NutritionDayEntriesSnapshot {
+        let day = try NutritionDayKey(containing: date, calendar: calendar)
+        return try mealEntriesSnapshot(
+            day: day,
+            log: uniqueDayLog(for: day)
+        )
+    }
+
+    public func createMealEntry(
+        _ request: MealEntryCreateRequest
+    ) async throws -> NutritionDayEntriesSnapshot {
+        let day = try NutritionDayKey(
+            containing: request.date,
+            calendar: calendar
+        )
+        let requestMatches = try matchingEntries(id: request.requestID)
+        guard requestMatches.count <= 1 else {
+            throw MealEntryRepositoryIntegrityError.duplicateMealEntryIDs(
+                id: request.requestID,
+                count: requestMatches.count
+            )
+        }
+
+        if let existing = requestMatches.first {
+            guard try storedEntry(existing, matches: request, day: day) else {
+                throw MealEntryRepositoryMutationError.requestIDConflict(
+                    id: request.requestID
+                )
+            }
+            guard let log = existing.dailyNutritionLog else {
+                throw MealEntryRepositoryIntegrityError.invalidPersistedMealEntry(
+                    id: existing.id
+                )
+            }
+            return try mealEntriesSnapshot(day: day, log: log)
+        }
+
+        let source = try resolveMealEntrySource(request.source)
+        let values = try mealEntryPersistenceValues(
+            quantity: source.quantity,
+            macros: source.macros
+        )
+        let timestamp = now()
+        let log: DailyNutritionLog
+        if let existing = try uniqueDayLog(for: day) {
+            existing.updatedAt = timestamp
+            log = existing
+        } else {
+            let id = makeID()
+            guard try matchingDays(id: id).isEmpty else {
+                throw NutritionRepositoryIntegrityError.nutritionDayIDCollision(
+                    id: id
+                )
+            }
+            let created = DailyNutritionLog(
+                id: id,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                date: day.start
+            )
+            modelContext.insert(created)
+            log = created
+        }
+
+        modelContext.insert(
+            MealEntry(
+                id: request.requestID,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                category: request.category,
+                recipeId: source.recipeID,
+                foodId: source.foodID,
+                adhocName: source.adhocName,
+                quantity: values.quantity,
+                caloriesResolved: values.calories,
+                proteinResolved: values.proteinG,
+                carbResolved: values.carbG,
+                fatResolved: values.fatG,
+                loggedAt: timestamp,
+                dailyNutritionLog: log
+            )
+        )
+        try saveMutation(or: .saveFailed)
+        return try mealEntriesSnapshot(day: day, log: log)
+    }
+
+    public func updateMealEntry(
+        id: UUID,
+        update: MealEntryUpdate
+    ) async throws -> NutritionDayEntriesSnapshot {
+        let entry = try requiredMealEntry(id: id)
+        let original = try mealEntrySnapshot(
+            entry,
+            resolvingSourceNames: false
+        )
+        guard let log = entry.dailyNutritionLog else {
+            throw MealEntryRepositoryIntegrityError.invalidPersistedMealEntry(
+                id: id
+            )
+        }
+        let day = try NutritionDayKey(
+            containing: log.date,
+            calendar: calendar
+        )
+        guard try uniqueDayLog(for: day)?.id == log.id else {
+            throw MealEntryRepositoryIntegrityError.invalidPersistedMealEntry(
+                id: id
+            )
+        }
+        _ = try mealEntriesSnapshot(day: day, log: log)
+
+        let macros = try MealEntryMacroResolver.rescaleSnapshot(
+            original.resolvedMacros,
+            from: original.quantity,
+            to: update.quantity
+        )
+        let values = try mealEntryPersistenceValues(
+            quantity: update.quantity,
+            macros: macros
+        )
+        let timestamp = now()
+        entry.category = update.category
+        entry.quantity = values.quantity
+        entry.caloriesResolved = values.calories
+        entry.proteinResolved = values.proteinG
+        entry.carbResolved = values.carbG
+        entry.fatResolved = values.fatG
+        entry.updatedAt = timestamp
+        log.updatedAt = timestamp
+        try saveMutation(or: .saveFailed)
+        return try mealEntriesSnapshot(day: day, log: log)
+    }
+
+    public func deleteMealEntry(
+        id: UUID
+    ) async throws -> NutritionDayEntriesSnapshot {
+        let entry = try requiredMealEntry(id: id)
+        _ = try mealEntrySnapshot(entry, resolvingSourceNames: false)
+        guard let log = entry.dailyNutritionLog else {
+            throw MealEntryRepositoryIntegrityError.invalidPersistedMealEntry(
+                id: id
+            )
+        }
+        let day = try NutritionDayKey(
+            containing: log.date,
+            calendar: calendar
+        )
+        guard try uniqueDayLog(for: day)?.id == log.id else {
+            throw MealEntryRepositoryIntegrityError.invalidPersistedMealEntry(
+                id: id
+            )
+        }
+        _ = try mealEntriesSnapshot(day: day, log: log)
+
+        log.updatedAt = now()
+        modelContext.delete(entry)
+        try saveMutation(or: .deleteFailed)
+        return try mealEntriesSnapshot(day: day, log: log)
+    }
+
+    private func uniqueDayLog(
+        for day: NutritionDayKey
+    ) throws -> DailyNutritionLog? {
+        let matches = try matchingDays(for: day)
+        guard matches.count <= 1 else {
+            throw duplicateDayError(day: day, matches: matches)
+        }
+        guard let log = matches.first else { return nil }
+        try validateUniqueDayID(log)
+        return log
+    }
+
+    private func matchingEntries(id: UUID) throws -> [MealEntry] {
+        let requestedID = id
+        return try fetchEntries(
+            FetchDescriptor<MealEntry>(
+                predicate: #Predicate { $0.id == requestedID }
+            )
+        )
+    }
+
+    private func requiredMealEntry(id: UUID) throws -> MealEntry {
+        let matches = try matchingEntries(id: id)
+        guard !matches.isEmpty else {
+            throw MealEntryRepositoryMutationError.mealEntryNotFound(id: id)
+        }
+        guard matches.count == 1, let entry = matches.first else {
+            throw MealEntryRepositoryIntegrityError.duplicateMealEntryIDs(
+                id: id,
+                count: matches.count
+            )
+        }
+        return entry
+    }
+
+    private func validateUniqueMealEntryIDs(
+        _ entries: [MealEntry]
+    ) throws {
+        let duplicate = Dictionary(grouping: entries, by: \.id)
+            .filter { $0.value.count > 1 }
+            .sorted { $0.key.uuidString < $1.key.uuidString }
+            .first
+        if let (id, matches) = duplicate {
+            throw MealEntryRepositoryIntegrityError.duplicateMealEntryIDs(
+                id: id,
+                count: matches.count
+            )
+        }
+    }
+
+    private func mealEntriesSnapshot(
+        day: NutritionDayKey,
+        log: DailyNutritionLog?
+    ) throws -> NutritionDayEntriesSnapshot {
+        guard let log else {
+            return try NutritionDayEntriesSnapshot(
+                day: day,
+                log: nil,
+                entries: []
+            )
+        }
+
+        let matchingLog = try uniqueDayLog(for: day)
+        guard matchingLog?.id == log.id else {
+            throw NutritionRepositoryIntegrityError.duplicateNutritionDayIDs(
+                id: log.id,
+                count: matchingLog == nil ? 0 : 1
+            )
+        }
+        let allEntries = try fetchEntries(FetchDescriptor<MealEntry>())
+        try validateUniqueMealEntryIDs(allEntries)
+        let rows = allEntries.filter {
+            $0.dailyNutritionLog?.id == log.id
+        }
+        let entries = try rows
+            .map { try mealEntrySnapshot($0, resolvingSourceNames: true) }
+            .sorted(by: mealEntryOrder)
+        let logSnapshot = NutritionDaySnapshot(
+            id: log.id,
+            createdAt: log.createdAt,
+            updatedAt: log.updatedAt,
+            day: day,
+            mealEntryIDs: entries
+                .map(\.id)
+                .sorted { $0.uuidString < $1.uuidString }
+        )
+        return try NutritionDayEntriesSnapshot(
+            day: day,
+            log: logSnapshot,
+            entries: entries
+        )
+    }
+
+    private func mealEntrySnapshot(
+        _ entry: MealEntry,
+        resolvingSourceNames: Bool
+    ) throws -> MealEntrySnapshot {
+        do {
+            guard let log = entry.dailyNutritionLog else {
+                throw MealEntryRepositoryIntegrityError
+                    .invalidPersistedMealEntry(id: entry.id)
+            }
+            let category = try MealCategory(
+                kind: entry.category.kind,
+                customName: entry.category.customName
+            )
+            let quantity = try NutritionQuantity(
+                try FoodPersistenceValueMapper.decimal(from: entry.quantity)
+            ).value
+            let macros = try NutritionMacros(
+                calories: try FoodPersistenceValueMapper.decimal(
+                    from: entry.caloriesResolved
+                ),
+                proteinG: try FoodPersistenceValueMapper.decimal(
+                    from: entry.proteinResolved
+                ),
+                carbG: try FoodPersistenceValueMapper.decimal(
+                    from: entry.carbResolved
+                ),
+                fatG: try FoodPersistenceValueMapper.decimal(
+                    from: entry.fatResolved
+                )
+            )
+            return MealEntrySnapshot(
+                id: entry.id,
+                createdAt: entry.createdAt,
+                updatedAt: entry.updatedAt,
+                category: category,
+                source: try mealEntrySourceSnapshot(
+                    entry,
+                    resolvingNames: resolvingSourceNames
+                ),
+                quantity: quantity,
+                resolvedMacros: macros,
+                loggedAt: entry.loggedAt,
+                nutritionDayID: log.id
+            )
+        } catch let error as MealEntryRepositoryIntegrityError {
+            throw error
+        } catch let error as RecipeRepositoryIntegrityError {
+            throw error
+        } catch let error as FoodRepositoryIntegrityError {
+            throw error
+        } catch {
+            throw MealEntryRepositoryIntegrityError.invalidPersistedMealEntry(
+                id: entry.id
+            )
+        }
+    }
+
+    private func mealEntrySourceSnapshot(
+        _ entry: MealEntry,
+        resolvingNames: Bool
+    ) throws -> MealEntrySourceSnapshot {
+        let sourceCount = [
+            entry.recipeId != nil,
+            entry.foodId != nil,
+            entry.adhocName != nil,
+        ].filter { $0 }.count
+        guard sourceCount == 1 else {
+            throw MealEntryRepositoryIntegrityError.invalidPersistedMealEntry(
+                id: entry.id
+            )
+        }
+
+        if let recipeID = entry.recipeId {
+            let name: String?
+            if resolvingNames {
+                name = try recipeName(id: recipeID)
+            } else {
+                name = nil
+            }
+            return .recipe(id: recipeID, name: name)
+        }
+        if let foodID = entry.foodId {
+            let name: String?
+            if resolvingNames {
+                name = try foodName(id: foodID)
+            } else {
+                name = nil
+            }
+            return .food(id: foodID, name: name)
+        }
+        guard let rawName = entry.adhocName else {
+            throw MealEntryRepositoryIntegrityError.invalidPersistedMealEntry(
+                id: entry.id
+            )
+        }
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name == rawName else {
+            throw MealEntryRepositoryIntegrityError.invalidPersistedMealEntry(
+                id: entry.id
+            )
+        }
+        return .adhoc(name: name)
+    }
+
+    private func recipeName(id: UUID) throws -> String? {
+        let matches = try matchingRecipes(id: id)
+        guard matches.count <= 1 else {
+            throw RecipeRepositoryIntegrityError.duplicateRecipeIDs(
+                id: id,
+                count: matches.count
+            )
+        }
+        return matches.first?.name
+    }
+
+    private func foodName(id: UUID) throws -> String? {
+        let matches = try matchingFoods(id: id)
+        guard matches.count <= 1 else {
+            throw FoodRepositoryIntegrityError.duplicateFoodIDs(
+                id: id,
+                count: matches.count
+            )
+        }
+        return matches.first?.name
+    }
+
+    private func storedEntry(
+        _ entry: MealEntry,
+        matches request: MealEntryCreateRequest,
+        day: NutritionDayKey
+    ) throws -> Bool {
+        let snapshot = try mealEntrySnapshot(
+            entry,
+            resolvingSourceNames: false
+        )
+        guard let log = entry.dailyNutritionLog,
+              try NutritionDayKey(
+                containing: log.date,
+                calendar: calendar
+              ) == day,
+              snapshot.category == request.category else {
+            return false
+        }
+
+        switch (snapshot.source, request.source) {
+        case let (
+            .recipe(storedID, _),
+            .recipe(requestedID, consumedServings)
+        ):
+            return storedID == requestedID
+                && snapshot.quantity == consumedServings
+        case let (
+            .food(storedID, _),
+            .food(requestedID, quantity)
+        ):
+            return storedID == requestedID
+                && snapshot.quantity == quantity
+        case let (
+            .adhoc(storedName),
+            .adhoc(requestedName, quantity, macros)
+        ):
+            return storedName == requestedName
+                && snapshot.quantity == quantity
+                && snapshot.resolvedMacros == macros
+        default:
+            return false
+        }
+    }
+
+    private func resolveMealEntrySource(
+        _ source: MealEntrySourceRequest
+    ) throws -> ResolvedMealEntrySource {
+        switch source {
+        case let .recipe(id, consumedServings):
+            let matches = try matchingRecipes(id: id)
+            guard !matches.isEmpty else {
+                throw MealEntryRepositoryMutationError.recipeNotFound(id: id)
+            }
+            guard matches.count == 1, let recipe = matches.first else {
+                throw RecipeRepositoryIntegrityError.duplicateRecipeIDs(
+                    id: id,
+                    count: matches.count
+                )
+            }
+            let archive = try archiveState()
+            guard !archive.ids.contains(id) else {
+                throw MealEntryRepositoryMutationError.recipeArchived(id: id)
+            }
+            let snapshot = try recipeSnapshot(recipe)
+            return ResolvedMealEntrySource(
+                recipeID: id,
+                foodID: nil,
+                adhocName: nil,
+                quantity: consumedServings,
+                macros: try MealEntryMacroResolver.recipe(
+                    snapshot,
+                    consumedServings: consumedServings
+                )
+            )
+        case let .food(id, quantity):
+            let matches = try matchingFoods(id: id)
+            guard !matches.isEmpty else {
+                throw MealEntryRepositoryMutationError.foodNotFound(id: id)
+            }
+            guard matches.count == 1, let food = matches.first else {
+                throw FoodRepositoryIntegrityError.duplicateFoodIDs(
+                    id: id,
+                    count: matches.count
+                )
+            }
+            guard food.source == .userCreated else {
+                throw MealEntryRepositoryMutationError.unsupportedFoodSource(
+                    id: id,
+                    source: food.source
+                )
+            }
+            let snapshot = try foodSnapshot(food)
+            return ResolvedMealEntrySource(
+                recipeID: nil,
+                foodID: id,
+                adhocName: nil,
+                quantity: quantity,
+                macros: try MealEntryMacroResolver.food(
+                    snapshot,
+                    quantity: quantity
+                )
+            )
+        case let .adhoc(name, quantity, macros):
+            return ResolvedMealEntrySource(
+                recipeID: nil,
+                foodID: nil,
+                adhocName: name,
+                quantity: quantity,
+                macros: try MealEntryMacroResolver.adhoc(
+                    resolvedMacros: macros,
+                    quantity: quantity
+                )
+            )
+        }
+    }
+
+    private func mealEntryPersistenceValues(
+        quantity: Decimal,
+        macros: NutritionMacros
+    ) throws -> MealEntryPersistenceValues {
+        do {
+            return MealEntryPersistenceValues(
+                quantity: try FoodPersistenceValueMapper.double(
+                    from: quantity
+                ),
+                calories: try NutritionPersistenceDecimalMapper.double(
+                    from: macros.calories,
+                    field: .calories
+                ),
+                proteinG: try NutritionPersistenceDecimalMapper.double(
+                    from: macros.proteinG,
+                    field: .proteinG
+                ),
+                carbG: try NutritionPersistenceDecimalMapper.double(
+                    from: macros.carbG,
+                    field: .carbG
+                ),
+                fatG: try NutritionPersistenceDecimalMapper.double(
+                    from: macros.fatG,
+                    field: .fatG
+                )
+            )
+        } catch {
+            throw MealEntryRepositoryMutationError.invalidInput
+        }
+    }
+
+    private func mealEntryOrder(
+        _ lhs: MealEntrySnapshot,
+        _ rhs: MealEntrySnapshot
+    ) -> Bool {
+        if lhs.loggedAt != rhs.loggedAt {
+            return lhs.loggedAt < rhs.loggedAt
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt < rhs.createdAt
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
     }
 }
