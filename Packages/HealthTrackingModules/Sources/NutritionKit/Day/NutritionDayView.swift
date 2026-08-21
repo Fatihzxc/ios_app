@@ -322,7 +322,7 @@ public struct NutritionDayView: View {
                 Image(systemName: "trash")
                     .frame(width: 52, height: 52)
             }
-            .disabled(viewModel.mutationState == .deleting(entryID: entry.id))
+            .disabled(viewModel.mutationState != .idle)
             .accessibilityLabel(localized("nutrition.day.delete"))
             .accessibilityHint(localized("nutrition.day.delete.hint"))
             .accessibilityIdentifier(

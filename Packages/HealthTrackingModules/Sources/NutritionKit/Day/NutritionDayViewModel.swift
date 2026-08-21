@@ -133,11 +133,13 @@ public final class NutritionDayViewModel {
     }
 
     public func deleteEntry(id: UUID) async {
-        guard let originalSnapshot = currentSnapshot,
+        guard canBeginDelete(id: id),
+              let originalSnapshot = currentSnapshot,
               originalSnapshot.entries.contains(where: { $0.id == id }) else {
             return
         }
         let mutationDay = selectedDay
+        let mutationGeneration = loadGeneration
         let targets = currentTargets
         mutationState = .deleting(entryID: id)
 
@@ -151,19 +153,15 @@ public final class NutritionDayViewModel {
             try publish(snapshot: optimisticSnapshot, targets: targets)
 
             let repositorySnapshot = try await repository.deleteMealEntry(id: id)
-            guard selectedDay == mutationDay else {
-                mutationState = .idle
-                return
-            }
+            guard loadGeneration == mutationGeneration,
+                  selectedDay == mutationDay else { return }
             try validate(repositorySnapshot, belongsTo: mutationDay)
             currentSnapshot = repositorySnapshot
             try publish(snapshot: repositorySnapshot, targets: targets)
             mutationState = .idle
         } catch {
-            guard selectedDay == mutationDay else {
-                mutationState = .idle
-                return
-            }
+            guard loadGeneration == mutationGeneration,
+                  selectedDay == mutationDay else { return }
             currentSnapshot = originalSnapshot
             try? publish(snapshot: originalSnapshot, targets: targets)
             mutationState = .deleteError(entryID: id)
@@ -178,6 +176,17 @@ public final class NutritionDayViewModel {
     public func dismissMutationError() {
         if case .deleteError = mutationState {
             mutationState = .idle
+        }
+    }
+
+    private func canBeginDelete(id: UUID) -> Bool {
+        switch mutationState {
+        case .idle:
+            return true
+        case let .deleteError(failedID):
+            return failedID == id
+        case .deleting:
+            return false
         }
     }
 
