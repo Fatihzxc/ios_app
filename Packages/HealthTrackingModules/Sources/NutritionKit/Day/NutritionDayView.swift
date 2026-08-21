@@ -43,7 +43,6 @@ public struct NutritionDayView: View {
             reduceMotion ? nil : .easeInOut(duration: 0.2),
             value: viewModel.state
         )
-        .accessibilityIdentifier("root.nutrition.content")
     }
 
     private var dateControls: some View {
@@ -80,7 +79,10 @@ public struct NutritionDayView: View {
                         displayedComponents: .date
                     )
                     .labelsHidden()
+                    .padding(.vertical, 9)
                     .frame(maxWidth: .infinity, minHeight: 52)
+                    .contentShape(Rectangle())
+                    .accessibilityElement(children: .combine)
                     .accessibilityLabel(localized("nutrition.day.picker"))
                     .accessibilityValue(formattedDate(viewModel.selectedDay.start))
                     .accessibilityHint(localized("nutrition.day.picker.hint"))
@@ -98,6 +100,8 @@ public struct NutritionDayView: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("root.nutrition.content")
     }
 
     @ViewBuilder
@@ -143,8 +147,8 @@ public struct NutritionDayView: View {
                 isEmpty ? "nutrition.day.empty-content" : "nutrition.day.content"
             )
 
-            if case let .deleteError(entryID) = viewModel.mutationState {
-                deleteError(entryID: entryID)
+            if case .deleteError = viewModel.mutationState {
+                deleteError
             }
         }
         .accessibilityElement(children: .contain)
@@ -318,7 +322,7 @@ public struct NutritionDayView: View {
                 Image(systemName: "trash")
                     .frame(width: 52, height: 52)
             }
-            .disabled(viewModel.mutationState == .deleting(entryID: entry.id))
+            .disabled(viewModel.mutationState != .idle)
             .accessibilityLabel(localized("nutrition.day.delete"))
             .accessibilityHint(localized("nutrition.day.delete.hint"))
             .accessibilityIdentifier(
@@ -347,7 +351,7 @@ public struct NutritionDayView: View {
         }
     }
 
-    private func deleteError(entryID: UUID) -> some View {
+    private var deleteError: some View {
         AppCard {
             VStack(alignment: .leading, spacing: AppSpacing.standard) {
                 Text(localized("nutrition.day.delete.error"))
@@ -365,7 +369,6 @@ public struct NutritionDayView: View {
                 .accessibilityIdentifier("nutrition.day.mutation.retry")
             }
         }
-        .accessibilityValue(entryID.uuidString)
     }
 
     @ToolbarContentBuilder

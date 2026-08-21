@@ -527,6 +527,62 @@ final class NutritionDayViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.mutationState, .idle)
     }
 
+    func testDeleteIntentCannotRepublishThePreviousDayAfterNavigationStarts() async throws {
+        let calendar = makeCalendar(timeZoneID: "Europe/Istanbul")
+        let now = makeDate(
+            year: 2026,
+            month: 8,
+            day: 21,
+            hour: 9,
+            calendar: calendar
+        )
+        let day = try NutritionDayKey(containing: now, calendar: calendar)
+        let entry = try makeEntry(
+            id: uuid("00000000-0000-4000-8000-000000000971"),
+            category: MealCategory(kind: .breakfast),
+            name: "Önceki gün",
+            day: day,
+            value: 10
+        )
+        let repository = DayRepositoryStub(calendar: calendar)
+        repository.snapshotsByStart[day.start] = try makeSnapshot(
+            day: day,
+            entries: [entry]
+        )
+        let viewModel = NutritionDayViewModel(
+            repository: repository,
+            calendar: calendar,
+            now: { now }
+        )
+        await viewModel.load()
+
+        repository.suspendsEntryLoads = true
+        let nextDay = try XCTUnwrap(viewModel.adjacentDay(by: 1))
+        let navigationTask = Task { await viewModel.selectNextDay() }
+        await waitUntil { repository.pendingEntryDays.contains(nextDay) }
+        XCTAssertEqual(viewModel.state, .loading)
+
+        await viewModel.deleteEntry(id: entry.id)
+
+        XCTAssertEqual(
+            repository.deletedEntryIDs,
+            [],
+            "A row from the previous presentation must not mutate after day loading begins."
+        )
+        XCTAssertEqual(
+            viewModel.state,
+            .loading,
+            "A stale row intent must not publish previous-day content under the new date."
+        )
+        XCTAssertEqual(viewModel.mutationState, .idle)
+
+        repository.finishEntryLoad(
+            for: nextDay,
+            with: .success(try makeSnapshot(day: nextDay, entries: []))
+        )
+        await navigationTask.value
+    }
+
     private func contentPresentation(
         from state: NutritionDayViewState
     ) throws -> NutritionDayPresentation {
