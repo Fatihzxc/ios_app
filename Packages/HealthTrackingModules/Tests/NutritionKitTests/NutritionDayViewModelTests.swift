@@ -388,6 +388,145 @@ final class NutritionDayViewModelTests: XCTestCase {
         XCTAssertEqual(repository.deletedEntryIDs, [first.id, first.id])
     }
 
+    func testASecondDeleteIsIgnoredWhileTheFirstMutationIsInFlight() async throws {
+        let calendar = makeCalendar(timeZoneID: "Europe/Istanbul")
+        let now = makeDate(
+            year: 2026,
+            month: 8,
+            day: 21,
+            hour: 9,
+            calendar: calendar
+        )
+        let day = try NutritionDayKey(containing: now, calendar: calendar)
+        let first = try makeEntry(
+            id: uuid("00000000-0000-4000-8000-000000000951"),
+            category: MealCategory(kind: .breakfast),
+            name: "İlk",
+            day: day,
+            value: 10
+        )
+        let second = try makeEntry(
+            id: uuid("00000000-0000-4000-8000-000000000952"),
+            category: MealCategory(kind: .breakfast),
+            name: "İkinci",
+            day: day,
+            value: 20
+        )
+        let repository = DayRepositoryStub(calendar: calendar)
+        repository.snapshotsByStart[day.start] = try makeSnapshot(
+            day: day,
+            entries: [first, second]
+        )
+        repository.suspendsDeletes = true
+        let viewModel = NutritionDayViewModel(
+            repository: repository,
+            calendar: calendar,
+            now: { now }
+        )
+        await viewModel.load()
+
+        let firstTask = Task { await viewModel.deleteEntry(id: first.id) }
+        await waitUntil { repository.pendingDeleteIDs.contains(first.id) }
+        let secondTask = Task { await viewModel.deleteEntry(id: second.id) }
+        await allowMainActorWorkToSettle()
+
+        let observedDeletedEntryIDs = repository.deletedEntryIDs
+        let observedMutationState = viewModel.mutationState
+        let observedOptimisticEntryIDs: [UUID]?
+        if case let .content(presentation) = viewModel.state {
+            observedOptimisticEntryIDs = presentation.sections[0].entries.map(\.id)
+        } else {
+            observedOptimisticEntryIDs = nil
+        }
+
+        if repository.pendingDeleteIDs.contains(second.id) {
+            repository.finishDelete(for: second.id, with: .failure(StubFailure.delete))
+        }
+        repository.finishDelete(for: first.id, with: .failure(StubFailure.delete))
+        await secondTask.value
+        await firstTask.value
+
+        XCTAssertEqual(
+            observedDeletedEntryIDs,
+            [first.id],
+            "Only one destructive mutation may be sent while an earlier delete is unresolved."
+        )
+        XCTAssertEqual(observedMutationState, .deleting(entryID: first.id))
+        XCTAssertEqual(observedOptimisticEntryIDs, [second.id])
+    }
+
+    func testAnOldDeleteCompletionCannotOverwriteANewerReloadOfTheSameDay() async throws {
+        let calendar = makeCalendar(timeZoneID: "Europe/Istanbul")
+        let now = makeDate(
+            year: 2026,
+            month: 8,
+            day: 21,
+            hour: 9,
+            calendar: calendar
+        )
+        let day = try NutritionDayKey(containing: now, calendar: calendar)
+        let first = try makeEntry(
+            id: uuid("00000000-0000-4000-8000-000000000961"),
+            category: MealCategory(kind: .breakfast),
+            name: "Silinen",
+            day: day,
+            value: 10
+        )
+        let second = try makeEntry(
+            id: uuid("00000000-0000-4000-8000-000000000962"),
+            category: MealCategory(kind: .breakfast),
+            name: "Korunan",
+            day: day,
+            value: 20
+        )
+        let newer = try makeEntry(
+            id: uuid("00000000-0000-4000-8000-000000000963"),
+            category: MealCategory(kind: .breakfast),
+            name: "Yeni",
+            day: day,
+            value: 30
+        )
+        let repository = DayRepositoryStub(calendar: calendar)
+        repository.snapshotsByStart[day.start] = try makeSnapshot(
+            day: day,
+            entries: [first, second]
+        )
+        repository.suspendsDeletes = true
+        let viewModel = NutritionDayViewModel(
+            repository: repository,
+            calendar: calendar,
+            now: { now }
+        )
+        await viewModel.load()
+
+        let deleteTask = Task { await viewModel.deleteEntry(id: first.id) }
+        await waitUntil { repository.pendingDeleteIDs.contains(first.id) }
+
+        repository.snapshotsByStart[day.start] = try makeSnapshot(
+            day: day,
+            entries: [second, newer]
+        )
+        await viewModel.selectNextDay()
+        await viewModel.selectPreviousDay()
+
+        let reloaded = try contentPresentation(from: viewModel.state)
+        XCTAssertEqual(reloaded.sections[0].entries.map(\.id), [second.id, newer.id])
+
+        repository.finishDelete(
+            for: first.id,
+            with: .success(try makeSnapshot(day: day, entries: [second]))
+        )
+        await deleteTask.value
+
+        let final = try contentPresentation(from: viewModel.state)
+        XCTAssertEqual(
+            final.sections[0].entries.map(\.id),
+            [second.id, newer.id],
+            "A stale mutation response must not overwrite a newer load of the same local day."
+        )
+        XCTAssertEqual(viewModel.mutationState, .idle)
+    }
+
     private func contentPresentation(
         from state: NutritionDayViewState
     ) throws -> NutritionDayPresentation {
@@ -474,6 +613,12 @@ final class NutritionDayViewModelTests: XCTestCase {
         XCTFail("Condition was not reached without a timing sleep.", file: file, line: line)
     }
 
+    private func allowMainActorWorkToSettle() async {
+        for _ in 0..<100 {
+            await Task.yield()
+        }
+    }
+
     private func assertEquatableSendable<Value: Equatable & Sendable>(_: Value) {}
 }
 
@@ -499,11 +644,14 @@ private final class DayRepositoryStub: NutritionDayViewRepository {
     private var entryContinuations: [
         Date: CheckedContinuation<NutritionDayEntriesSnapshot, Error>
     ] = [:]
-    private var deleteContinuation: CheckedContinuation<
-        NutritionDayEntriesSnapshot,
-        Error
-    >?
-    private(set) var pendingDeleteID: UUID?
+    private var deleteContinuations: [
+        UUID: CheckedContinuation<NutritionDayEntriesSnapshot, Error>
+    ] = [:]
+    private(set) var pendingDeleteIDs: Set<UUID> = []
+
+    var pendingDeleteID: UUID? {
+        pendingDeleteIDs.first
+    }
 
     init(calendar: Calendar) {
         self.calendar = calendar
@@ -523,10 +671,16 @@ private final class DayRepositoryStub: NutritionDayViewRepository {
     }
 
     func finishDelete(with result: Result<NutritionDayEntriesSnapshot, Error>) {
-        let continuation = deleteContinuation
-        deleteContinuation = nil
-        pendingDeleteID = nil
-        continuation?.resume(with: result)
+        guard let id = pendingDeleteIDs.first else { return }
+        finishDelete(for: id, with: result)
+    }
+
+    func finishDelete(
+        for id: UUID,
+        with result: Result<NutritionDayEntriesSnapshot, Error>
+    ) {
+        pendingDeleteIDs.remove(id)
+        deleteContinuations.removeValue(forKey: id)?.resume(with: result)
     }
 
     func fetchNutritionTargets() async throws -> NutritionMacroTargets? {
@@ -552,9 +706,9 @@ private final class DayRepositoryStub: NutritionDayViewRepository {
     ) async throws -> NutritionDayEntriesSnapshot {
         deletedEntryIDs.append(id)
         if suspendsDeletes {
-            pendingDeleteID = id
+            pendingDeleteIDs.insert(id)
             return try await withCheckedThrowingContinuation { continuation in
-                deleteContinuation = continuation
+                deleteContinuations[id] = continuation
             }
         }
         if let deleteResult {
