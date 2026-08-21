@@ -65,8 +65,49 @@ enum NutritionPersistenceDecimalMapper {
     }
 }
 
+private enum FoodPersistenceValueError: Error {
+    case notRepresentable
+}
+
+private enum FoodPersistenceValueMapper {
+    private static let posix = Locale(identifier: "en_US_POSIX")
+
+    static func decimal(from value: Double) throws -> Decimal {
+        guard value.isFinite,
+              let result = Decimal(string: String(value), locale: posix),
+              result.isFinite else {
+            throw FoodPersistenceValueError.notRepresentable
+        }
+        return result
+    }
+
+    static func double(from value: Decimal) throws -> Double {
+        guard value.isFinite else {
+            throw FoodPersistenceValueError.notRepresentable
+        }
+        let decimalString = NSDecimalNumber(decimal: value).stringValue
+        guard let result = Double(decimalString),
+              result.isFinite,
+              value == 0 || result != 0,
+              let roundTrip = Decimal(string: String(result), locale: posix),
+              roundTrip == value else {
+            throw FoodPersistenceValueError.notRepresentable
+        }
+        return result
+    }
+}
+
+private struct FoodPersistenceValues {
+    let servingSize: Double
+    let calories: Double
+    let proteinG: Double
+    let carbG: Double
+    let fatG: Double
+    let fiberG: Double?
+}
+
 @MainActor
-public final class SwiftDataNutritionRepository: NutritionDayRepository {
+public final class SwiftDataNutritionRepository: NutritionDayRepository, FoodLibraryRepository {
     private let modelContext: ModelContext
     private let calendar: Calendar
     private let now: @MainActor () -> Date
@@ -80,6 +121,9 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository {
     private let fetchProfilesOperation: @MainActor (
         FetchDescriptor<UserProfile>
     ) throws -> [UserProfile]
+    private let fetchFoodsOperation: @MainActor (
+        FetchDescriptor<Food>
+    ) throws -> [Food]
     private let saveOperation: @MainActor () throws -> Void
     private let rollbackOperation: @MainActor () -> Void
 
@@ -96,6 +140,7 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository {
         fetchDaysOperation = { try modelContext.fetch($0) }
         fetchEntriesOperation = { try modelContext.fetch($0) }
         fetchProfilesOperation = { try modelContext.fetch($0) }
+        fetchFoodsOperation = { try modelContext.fetch($0) }
         saveOperation = { try modelContext.save() }
         rollbackOperation = { modelContext.rollback() }
     }
@@ -115,6 +160,7 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository {
         fetchDaysOperation = { try modelContext.fetch($0) }
         fetchEntriesOperation = { try modelContext.fetch($0) }
         fetchProfilesOperation = { try modelContext.fetch($0) }
+        fetchFoodsOperation = { try modelContext.fetch($0) }
         saveOperation = save
         rollbackOperation = rollback
     }
@@ -137,6 +183,7 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository {
         fetchDaysOperation = { try modelContext.fetch($0) }
         fetchEntriesOperation = { try modelContext.fetch($0) }
         fetchProfilesOperation = fetchProfiles
+        fetchFoodsOperation = { try modelContext.fetch($0) }
         saveOperation = save
         rollbackOperation = rollback
     }
@@ -162,6 +209,7 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository {
         fetchDaysOperation = fetchDays
         fetchEntriesOperation = fetchEntries
         fetchProfilesOperation = { try modelContext.fetch($0) }
+        fetchFoodsOperation = { try modelContext.fetch($0) }
         saveOperation = save
         rollbackOperation = rollback
     }
@@ -192,6 +240,99 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository {
                 field: .fatG
             )
         )
+    }
+
+    public func fetchFoods(matching query: String) async throws -> [FoodSnapshot] {
+        let foods = try fetchFoodModels(FetchDescriptor<Food>())
+        try validateUniqueFoodIDs(foods)
+        return FoodSearch.results(
+            try foods.map(foodSnapshot),
+            matching: query
+        )
+    }
+
+    public func createFood(_ input: FoodInput) async throws -> FoodSnapshot {
+        let id = makeID()
+        guard try matchingFoods(id: id).isEmpty else {
+            throw FoodRepositoryIntegrityError.foodIDCollision(id: id)
+        }
+        let values = try persistenceValues(input)
+        let timestamp = now()
+        let food = Food(
+            id: id,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            name: input.name,
+            brand: input.brand,
+            servingSize: values.servingSize,
+            servingUnit: input.servingUnit,
+            caloriesPerServing: values.calories,
+            proteinG: values.proteinG,
+            carbG: values.carbG,
+            fatG: values.fatG,
+            fiberG: values.fiberG,
+            source: .userCreated
+        )
+        modelContext.insert(food)
+        try saveMutation(or: .saveFailed)
+        return try foodSnapshot(food)
+    }
+
+    public func updateFood(
+        id: UUID,
+        input: FoodInput
+    ) async throws -> FoodSnapshot {
+        let matches = try matchingFoods(id: id)
+        guard !matches.isEmpty else {
+            throw FoodRepositoryMutationError.foodNotFound(id: id)
+        }
+        guard matches.count == 1, let food = matches.first else {
+            throw FoodRepositoryIntegrityError.duplicateFoodIDs(
+                id: id,
+                count: matches.count
+            )
+        }
+        guard food.source == .userCreated else {
+            throw FoodRepositoryMutationError.unsupportedMutationSource(
+                id: id,
+                source: food.source
+            )
+        }
+
+        let values = try persistenceValues(input)
+        food.name = input.name
+        food.brand = input.brand
+        food.servingSize = values.servingSize
+        food.servingUnit = input.servingUnit
+        food.caloriesPerServing = values.calories
+        food.proteinG = values.proteinG
+        food.carbG = values.carbG
+        food.fatG = values.fatG
+        food.fiberG = values.fiberG
+        food.updatedAt = now()
+        try saveMutation(or: .saveFailed)
+        return try foodSnapshot(food)
+    }
+
+    public func deleteFood(id: UUID) async throws {
+        let matches = try matchingFoods(id: id)
+        guard !matches.isEmpty else {
+            throw FoodRepositoryMutationError.foodNotFound(id: id)
+        }
+        guard matches.count == 1, let food = matches.first else {
+            throw FoodRepositoryIntegrityError.duplicateFoodIDs(
+                id: id,
+                count: matches.count
+            )
+        }
+        guard food.source == .userCreated else {
+            throw FoodRepositoryMutationError.unsupportedMutationSource(
+                id: id,
+                source: food.source
+            )
+        }
+        modelContext.delete(food)
+        try saveMutation(or: .deleteFailed)
     }
 
     public func fetchNutritionDay(
@@ -291,6 +432,109 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository {
         entries.forEach { modelContext.delete($0) }
         modelContext.delete(day)
         try saveMutation(or: .deleteFailed)
+    }
+
+    private func matchingFoods(id: UUID) throws -> [Food] {
+        let requestedID = id
+        return try fetchFoodModels(
+            FetchDescriptor<Food>(
+                predicate: #Predicate { $0.id == requestedID }
+            )
+        )
+    }
+
+    private func fetchFoodModels(
+        _ descriptor: FetchDescriptor<Food>
+    ) throws -> [Food] {
+        do {
+            return try fetchFoodsOperation(descriptor)
+        } catch {
+            throw NutritionRepositoryOperationError.loadFailed
+        }
+    }
+
+    private func validateUniqueFoodIDs(_ foods: [Food]) throws {
+        let duplicate = Dictionary(grouping: foods, by: \.id)
+            .filter { $0.value.count > 1 }
+            .sorted { $0.key.uuidString < $1.key.uuidString }
+            .first
+        if let (id, matches) = duplicate {
+            throw FoodRepositoryIntegrityError.duplicateFoodIDs(
+                id: id,
+                count: matches.count
+            )
+        }
+    }
+
+    private func foodSnapshot(_ food: Food) throws -> FoodSnapshot {
+        do {
+            let input = try FoodInput(
+                name: food.name,
+                brand: food.brand,
+                servingSize: try FoodPersistenceValueMapper.decimal(
+                    from: food.servingSize
+                ),
+                servingUnit: food.servingUnit,
+                caloriesPerServing: try FoodPersistenceValueMapper.decimal(
+                    from: food.caloriesPerServing
+                ),
+                proteinG: try FoodPersistenceValueMapper.decimal(
+                    from: food.proteinG
+                ),
+                carbG: try FoodPersistenceValueMapper.decimal(
+                    from: food.carbG
+                ),
+                fatG: try FoodPersistenceValueMapper.decimal(
+                    from: food.fatG
+                ),
+                fiberG: try food.fiberG.map {
+                    try FoodPersistenceValueMapper.decimal(from: $0)
+                }
+            )
+            return FoodSnapshot(
+                id: food.id,
+                createdAt: food.createdAt,
+                updatedAt: food.updatedAt,
+                name: input.name,
+                brand: input.brand,
+                servingSize: input.servingSize,
+                servingUnit: input.servingUnit,
+                macros: input.macros,
+                fiberG: input.fiberG,
+                source: food.source
+            )
+        } catch {
+            throw FoodRepositoryIntegrityError.invalidPersistedFood(id: food.id)
+        }
+    }
+
+    private func persistenceValues(
+        _ input: FoodInput
+    ) throws -> FoodPersistenceValues {
+        do {
+            return FoodPersistenceValues(
+                servingSize: try FoodPersistenceValueMapper.double(
+                    from: input.servingSize
+                ),
+                calories: try FoodPersistenceValueMapper.double(
+                    from: input.macros.calories
+                ),
+                proteinG: try FoodPersistenceValueMapper.double(
+                    from: input.macros.proteinG
+                ),
+                carbG: try FoodPersistenceValueMapper.double(
+                    from: input.macros.carbG
+                ),
+                fatG: try FoodPersistenceValueMapper.double(
+                    from: input.macros.fatG
+                ),
+                fiberG: try input.fiberG.map {
+                    try FoodPersistenceValueMapper.double(from: $0)
+                }
+            )
+        } catch {
+            throw FoodRepositoryMutationError.invalidInput
+        }
     }
 
     private func matchingDays(for day: NutritionDayKey) throws -> [DailyNutritionLog] {
