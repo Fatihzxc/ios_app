@@ -542,6 +542,32 @@ final class TrainingRepositoryContractTests: XCTestCase {
         XCTAssertEqual(stored.first?.workoutSession?.id, fixture.session.id)
     }
 
+    func testDurationSetPersistsAnExplicitWeeklyPallofVariantWithoutAddingReps() async throws {
+        let fixture = try makeSetMutationFixture(kind: .duration)
+        let measurement = SetMeasurementInput(
+            durationSec: 30,
+            performedVariant: "plank",
+            rir: 0
+        )
+        let request = SetLogSaveRequest(
+            workoutSessionID: fixture.session.id,
+            exerciseTemplateID: fixture.exercise.id,
+            setIndex: 1,
+            measurement: measurement,
+            completedAt: Date(timeIntervalSinceReferenceDate: 4_500)
+        )
+
+        let snapshot = try await fixture.repository.saveSet(request)
+
+        XCTAssertEqual(snapshot.measurement, measurement)
+        XCTAssertNil(snapshot.measurement.reps)
+        let stored = try ModelContext(fixture.container).fetch(FetchDescriptor<SetLog>())
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored.first?.durationSec, 30)
+        XCTAssertEqual(stored.first?.performedVariant, "plank")
+        XCTAssertNil(stored.first?.reps)
+    }
+
     func testInvalidAndAmbiguousSetInputsNeverMutatePersistentCount() async throws {
         let fixture = try makeSetMutationFixture(kind: .duration)
         let invalidInputs: [SetMeasurementInput] = [

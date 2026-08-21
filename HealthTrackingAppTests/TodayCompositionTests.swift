@@ -19,6 +19,8 @@ final class TodayCompositionTests: XCTestCase {
             repositorySnapshot.workoutDays.filter { $0.containsOHP }.map(\.name),
             ["Gün B"]
         )
+        XCTAssertTrue(repositorySnapshot.sessions.isEmpty)
+        XCTAssertTrue(repositorySnapshot.exerciseHistories.isEmpty)
         XCTAssertEqual(repositorySnapshot.healthChecks.count, 3)
 
         await dependencies.loadInitialContent()
@@ -52,6 +54,40 @@ final class TodayCompositionTests: XCTestCase {
         _ = try AppDependencies(environment: .uiTesting)
 
         XCTAssertLessThanOrEqual(launchStart, ProcessInfo.processInfo.systemUptime)
+    }
+
+    func testLaunchPerformanceCheckpointNamesAreStableAndOrdered() {
+        XCTAssertEqual(
+            AppLaunchPerformance.Checkpoint.allCases.map(\.rawValue),
+            ["environment", "container", "dependencies", "seed", "today"]
+        )
+    }
+
+    func testLaunchPerformanceEvidenceRequiresOneExplicitUITestFlag() throws {
+        let baseArguments = [
+            "HealthTrackingApp",
+            "-ui-testing",
+            "-ui-test-scenario", "seeded",
+            "-ui-test-appearance", "light",
+        ]
+        XCTAssertFalse(
+            try XCTUnwrap(
+                AppUITestLaunchConfiguration.resolve(arguments: baseArguments)
+            ).exposesLaunchPerformanceEvidence
+        )
+
+        let flag = AppUITestLaunchConfiguration.launchPerformanceEvidenceFlag
+        XCTAssertTrue(
+            try XCTUnwrap(
+                AppUITestLaunchConfiguration.resolve(arguments: baseArguments + [flag])
+            ).exposesLaunchPerformanceEvidence
+        )
+        XCTAssertNil(
+            AppUITestLaunchConfiguration.resolve(
+                arguments: baseArguments + [flag, flag]
+            ),
+            "Duplicate instrumentation flags must fail closed."
+        )
     }
 
     private static let rootInitializerIsTypeChecked: () -> Void = {

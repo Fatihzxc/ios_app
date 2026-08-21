@@ -35,6 +35,20 @@ struct AppRootView: View {
             .accessibilityHidden(true)
             .allowsHitTesting(false)
         }
+        .overlay(alignment: .topLeading) {
+            #if DEBUG
+            if exposesLaunchPerformanceEvidence,
+               let evidence = AppLaunchPerformance.evidenceValue() {
+                Text(String(localized: "today.performance.breakdown"))
+                    .font(.system(size: 1))
+                    .foregroundStyle(.clear)
+                    .frame(width: 1, height: 1)
+                    .accessibilityIdentifier("today.performance.breakdown")
+                    .accessibilityValue(evidence)
+                    .allowsHitTesting(false)
+            }
+            #endif
+        }
         .task {
             guard shouldLoadFoundation, !hasStartedFoundationLoad else { return }
             hasStartedFoundationLoad = true
@@ -92,6 +106,7 @@ struct AppRootView: View {
         case .today:
             TodayView(
                 viewModel: todayViewModel,
+                exposesLaunchPerformanceEvidence: exposesLaunchPerformanceEvidence,
                 onPerformAction: performTodayAction
             )
         case .training:
@@ -133,6 +148,14 @@ struct AppRootView: View {
 
     private func performTodayAction(_ action: TodayMainAction) {
         openSession(workoutDayID: action.workoutDayID)
+    }
+
+    private var exposesLaunchPerformanceEvidence: Bool {
+        #if DEBUG
+        AppUITestLaunchConfiguration.resolve()?.exposesLaunchPerformanceEvidence == true
+        #else
+        false
+        #endif
     }
 }
 

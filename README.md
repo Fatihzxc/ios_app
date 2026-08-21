@@ -1,6 +1,6 @@
 # HealthTrackingApp
 
-HealthTrackingApp is an iOS foundation project for a Turkish-first health and training app. M0 establishes the app shell, SwiftData schema, local and CloudKit build configurations, module boundaries, design-system gallery, accessibility contracts, and repeatable tests. Later milestones will add the complete product behavior.
+HealthTrackingApp is a Turkish-first iOS health and training app. M0 supplies the local-first SwiftData and modular application foundation; M1 adds the complete guided foundation-training loop, deterministic guidance and its accessibility acceptance gates. Later milestones add nutrition, symptoms/reminders, reports and device-service integration.
 
 ## First setup
 
@@ -13,7 +13,7 @@ You need a Mac, Git, Homebrew, and XcodeGen 2.46.0 or newer. Before using the pr
 Then, in Terminal, copy and run:
 
 ```bash
-git clone --branch feat/m0-foundation --single-branch https://github.com/Fatihzxc/ios_app.git
+git clone --branch main --single-branch https://github.com/Fatihzxc/ios_app.git
 cd ios_app
 brew install xcodegen
 ./scripts/bootstrap.sh
@@ -36,6 +36,16 @@ This runs repository verifiers, Local Debug unit/UI tests (including accessibili
 
 A successful Cloud compile proves only that the configuration builds. It does not prove that CloudKit is provisioned, reachable, or synchronizing data.
 
+## M1 training
+
+On launch, Today presents one current directive: start, resume or rest. Start a session from Today, or open Training and choose the ordered A/B/C day. The guided deck moves through warm-up, exercises, cooldown and summary; closing the deck preserves an in-progress session for the next launch. Training history supports opening a session, correcting a set and confirmed deletion.
+
+Each exercise shows its measurement family, target, recommendation, RIR input, safety note and failure policy. Progression stays conservative when required RIR or OHP symptom information is absent. Scheduled/reactive deload and phase changes always require an explicit user choice. Haptics are supplementary to visible semantics and can be disabled persistently under Settings.
+
+M1.16 covers VoiceOver reading order and focus, 52-point session controls, light/dark appearances, default through AX5 Dynamic Type, Reduce Motion, Increase Contrast, modern iPhone and a dedicated small-iPhone AX5 job. The full local command above runs the modern-simulator matrix. CI additionally selects an iPhone SE (3rd generation), or an iPhone 13 mini when available, for the canonical small-phone check.
+
+Training guidance is deterministic product behavior, not medical diagnosis or individualized clinical advice. Stop the movement and seek appropriate professional care when symptoms or safety concerns require it.
+
 ## Run on a personal iPhone
 
 1. Connect and trust the iPhone, then select it as the run destination in Xcode.
@@ -57,4 +67,4 @@ The `HealthTrackingApp-Cloud` scheme additionally needs a paid Apple Developer P
 
 ## Current limits
 
-M0 is foundation evidence, not a finished health product. TestFlight distribution, live multi-device CloudKit synchronization, notification delivery, and HealthKit authorization/data exchange are not yet completed or accepted. Simulator tests cannot establish those device- and service-dependent behaviors.
+M1 training is accepted only through repository and simulator evidence; the whole health product is not finished. Nutrition tracking, symptom/reminder workflows, reports and the final cross-milestone audit remain later milestones. TestFlight distribution, live multi-device CloudKit synchronization, notification delivery, HealthKit authorization/data exchange and haptic behavior on physical hardware are not established by simulator tests.

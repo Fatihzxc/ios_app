@@ -104,10 +104,15 @@ final class TrainingAccessibilityUITests: XCTestCase {
         _ = assertFiftyTwoPointTarget("session.set.rir.2", in: app)
         _ = assertFiftyTwoPointTarget("session.set.save", in: app)
         _ = assertFiftyTwoPointTarget("session.exercise.next", in: app)
+        _ = assertFiftyTwoPointTarget("session.exercise.back", in: app)
+        _ = assertFiftyTwoPointTarget("session.exercise.finish-incomplete", in: app)
     }
 
     func testLightDarkAndDynamicTypeMatrixPassesSessionAudit() throws {
         for appearance in Appearance.allCases {
+            var safetyHeadingHeights: [(size: String, height: CGFloat)] = []
+            var recommendationHeights: [(size: String, height: CGFloat)] = []
+
             for textSize in TextSize.allCases {
                 let app = launchSession(appearance: appearance, textSize: textSize)
                 tap("today.action.primary", in: app)
@@ -119,15 +124,47 @@ final class TrainingAccessibilityUITests: XCTestCase {
                 XCTAssertTrue(stage.isHittable)
                 _ = assertFiftyTwoPointTarget("session.set.weight.increment", in: app)
                 _ = assertFiftyTwoPointTarget("session.set.save", in: app)
+                scrollToTop(in: app)
+                let safetyHeading = require(
+                    app.staticTexts["session.exercise.safety.heading"],
+                    "The safety status heading must remain a concrete text element."
+                )
+                let recommendation = require(
+                    app.staticTexts["session.set.recommendation"],
+                    "The set recommendation must remain a concrete text element."
+                )
+                safetyHeadingHeights.append(
+                    (size: textSize.rawValue, height: safetyHeading.frame.height)
+                )
+                recommendationHeights.append(
+                    (size: textSize.rawValue, height: recommendation.frame.height)
+                )
                 try app.performAccessibilityAudit(
                     for: [.elementDetection, .hitRegion, .dynamicType, .textClipped]
-                )
-                scrollToTop(in: app)
+                ) { issue in
+                    self.isVerifiedStatusPillDynamicTypeFalsePositive(issue)
+                }
                 attachScreenshot(
                     named: "m1-session-\(appearance.rawValue)-\(textSize.rawValue)"
                 )
                 app.terminate()
             }
+
+            assertStrictDynamicTypeGrowth(
+                safetyHeadingHeights,
+                element: "session.exercise.safety.heading",
+                appearance: appearance
+            )
+            assertStrictDynamicTypeGrowth(
+                recommendationHeights,
+                element: "session.set.recommendation",
+                appearance: appearance
+            )
+            try attachDynamicTypeEvidence(
+                appearance: appearance,
+                safetyHeadingHeights: safetyHeadingHeights,
+                recommendationHeights: recommendationHeights
+            )
         }
     }
 
@@ -173,7 +210,37 @@ final class TrainingAccessibilityUITests: XCTestCase {
         )
         _ = assertFiftyTwoPointTarget("session.set.weight.increment", in: app)
         _ = assertFiftyTwoPointTarget("session.set.save", in: app)
+        let variantLabel = require(
+            app.staticTexts["session.set.variant.label"],
+            "The small-phone AX5 form must render the full performed-variant label outside the field."
+        )
+        makeVisible(variantLabel, in: app)
+        XCTAssertEqual(variantLabel.label, "Uygulanan varyasyon (opsiyonel)")
+        XCTAssertTrue(
+            app.frame.contains(variantLabel.frame),
+            "The full performed-variant label must remain inside the small-phone viewport. "
+                + "Label: \(variantLabel.frame), viewport: \(app.frame)"
+        )
+        XCTAssertGreaterThan(
+            variantLabel.frame.height,
+            60,
+            "The performed-variant label must wrap instead of truncating at AX5."
+        )
+        let variantField = require(
+            app.textFields["session.set.variant"],
+            "The performed-variant field must remain an accessible text field."
+        )
+        XCTAssertEqual(variantField.label, "Uygulanan varyasyon (opsiyonel)")
+        XCTAssertTrue(
+            variantField.placeholderValue?.isEmpty ?? true,
+            "The external label must not be repeated as a clipped field placeholder."
+        )
         attachScreenshot(named: "m1-session-small-ax5")
+        // The two-appearance matrix owns the Dynamic Type audit and direct
+        // default-to-AX5 growth measurements. This dedicated gate validates
+        // the already-forced AX5 small-phone layout without asking Xcode to
+        // initiate another font-size transition from the maximum category.
+        try app.performAccessibilityAudit(for: [.textClipped])
     }
 
     private func launchSession(
@@ -218,16 +285,52 @@ final class TrainingAccessibilityUITests: XCTestCase {
     }
 
     private func makeHittable(_ element: XCUIElement, in app: XCUIApplication) {
+        position(element, in: app, requiresHittable: true)
+    }
+
+    private func makeVisible(_ element: XCUIElement, in app: XCUIApplication) {
+        position(element, in: app, requiresHittable: false)
+    }
+
+    private func position(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        requiresHittable: Bool
+    ) {
+        let safetyInset: CGFloat = requiresHittable ? 44 : 0
         var remainingScrolls = 12
-        while !element.isHittable, remainingScrolls > 0 {
+        while remainingScrolls > 0 {
             let frame = element.frame
-            if !frame.isEmpty, frame.midY < app.frame.midY {
+            let isSafelyPositioned = !frame.isEmpty &&
+                frame.minY >= app.frame.minY + safetyInset &&
+                frame.maxY <= app.frame.maxY - safetyInset
+            if isSafelyPositioned && (!requiresHittable || element.isHittable) {
+                return
+            }
+            if !requiresHittable {
+                scrollByShortDrag(
+                    towardTop: !frame.isEmpty && frame.midY > app.frame.midY,
+                    in: app
+                )
+            } else if !frame.isEmpty, frame.midY < app.frame.midY {
                 app.swipeDown()
             } else {
                 app.swipeUp()
             }
             remainingScrolls -= 1
         }
+    }
+
+    private func scrollByShortDrag(towardTop: Bool, in app: XCUIApplication) {
+        let upper = app.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)
+        )
+        let lower = app.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.60)
+        )
+        let start = towardTop ? lower : upper
+        let end = towardTop ? upper : lower
+        start.press(forDuration: 0.05, thenDragTo: end)
     }
 
     private func scrollToTop(in app: XCUIApplication) {
@@ -238,6 +341,59 @@ final class TrainingAccessibilityUITests: XCTestCase {
 
     private func identified(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
         app.descendants(matching: .any)[identifier]
+    }
+
+    private func isVerifiedStatusPillDynamicTypeFalsePositive(
+        _ issue: XCUIAccessibilityAuditIssue
+    ) -> Bool {
+        guard issue.auditType == .dynamicType,
+              let identifier = issue.element?.identifier else {
+            return false
+        }
+        return identifier == "session.exercise.safety.heading"
+            || identifier == "session.set.recommendation"
+    }
+
+    private func assertStrictDynamicTypeGrowth(
+        _ measurements: [(size: String, height: CGFloat)],
+        element: String,
+        appearance: Appearance
+    ) {
+        XCTAssertEqual(measurements.count, TextSize.allCases.count)
+        for index in 1..<measurements.count {
+            let previous = measurements[index - 1]
+            let current = measurements[index]
+            XCTAssertGreaterThan(
+                current.height,
+                previous.height,
+                "\(element) must grow from \(previous.size) to \(current.size) in \(appearance.rawValue)."
+            )
+        }
+    }
+
+    private func attachDynamicTypeEvidence(
+        appearance: Appearance,
+        safetyHeadingHeights: [(size: String, height: CGFloat)],
+        recommendationHeights: [(size: String, height: CGFloat)]
+    ) throws {
+        let rows = zip(safetyHeadingHeights, recommendationHeights).map { safety, recommendation in
+            [
+                "textSize": safety.size,
+                "safetyHeadingHeight": Double(safety.height),
+                "recommendationHeight": Double(recommendation.height),
+            ] as [String: Any]
+        }
+        let data = try JSONSerialization.data(
+            withJSONObject: [
+                "appearance": appearance.rawValue,
+                "measurements": rows,
+            ],
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = "m1-status-pill-dynamic-type-\(appearance.rawValue)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     @discardableResult

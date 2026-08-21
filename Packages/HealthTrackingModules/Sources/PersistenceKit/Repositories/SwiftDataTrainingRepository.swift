@@ -55,25 +55,31 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
     }
 
     public func fetchTodaySnapshot() async throws -> TodayRepositorySnapshot? {
-        let profiles = try modelContext.fetch(
-            FetchDescriptor<UserProfile>(
-                sortBy: [SortDescriptor(\UserProfile.updatedAt, order: .reverse)]
-            )
+        var profileDescriptor = FetchDescriptor<UserProfile>(
+            sortBy: [SortDescriptor(\UserProfile.updatedAt, order: .reverse)]
         )
-        guard profiles.count <= 1 else {
-            throw TrainingRepositoryIntegrityError.duplicateUserProfiles(count: profiles.count)
+        profileDescriptor.fetchLimit = 2
+        let profiles = try modelContext.fetch(profileDescriptor)
+        if profiles.count > 1 {
+            profileDescriptor.fetchLimit = nil
+            throw TrainingRepositoryIntegrityError.duplicateUserProfiles(
+                count: try modelContext.fetchCount(profileDescriptor)
+            )
         }
 
-        let programs = Self.sortActivePrograms(
-            try modelContext.fetch(
-                FetchDescriptor<Program>(
-                    predicate: #Predicate { $0.isActive },
-                    sortBy: [SortDescriptor(\Program.updatedAt, order: .reverse)]
-                )
-            )
+        var activeProgramDescriptor = FetchDescriptor<Program>(
+            predicate: #Predicate { $0.isActive },
+            sortBy: [SortDescriptor(\Program.updatedAt, order: .reverse)]
         )
-        guard programs.count <= 1 else {
-            throw TrainingRepositoryIntegrityError.duplicateActivePrograms(count: programs.count)
+        activeProgramDescriptor.fetchLimit = 2
+        let programs = Self.sortActivePrograms(
+            try modelContext.fetch(activeProgramDescriptor)
+        )
+        if programs.count > 1 {
+            activeProgramDescriptor.fetchLimit = nil
+            throw TrainingRepositoryIntegrityError.duplicateActivePrograms(
+                count: try modelContext.fetchCount(activeProgramDescriptor)
+            )
         }
         guard let program = programs.first else { return nil }
         guard let profile = profiles.first else {
@@ -86,19 +92,31 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
             .sorted(by: Self.workoutDayOrderedBefore)
         let workoutDayIDs = Set(workoutDays.map(\.id))
 
-        let programStates = try modelContext.fetch(FetchDescriptor<ProgramState>())
-            .filter { $0.programId == program.id }
-        guard programStates.count <= 1 else {
+        let programID = program.id
+        var programStateDescriptor = FetchDescriptor<ProgramState>(
+            predicate: #Predicate { $0.programId == programID }
+        )
+        programStateDescriptor.fetchLimit = 2
+        let programStates = try modelContext.fetch(programStateDescriptor)
+        if programStates.count > 1 {
+            programStateDescriptor.fetchLimit = nil
             throw TrainingRepositoryIntegrityError.duplicateProgramStates(
-                programID: program.id,
-                count: programStates.count
+                programID: programID,
+                count: try modelContext.fetchCount(programStateDescriptor)
             )
         }
         guard let programState = programStates.first else {
-            throw TrainingRepositoryIntegrityError.missingProgramState(programID: program.id)
+            throw TrainingRepositoryIntegrityError.missingProgramState(programID: programID)
         }
 
-        let exercises = workoutDays.flatMap { $0.exerciseTemplates ?? [] }
+        // Fetch once instead of faulting each workout day's to-many relationship separately.
+        // The inverse day objects are already registered in this context, so resolving their IDs
+        // does not require another catalog-wide fetch.
+        let exercises = try modelContext.fetch(FetchDescriptor<ExerciseTemplate>())
+            .filter { exercise in
+                guard let workoutDayID = exercise.workoutDayTemplate?.id else { return false }
+                return workoutDayIDs.contains(workoutDayID)
+            }
         let ohpDayIDs = Set(
             exercises.compactMap { exercise -> UUID? in
                 guard exercise.progressionRule == .gradedEntryOHP else { return nil }
@@ -115,37 +133,42 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
         let completedSessions = sessions.filter {
             $0.status == .completed && workoutDayIDs.contains($0.workoutDayTemplateId)
         }
-        let exerciseIDs = Set(exercises.map(\.id))
-        let setLogs = completedSessions
-            .flatMap { $0.setLogs ?? [] }
-            .filter { exerciseIDs.contains($0.exerciseTemplateId) }
-        let setLogsByExerciseID = Dictionary(grouping: setLogs, by: \.exerciseTemplateId)
+        let exerciseHistories: [TodayRepositorySnapshot.ExerciseHistory]
+        if completedSessions.isEmpty {
+            exerciseHistories = []
+        } else {
+            let exerciseIDs = Set(exercises.map(\.id))
+            let setLogs = completedSessions
+                .flatMap { $0.setLogs ?? [] }
+                .filter { exerciseIDs.contains($0.exerciseTemplateId) }
+            let setLogsByExerciseID = Dictionary(grouping: setLogs, by: \.exerciseTemplateId)
 
-        let exerciseHistories = exercises
-            .sorted { $0.id.uuidString < $1.id.uuidString }
-            .compactMap { exercise -> TodayRepositorySnapshot.ExerciseHistory? in
-                let exerciseSets = setLogsByExerciseID[exercise.id, default: []]
-                var setsBySessionID: [UUID: [SetLog]] = [:]
-                for setLog in exerciseSets {
-                    guard let sessionID = setLog.workoutSession?.id else { continue }
-                    setsBySessionID[sessionID, default: []].append(setLog)
-                }
-                let history = completedSessions.compactMap {
-                    session -> CompletedExerciseHistorySnapshot? in
-                    guard let logs = setsBySessionID[session.id], !logs.isEmpty else {
-                        return nil
+            exerciseHistories = exercises
+                .sorted { $0.id.uuidString < $1.id.uuidString }
+                .compactMap { exercise -> TodayRepositorySnapshot.ExerciseHistory? in
+                    let exerciseSets = setLogsByExerciseID[exercise.id, default: []]
+                    var setsBySessionID: [UUID: [SetLog]] = [:]
+                    for setLog in exerciseSets {
+                        guard let sessionID = setLog.workoutSession?.id else { continue }
+                        setsBySessionID[sessionID, default: []].append(setLog)
                     }
-                    let snapshots = logs
-                        .sorted(by: Self.setLogOrderedBefore)
-                        .map { Self.snapshot($0, workoutSessionID: session.id) }
-                    return CompletedExerciseHistorySnapshot(
-                        session: Self.sessionSnapshot(session),
-                        setLogs: snapshots
-                    )
+                    let history = completedSessions.compactMap {
+                        session -> CompletedExerciseHistorySnapshot? in
+                        guard let logs = setsBySessionID[session.id], !logs.isEmpty else {
+                            return nil
+                        }
+                        let snapshots = logs
+                            .sorted(by: Self.setLogOrderedBefore)
+                            .map { Self.snapshot($0, workoutSessionID: session.id) }
+                        return CompletedExerciseHistorySnapshot(
+                            session: Self.sessionSnapshot(session),
+                            setLogs: snapshots
+                        )
+                    }
+                    guard !history.isEmpty else { return nil }
+                    return .init(exerciseID: exercise.id, sessions: history)
                 }
-                guard !history.isEmpty else { return nil }
-                return .init(exerciseID: exercise.id, sessions: history)
-            }
+        }
 
         let healthChecks = try modelContext.fetch(FetchDescriptor<HealthCheckReminder>())
             .filter { $0.status == .pending }
@@ -157,8 +180,10 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
                     dueDate: $0.dueDate
                 )
             }
-        let measurementReminders = try modelContext.fetch(FetchDescriptor<AppReminder>())
-            .filter { $0.isEnabled && $0.type == .measurement }
+        let measurementReminders = try modelContext.fetch(
+            FetchDescriptor<AppReminder>(predicate: #Predicate { $0.isEnabled })
+        )
+            .filter { $0.type == .measurement }
             .sorted { $0.id.uuidString < $1.id.uuidString }
             .map {
                 TodayRepositorySnapshot.MeasurementReminder(

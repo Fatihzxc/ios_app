@@ -347,6 +347,64 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
 
+  test-cold-launch:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install compatible XcodeGen
+        run: |
+          required_version="2.46.0"
+          version_at_least() {
+            local actual="$1"
+            local required="$2"
+            local actual_major actual_minor actual_patch required_major required_minor required_patch
+            IFS=. read -r actual_major actual_minor actual_patch <<< "$actual"
+            IFS=. read -r required_major required_minor required_patch <<< "$required"
+            actual_minor="${actual_minor:-0}"
+            actual_patch="${actual_patch:-0}"
+            required_minor="${required_minor:-0}"
+            required_patch="${required_patch:-0}"
+            (( actual_major > required_major )) ||
+              (( actual_major == required_major && actual_minor > required_minor )) ||
+              (( actual_major == required_major && actual_minor == required_minor && actual_patch >= required_patch ))
+          }
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          version_output="$(xcodegen --version)"
+          version="$(printf '%s\n' "$version_output" | grep -Eo '[0-9]+(\.[0-9]+){1,2}' | head -n 1)"
+          if [[ -z "$version" ]] || ! version_at_least "$version" "$required_version"; then
+            brew upgrade xcodegen
+          fi
+          xcodegen --version
+
+      - name: Test cold launch contract with phase evidence
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          scripts/bootstrap.sh
+          destination="$(scripts/select-simulator.sh)"
+          result_bundle=".build/HealthTrackingApp-cold-launch.xcresult"
+          rm -rf "$result_bundle"
+          xcodebuild test \
+            -project HealthTrackingApp.xcodeproj \
+            -scheme HealthTrackingApp-Local \
+            -destination "$destination" \
+            -resultBundlePath "$result_bundle" \
+            -only-testing:HealthTrackingAppUITests/TodayGuidanceUITests/testColdLaunchPublishesFirstMeaningfulDirectiveWithinOneSecondMedian \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload cold-launch test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HealthTrackingApp-cold-launch-xcresult
+          path: .build/HealthTrackingApp-cold-launch.xcresult
+          include-hidden-files: true
+          if-no-files-found: warn
+
   test-small-phone:
     runs-on: macos-15
     timeout-minutes: 30

@@ -29,10 +29,16 @@ public final class SwiftDataSeedLoader: SeedLoading {
 
     public func seedIfNeeded(installedAt: Date) throws {
         do {
-            let settings = try modelContext.fetch(FetchDescriptor<AppSetting>())
-            let markers = settings.filter { $0.key == Self.markerKey }
-            guard markers.count <= 1 else {
-                throw SeedLoadingError.duplicateMarkers(count: markers.count)
+            let markerKey = Self.markerKey
+            var markerDescriptor = FetchDescriptor<AppSetting>(
+                predicate: #Predicate { $0.key == markerKey }
+            )
+            markerDescriptor.fetchLimit = 2
+            let markers = try modelContext.fetch(markerDescriptor)
+            if markers.count > 1 {
+                markerDescriptor.fetchLimit = nil
+                let markerCount = try modelContext.fetchCount(markerDescriptor)
+                throw SeedLoadingError.duplicateMarkers(count: markerCount)
             }
             guard !markers.contains(where: Self.isValidMarker) else {
                 return

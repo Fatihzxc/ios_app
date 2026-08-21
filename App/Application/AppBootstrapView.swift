@@ -8,10 +8,11 @@ struct AppBootstrapView: View {
     private let makeContent: @MainActor (any AppDependencyLoading) -> AnyView
 
     init(
+        runtime: AppBootstrapRuntime? = nil,
         resolveEnvironment: @escaping @MainActor () throws -> AppEnvironment = {
             try AppLaunchEnvironment.resolve()
         },
-        makeDependencies: @escaping @MainActor (AppEnvironment) throws -> any AppDependencyLoading = {
+        makeDependencies: @escaping @MainActor (AppEnvironment) async throws -> any AppDependencyLoading = {
             try AppDependencies(environment: $0)
         },
         makeContent: @escaping @MainActor (any AppDependencyLoading) -> AnyView = {
@@ -33,13 +34,17 @@ struct AppBootstrapView: View {
             )
         }
     ) {
-        _runtime = StateObject(
-            wrappedValue: AppBootstrapRuntime(
-                resolveEnvironment: resolveEnvironment,
-                makeDependencies: makeDependencies,
-                startsInitialLoad: true
+        if let runtime {
+            _runtime = StateObject(wrappedValue: runtime)
+        } else {
+            _runtime = StateObject(
+                wrappedValue: AppBootstrapRuntime(
+                    resolveEnvironment: resolveEnvironment,
+                    makeDependencies: makeDependencies,
+                    startsInitialLoad: true
+                )
             )
-        )
+        }
         self.makeContent = makeContent
     }
 
@@ -147,11 +152,12 @@ final class AppBootstrapRuntime: ObservableObject {
 
     init(
         resolveEnvironment: @escaping @MainActor () throws -> AppEnvironment,
-        makeDependencies: @escaping @MainActor (AppEnvironment) throws -> any AppDependencyLoading,
+        makeDependencies: @escaping @MainActor (AppEnvironment) async throws -> any AppDependencyLoading,
         startsInitialLoad: Bool = false
     ) {
         do {
             let environment = try resolveEnvironment()
+            AppLaunchPerformance.record(.environment)
             let attempt = AppBootstrapAttempt(
                 environment: environment,
                 makeDependencies: makeDependencies
@@ -196,20 +202,20 @@ final class AppBootstrapRuntime: ObservableObject {
 @MainActor
 private final class AppBootstrapAttempt {
     private let environment: AppEnvironment
-    private let makeDependencies: @MainActor (AppEnvironment) throws -> any AppDependencyLoading
+    private let makeDependencies: @MainActor (AppEnvironment) async throws -> any AppDependencyLoading
 
     private(set) var dependencies: (any AppDependencyLoading)?
 
     init(
         environment: AppEnvironment,
-        makeDependencies: @escaping @MainActor (AppEnvironment) throws -> any AppDependencyLoading
+        makeDependencies: @escaping @MainActor (AppEnvironment) async throws -> any AppDependencyLoading
     ) {
         self.environment = environment
         self.makeDependencies = makeDependencies
     }
 
     func load() async throws {
-        let dependencies = try makeDependencies(environment)
+        let dependencies = try await makeDependencies(environment)
         try dependencies.load()
         await dependencies.loadInitialContent()
         self.dependencies = dependencies

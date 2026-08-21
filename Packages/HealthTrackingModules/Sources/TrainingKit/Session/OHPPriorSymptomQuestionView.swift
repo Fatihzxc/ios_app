@@ -75,9 +75,9 @@ public struct OHPPriorSymptomQuestionView: View {
             PrimaryActionButton(
                 title: title,
                 accessibilityLabel: title,
+                minimumHeight: 52,
                 action: { answer(response) }
             )
-            .frame(minHeight: 52)
             .accessibilityIdentifier(identifier)
         } else {
             Button(title) {

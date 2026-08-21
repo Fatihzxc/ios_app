@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 public struct WarmupStageView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @AccessibilityFocusState private var isHeadingFocused: Bool
     private let presentation: SessionPresentation
     private let toggleItem: (UUID) -> Void
     private let complete: () -> Void
@@ -40,19 +41,23 @@ public struct WarmupStageView: View {
                 PrimaryActionButton(
                     title: localized("session.warmup.complete"),
                     accessibilityLabel: localized("session.warmup.complete"),
+                    minimumHeight: 52,
                     action: complete
                 )
                 .accessibilityIdentifier("session.warmup.complete")
                 Button(localized("session.warmup.skip"), action: skip)
                     .font(AppTypography.label)
                     .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: 52)
                     .accessibilityIdentifier("session.warmup.skip")
             }
             .padding(.horizontal, AppSpacing.screenHorizontal)
             .padding(.vertical, AppSpacing.large)
         }
         .accessibilityIdentifier("session.stage.warmup")
+        .task {
+            isHeadingFocused = true
+        }
     }
 
     private func checklistRow(
@@ -95,6 +100,7 @@ public struct WarmupStageView: View {
                 .font(AppTypography.titleLarge)
                 .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityFocused($isHeadingFocused)
             Text(detail)
                 .font(AppTypography.body)
                 .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))

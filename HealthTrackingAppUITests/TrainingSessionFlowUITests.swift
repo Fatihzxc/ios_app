@@ -376,8 +376,17 @@ final class TrainingSessionFlowUITests: XCTestCase {
 
     private func makeHittable(_ element: XCUIElement, in app: XCUIApplication) {
         var remainingScrolls = 10
-        while !element.isHittable, remainingScrolls > 0 {
+        while remainingScrolls > 0 {
             let elementFrame = element.frame
+            let needsSafeSessionPosition = element.identifier.hasPrefix("session.")
+            let isSafelyPositioned = !needsSafeSessionPosition || (
+                !elementFrame.isEmpty &&
+                    elementFrame.minY >= app.frame.minY + 44 &&
+                    elementFrame.maxY <= app.frame.maxY - 44
+            )
+            if element.isHittable && isSafelyPositioned {
+                return
+            }
             let isAboveViewport = !elementFrame.isEmpty
                 && elementFrame.midY < app.frame.midY
             if isAboveViewport {

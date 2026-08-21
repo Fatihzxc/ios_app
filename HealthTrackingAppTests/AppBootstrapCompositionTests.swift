@@ -102,6 +102,19 @@ final class AppBootstrapCompositionTests: XCTestCase {
         XCTAssertTrue(runtime.dependencies === successfulDependency)
     }
 
+    // Mutation caught: caching the startup dependency composition would make a
+    // recoverable bootstrap retry reuse state from the first attempt.
+    func testDependencyPrewarmerBuildsFreshDependenciesAfterInitialTaskIsConsumed() async throws {
+        let prewarmer = AppDependencyPrewarmer(environment: .uiTesting)
+
+        let initialDependencies = try await prewarmer.makeDependencies()
+        let retryDependencies = try await prewarmer.makeDependencies()
+
+        XCTAssertFalse(initialDependencies === retryDependencies)
+        XCTAssertEqual(initialDependencies.persistencePresentation, .uiTestingInMemory)
+        XCTAssertEqual(retryDependencies.persistencePresentation, .uiTestingInMemory)
+    }
+
     // Intentionally uninvoked: each call is type-checked without evaluating live
     // AppEnvironment resolution or default dependency construction on the host.
     private static let initializerCallsAreTypeChecked: () -> Void = {

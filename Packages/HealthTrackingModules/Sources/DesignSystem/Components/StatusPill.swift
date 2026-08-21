@@ -30,18 +30,21 @@ public struct StatusPill: View {
     }
 
     public var body: some View {
-        HStack(spacing: AppSpacing.small) {
-            if let systemImage {
-                Image(systemName: systemImage)
-            }
-            Text(text)
-        }
-        .font(AppTypography.micro)
-        .foregroundStyle(AppColors.color(style.colorRole, scheme: colorScheme))
-        .padding(.horizontal, AppSpacing.compact)
-        .padding(.vertical, AppSpacing.small)
-        .background(AppColors.color(style.colorRole, scheme: colorScheme).opacity(0.14))
-        .clipShape(Capsule())
-        .accessibilityElement(children: .combine)
+        label
+            .font(AppTypography.micro)
+            .fixedSize(horizontal: false, vertical: true)
+            .foregroundStyle(AppColors.color(style.colorRole, scheme: colorScheme))
+            .padding(.horizontal, AppSpacing.compact)
+            .padding(.vertical, AppSpacing.small)
+            .background(AppColors.color(style.colorRole, scheme: colorScheme).opacity(0.14))
+            .clipShape(Capsule())
+            .accessibilityLabel(text)
+    }
+
+    private var label: Text {
+        guard let systemImage else { return Text(text) }
+        return Text(Image(systemName: systemImage))
+            + Text(verbatim: String(" "))
+            + Text(text)
     }
 }

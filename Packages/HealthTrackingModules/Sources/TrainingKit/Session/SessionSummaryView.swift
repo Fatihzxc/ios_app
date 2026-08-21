@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 public struct SessionSummaryView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @AccessibilityFocusState private var isHeadingFocused: Bool
     @Bindable private var viewModel: SessionViewModel
     private let presentation: SessionPresentation
 
@@ -23,6 +24,7 @@ public struct SessionSummaryView: View {
                     .font(AppTypography.titleLarge)
                     .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityFocused($isHeadingFocused)
 
                 AppCard {
                     VStack(alignment: .leading, spacing: AppSpacing.compact) {
@@ -77,6 +79,7 @@ public struct SessionSummaryView: View {
                 PrimaryActionButton(
                     title: localized("session.summary.done"),
                     accessibilityLabel: localized("session.summary.done"),
+                    minimumHeight: 52,
                     action: {
                         Task { await viewModel.saveSummary() }
                     }
@@ -87,6 +90,9 @@ public struct SessionSummaryView: View {
             .padding(.vertical, AppSpacing.large)
         }
         .accessibilityIdentifier("session.stage.summary")
+        .task {
+            isHeadingFocused = true
+        }
     }
 
     @ViewBuilder
@@ -99,6 +105,7 @@ public struct SessionSummaryView: View {
                             .accessibilityHidden(true)
                         Text(localized("session.summary.personalRecord.title"))
                             .font(AppTypography.titleMedium)
+                            .accessibilityIdentifier("session.summary.personalRecords")
                     }
                     .foregroundStyle(AppColors.color(.stateSuccess, scheme: colorScheme))
 
@@ -122,7 +129,6 @@ public struct SessionSummaryView: View {
                     }
                 }
             }
-            .accessibilityIdentifier("session.summary.personalRecords")
         }
     }
 
@@ -149,7 +155,7 @@ public struct SessionSummaryView: View {
         } label: {
             Text(label)
                 .font(AppTypography.label)
-                .frame(minWidth: 44, minHeight: 44)
+                .frame(minWidth: 52, minHeight: 52)
                 .padding(.horizontal, AppSpacing.compact)
                 .background(
                     AppColors.color(

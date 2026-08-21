@@ -1,6 +1,6 @@
 import Foundation
 
-enum AppEnvironment: Equatable {
+enum AppEnvironment: Equatable, Sendable {
     case uiTesting
     case local(storeURL: URL)
     case cloud(containerIdentifier: String, storeURL: URL)

@@ -116,6 +116,9 @@
     "today.inventory.format" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "%1$lld faz: %2$@\n%3$lld antrenman günü: %4$@" } } }
     },
+    "today.performance.breakdown" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Açılış aşaması ölçümü" } } }
+    },
     "today.profile.provenance.fallback" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Henüz bir profil adı girilmediği için varsayılan ad gösteriliyor." } } }
     },

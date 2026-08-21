@@ -71,7 +71,7 @@ final class AppBootstrapViewLifecycleTests: XCTestCase {
         @ObservedObject var driver: RebuildDriver
         let probe: ContentProbe
         let resolveEnvironment: @MainActor () throws -> AppEnvironment
-        let makeDependencies: @MainActor (AppEnvironment) throws -> any AppDependencyLoading
+        let makeDependencies: @MainActor (AppEnvironment) async throws -> any AppDependencyLoading
 
         var body: some View {
             // The revision read invalidates this parent. AppBootstrapView remains at

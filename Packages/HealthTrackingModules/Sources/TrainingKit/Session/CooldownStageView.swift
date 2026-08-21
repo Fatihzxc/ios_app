@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 public struct CooldownStageView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @AccessibilityFocusState private var isHeadingFocused: Bool
     private let presentation: SessionPresentation
     private let toggleItem: (UUID) -> Void
     private let goBack: () -> Void
@@ -32,6 +33,7 @@ public struct CooldownStageView: View {
                     .font(AppTypography.titleLarge)
                     .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityFocused($isHeadingFocused)
 
                 ForEach(Array(presentation.plan.cooldownItems.enumerated()), id: \.element.id) {
                     index, item in
@@ -45,15 +47,16 @@ public struct CooldownStageView: View {
                 PrimaryActionButton(
                     title: localized("session.cooldown.complete"),
                     accessibilityLabel: localized("session.cooldown.complete"),
+                    minimumHeight: 52,
                     action: complete
                 )
                 .accessibilityIdentifier("session.cooldown.complete")
                 HStack(spacing: AppSpacing.standard) {
                     Button(localized("session.exercise.back"), action: goBack)
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(maxWidth: .infinity, minHeight: 52)
                         .accessibilityIdentifier("session.cooldown.back")
                     Button(localized("session.cooldown.skip"), action: skip)
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(maxWidth: .infinity, minHeight: 52)
                         .accessibilityIdentifier("session.cooldown.skip")
                 }
                 .font(AppTypography.label)
@@ -63,6 +66,9 @@ public struct CooldownStageView: View {
             .padding(.vertical, AppSpacing.large)
         }
         .accessibilityIdentifier("session.stage.cooldown")
+        .task {
+            isHeadingFocused = true
+        }
     }
 
     private func checklistRow(

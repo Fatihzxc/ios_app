@@ -187,13 +187,16 @@ final class TodayGuidanceUITests: XCTestCase {
         let storeIdentifier = UUID()
         let stabilizationLaunchCount = 5
         var samples: [Double] = []
+        var phaseSamples: [[String: Double]] = []
+        let phaseNames = ["environment", "container", "dependencies", "seed", "today"]
 
         let preparationApp = launch(
             scenario: "seeded",
             appearance: .light,
             textSize: .standard,
             storeIdentifier: storeIdentifier,
-            appliesLocaleOverride: false
+            appliesLocaleOverride: false,
+            exposesLaunchPerformanceEvidence: true
         )
         require(
             identified("root.today.content", in: preparationApp),
@@ -207,7 +210,8 @@ final class TodayGuidanceUITests: XCTestCase {
                 appearance: .light,
                 textSize: .standard,
                 storeIdentifier: storeIdentifier,
-                appliesLocaleOverride: false
+                appliesLocaleOverride: false,
+                exposesLaunchPerformanceEvidence: true
             )
             require(
                 identified("today.performance.firstMeaningful", in: app),
@@ -222,7 +226,8 @@ final class TodayGuidanceUITests: XCTestCase {
                 appearance: .light,
                 textSize: .standard,
                 storeIdentifier: storeIdentifier,
-                appliesLocaleOverride: false
+                appliesLocaleOverride: false,
+                exposesLaunchPerformanceEvidence: true
             )
             let marker = require(
                 identified("today.performance.firstMeaningful", in: app),
@@ -233,7 +238,36 @@ final class TodayGuidanceUITests: XCTestCase {
                 Double(rawValue),
                 "The launch marker value must be raw seconds, not formatted prose."
             )
+            let phaseMarker = require(
+                identified("today.performance.breakdown", in: app),
+                "Every measured launch must expose phase-level timing evidence."
+            )
+            let phaseRawValue = try XCTUnwrap(phaseMarker.value as? String)
+            let phaseData = try XCTUnwrap(phaseRawValue.data(using: .utf8))
+            let phaseObject = try JSONSerialization.jsonObject(with: phaseData)
+            let phaseDictionary = try XCTUnwrap(phaseObject as? [String: Any])
+            var phases: [String: Double] = [:]
+            for phaseName in phaseNames {
+                phases[phaseName] = try XCTUnwrap(
+                    phaseDictionary[phaseName] as? Double,
+                    "Missing numeric \(phaseName) launch checkpoint."
+                )
+            }
+            for (earlier, later) in zip(phaseNames, phaseNames.dropFirst()) {
+                XCTAssertLessThanOrEqual(
+                    try XCTUnwrap(phases[earlier]),
+                    try XCTUnwrap(phases[later]),
+                    "Launch checkpoints must be monotonic: \(earlier) before \(later)."
+                )
+            }
+            XCTAssertEqual(
+                try XCTUnwrap(phases["today"]),
+                seconds,
+                accuracy: 0.000_001,
+                "The final phase checkpoint must use the existing launch-to-content boundary."
+            )
             samples.append(seconds)
+            phaseSamples.append(phases)
             app.terminate()
         }
 
@@ -250,6 +284,7 @@ final class TodayGuidanceUITests: XCTestCase {
             "stabilizationLaunchCount": stabilizationLaunchCount,
             "repeatCount": samples.count,
             "samplesSeconds": samples,
+            "phaseSamplesSeconds": phaseSamples,
             "medianSeconds": median,
             "thresholdSeconds": 1.0,
         ]
@@ -277,7 +312,8 @@ final class TodayGuidanceUITests: XCTestCase {
         appearance: Appearance,
         textSize: TextSize,
         storeIdentifier: UUID? = nil,
-        appliesLocaleOverride: Bool = true
+        appliesLocaleOverride: Bool = true,
+        exposesLaunchPerformanceEvidence: Bool = false
     ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
@@ -290,6 +326,9 @@ final class TodayGuidanceUITests: XCTestCase {
                 "-AppleLanguages", "(tr)",
                 "-AppleLocale", "tr_TR",
             ]
+        }
+        if exposesLaunchPerformanceEvidence {
+            app.launchArguments.append("-ui-test-launch-performance-evidence")
         }
         if let storeIdentifier {
             app.launchArguments += [

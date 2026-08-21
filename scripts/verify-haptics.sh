@@ -8,13 +8,31 @@ scan_swift() {
     local pattern="$1"
     shift
 
+    local source_files
+    local find_status=0
+    source_files="$(find "$@" -type f -name '*.swift' -print)" || find_status=$?
+    if (( find_status != 0 )); then
+        echo "Unable to enumerate Swift sources for the haptic boundary scan." >&2
+        return "$find_status"
+    fi
+
     local file
     local match
-    while IFS= read -r -d '' file; do
+    local matches
+    local grep_status
+    while IFS= read -r file; do
+        [[ -z "$file" ]] && continue
+        grep_status=0
+        matches="$(grep -nE "$pattern" "$file")" || grep_status=$?
+        if (( grep_status > 1 )); then
+            echo "Unable to scan Swift source: $file" >&2
+            return "$grep_status"
+        fi
+        [[ -z "$matches" ]] && continue
         while IFS= read -r match; do
             printf '%s:%s\n' "$file" "$match"
-        done < <(grep -nE "$pattern" "$file" || true)
-    done < <(find "$@" -type f -name '*.swift' -print0)
+        done <<< "$matches"
+    done <<< "$source_files"
 }
 
 verify_generator_boundary() {
@@ -38,6 +56,15 @@ verify_generator_boundary() {
         fi
     done
 
+    local generator_findings
+    local generator_scan_status=0
+    generator_findings="$(scan_swift \
+        'UIImpactFeedbackGenerator|UISelectionFeedbackGenerator|UINotificationFeedbackGenerator' \
+        "${production_roots[@]}")" || generator_scan_status=$?
+    if (( generator_scan_status != 0 )); then
+        return "$generator_scan_status"
+    fi
+
     local finding
     while IFS= read -r finding; do
         [[ -z "$finding" ]] && continue
@@ -45,14 +72,17 @@ verify_generator_boundary() {
             echo "Direct UIKit feedback generator outside the live adapter: $finding" >&2
             return 1
         fi
-    done < <(scan_swift \
-        'UIImpactFeedbackGenerator|UISelectionFeedbackGenerator|UINotificationFeedbackGenerator' \
-        "${production_roots[@]}")
+    done <<< "$generator_findings"
 
     local training_kit_uikit_imports
+    local training_scan_status=0
     training_kit_uikit_imports="$(scan_swift \
         '^[[:space:]]*import[[:space:]]+UIKit[[:space:]]*$' \
-        "$target_root/Packages/HealthTrackingModules/Sources/TrainingKit")"
+        "$target_root/Packages/HealthTrackingModules/Sources/TrainingKit")" \
+        || training_scan_status=$?
+    if (( training_scan_status != 0 )); then
+        return "$training_scan_status"
+    fi
     if [[ -n "$training_kit_uikit_imports" ]]; then
         echo "TrainingKit must remain independent of UIKit." >&2
         return 1
@@ -118,6 +148,19 @@ self_test() {
         return 1
     fi
     grep -Fq 'Direct UIKit feedback generator outside the live adapter' "$fixture/bypass.out"
+
+    if scan_swift 'UIImpactFeedbackGenerator' "$fixture/missing" \
+        >"$fixture/find-error.out" 2>&1; then
+        echo "Haptic self-test expected source enumeration failure to fail closed." >&2
+        return 1
+    fi
+    grep -Fq 'Unable to enumerate Swift sources' "$fixture/find-error.out"
+
+    if scan_swift '[' "$fixture/App" >"$fixture/grep-error.out" 2>&1; then
+        echo "Haptic self-test expected source scan failure to fail closed." >&2
+        return 1
+    fi
+    grep -Fq 'Unable to scan Swift source' "$fixture/grep-error.out"
     echo "Training haptic verifier self-tests passed."
 }
 

@@ -279,7 +279,16 @@ require_text_contract(
         ".accessibility3",
         "minWidth: 52",
         "minHeight: 52",
+        "minimumHeight: 52",
         "session.set.save.hint",
+    ],
+)
+require_text_contract(
+    "Packages/HealthTrackingModules/Sources/DesignSystem/Components/PrimaryActionButton.swift",
+    [
+        "minimumHeight: CGFloat = 44",
+        ".frame(maxWidth: .infinity, minHeight: minimumHeight)",
+        ".frame(minWidth: minimumHeight, minHeight: minimumHeight)",
     ],
 )
 require_text_contract(
@@ -414,7 +423,12 @@ contracts = {
     ],
     "Packages/HealthTrackingModules/Sources/TrainingKit/Session/SetEntryBar.swift": [
         "@Environment(\\.dynamicTypeSize)", ".accessibility3", "minWidth: 52",
-        "minHeight: 52", "session.set.save.hint",
+        "minHeight: 52", "minimumHeight: 52", "session.set.save.hint",
+    ],
+    "Packages/HealthTrackingModules/Sources/DesignSystem/Components/PrimaryActionButton.swift": [
+        "minimumHeight: CGFloat = 44",
+        ".frame(maxWidth: .infinity, minHeight: minimumHeight)",
+        ".frame(minWidth: minimumHeight, minHeight: minimumHeight)",
     ],
     "Packages/HealthTrackingModules/Sources/TrainingKit/Session/TrainingSessionView.swift": [
         "@Environment(\\.accessibilityReduceMotion)", ".transition(", "0.12",
@@ -475,6 +489,14 @@ PY
     fi
     grep -Fq 'M1 contract Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift is missing required tokens' "$fixture/m1-today-summary.out"
     mv "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.valid.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift"
+    cp "$fixture/Packages/HealthTrackingModules/Sources/DesignSystem/Components/PrimaryActionButton.swift" "$fixture/Packages/HealthTrackingModules/Sources/DesignSystem/Components/PrimaryActionButton.valid.swift"
+    sed '/\.frame(minWidth: minimumHeight, minHeight: minimumHeight)/d' "$fixture/Packages/HealthTrackingModules/Sources/DesignSystem/Components/PrimaryActionButton.valid.swift" > "$fixture/Packages/HealthTrackingModules/Sources/DesignSystem/Components/PrimaryActionButton.swift"
+    if verify_repo "$fixture" >"$fixture/m1-primary-action-size.out" 2>&1; then
+        echo "Requirements self-test expected a missing M1 primary action sizing contract failure." >&2
+        return 1
+    fi
+    grep -Fq 'M1 contract Packages/HealthTrackingModules/Sources/DesignSystem/Components/PrimaryActionButton.swift is missing required tokens' "$fixture/m1-primary-action-size.out"
+    mv "$fixture/Packages/HealthTrackingModules/Sources/DesignSystem/Components/PrimaryActionButton.valid.swift" "$fixture/Packages/HealthTrackingModules/Sources/DesignSystem/Components/PrimaryActionButton.swift"
     mv "$fixture/docs/evidence/M1/acceptance.md" "$fixture/docs/evidence/M1/acceptance.valid.md"
     if verify_repo "$fixture" >"$fixture/m1-evidence.out" 2>&1; then
         echo "Requirements self-test expected a missing M1 evidence failure." >&2

@@ -259,8 +259,17 @@ final class M1AcceptanceUITests: XCTestCase {
 
     private func makeHittable(_ element: XCUIElement, in app: XCUIApplication) {
         var remainingScrolls = 14
-        while !element.isHittable, remainingScrolls > 0 {
+        while remainingScrolls > 0 {
             let frame = element.frame
+            let needsSafeSessionPosition = element.identifier.hasPrefix("session.")
+            let isSafelyPositioned = !needsSafeSessionPosition || (
+                !frame.isEmpty &&
+                    frame.minY >= app.frame.minY + 44 &&
+                    frame.maxY <= app.frame.maxY - 44
+            )
+            if element.isHittable && isSafelyPositioned {
+                return
+            }
             if !frame.isEmpty, frame.midY < app.frame.midY {
                 app.swipeDown()
             } else {

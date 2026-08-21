@@ -61,8 +61,12 @@ final class AccessibilitySmokeUITests: XCTestCase {
                 )
                 XCTAssertTrue(primaryContent.isHittable, "\(tab.primaryContentIdentifier) must remain hittable at accessibility XXXL.")
                 assertVisibleWithinApp(primaryContent, named: tab.primaryContentIdentifier, in: app)
+                // This fixture is already pinned to AX5. Asking Xcode to vary Dynamic Type
+                // beyond that maximum emits an element-less "unsupported" issue. The
+                // default-through-AX5 session matrix owns Dynamic Type variation; this
+                // smoke pass audits the actual AX5 render for detection, hit regions and clipping.
                 try app.performAccessibilityAudit(
-                    for: [.elementDetection, .hitRegion, .dynamicType, .textClipped]
+                    for: [.elementDetection, .hitRegion, .textClipped]
                 )
             }
 

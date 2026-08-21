@@ -33,41 +33,36 @@ final class AppDependencies: AppDependencyLoading {
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
 
-    init(
+    fileprivate struct PersistencePreparation: Sendable {
+        let mode: PersistenceMode
+        let presentation: FoundationPersistencePresentation
+    }
+
+    convenience init(
         environment: AppEnvironment,
         hapticClient: (any TrainingHapticClient)? = nil
     ) throws {
-        let persistenceMode: PersistenceMode
-        switch environment {
-        case .uiTesting:
-            #if DEBUG
-            if let identifier = AppUITestLaunchConfiguration.resolve()?
-                .persistentStoreIdentifier {
-                persistenceMode = .local(
-                    storeURL: try Self.makeUITestStoreURL(identifier: identifier)
-                )
-            } else {
-                persistenceMode = .inMemory
-            }
-            #else
-            persistenceMode = .inMemory
-            #endif
-            persistencePresentation = .uiTestingInMemory
-        case let .local(storeURL):
-            persistenceMode = .local(storeURL: storeURL)
-            persistencePresentation = .localStore
-        case let .cloud(containerIdentifier, storeURL):
-            persistenceMode = .cloud(
-                storeURL: storeURL,
-                privateDatabaseIdentifier: containerIdentifier
-            )
-            persistencePresentation = .iCloudConfigured
-        }
+        let persistence = try Self.persistencePreparation(for: environment)
+        let modelContainer = try ModelContainerFactory.make(for: persistence.mode)
+        AppLaunchPerformance.record(.container)
+        self.init(
+            environment: environment,
+            persistence: persistence,
+            modelContainer: modelContainer,
+            hapticClient: hapticClient
+        )
+    }
 
-        let modelContainer = try ModelContainerFactory.make(for: persistenceMode)
+    fileprivate init(
+        environment: AppEnvironment,
+        persistence: PersistencePreparation,
+        modelContainer: ModelContainer,
+        hapticClient: (any TrainingHapticClient)?
+    ) {
         let mainContext = ModelContext(modelContainer)
         self.modelContainer = modelContainer
         self.mainContext = mainContext
+        persistencePresentation = persistence.presentation
         injectedHapticClient = hapticClient
         trainingHapticController = nil
         let hapticControllerReference = TrainingHapticControllerReference()
@@ -110,7 +105,7 @@ final class AppDependencies: AppDependencyLoading {
                  .progressionMissingRIR, .weeklyPallof, .ohpSafety, .deloadScheduled,
                  .deloadReactive, .phaseTransition, .trainingHistory, .todayTrain,
                  .todayRest, .todayResume, .todayDeload, .todayPhase, .todayReminder,
-                 .todayPriority:
+                 .todayPriority, .m1AcceptanceCatalog, .m1PRBaseline, .m1PRNew:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -162,11 +157,49 @@ final class AppDependencies: AppDependencyLoading {
         #else
         installUITestFixture = {}
         #endif
+        AppLaunchPerformance.record(.dependencies)
+    }
+
+    fileprivate static func persistencePreparation(
+        for environment: AppEnvironment
+    ) throws -> PersistencePreparation {
+        let persistenceMode: PersistenceMode
+        let persistencePresentation: FoundationPersistencePresentation
+        switch environment {
+        case .uiTesting:
+            #if DEBUG
+            if let identifier = AppUITestLaunchConfiguration.resolve()?
+                .persistentStoreIdentifier {
+                persistenceMode = .local(
+                    storeURL: try Self.makeUITestStoreURL(identifier: identifier)
+                )
+            } else {
+                persistenceMode = .inMemory
+            }
+            #else
+            persistenceMode = .inMemory
+            #endif
+            persistencePresentation = .uiTestingInMemory
+        case let .local(storeURL):
+            persistenceMode = .local(storeURL: storeURL)
+            persistencePresentation = .localStore
+        case let .cloud(containerIdentifier, storeURL):
+            persistenceMode = .cloud(
+                storeURL: storeURL,
+                privateDatabaseIdentifier: containerIdentifier
+            )
+            persistencePresentation = .iCloudConfigured
+        }
+        return PersistencePreparation(
+            mode: persistenceMode,
+            presentation: persistencePresentation
+        )
     }
 
     func load() throws {
         try seedLoader.seedIfNeeded(installedAt: .now)
         try installUITestFixture()
+        AppLaunchPerformance.record(.seed)
     }
 
     func loadInitialContent() async {
@@ -222,6 +255,53 @@ final class AppDependencies: AppDependencyLoading {
         )
     }
     #endif
+}
+
+@MainActor
+final class AppDependencyPrewarmer {
+    private struct PreparedContainer {
+        let persistence: AppDependencies.PersistencePreparation
+        let modelContainer: ModelContainer
+    }
+
+    private let environment: AppEnvironment
+    private var initialAttempt: Result<PreparedContainer, Error>?
+
+    init(environment: AppEnvironment) {
+        self.environment = environment
+        initialAttempt = Result {
+            try Self.prepareContainer(for: environment)
+        }
+    }
+
+    func makeDependencies() async throws -> AppDependencies {
+        let prepared: PreparedContainer
+        if let initialAttempt {
+            self.initialAttempt = nil
+            prepared = try initialAttempt.get()
+        } else {
+            prepared = try Self.prepareContainer(for: environment)
+        }
+
+        return AppDependencies(
+            environment: environment,
+            persistence: prepared.persistence,
+            modelContainer: prepared.modelContainer,
+            hapticClient: nil
+        )
+    }
+
+    private static func prepareContainer(
+        for environment: AppEnvironment
+    ) throws -> PreparedContainer {
+        let persistence = try AppDependencies.persistencePreparation(for: environment)
+        let modelContainer = try ModelContainerFactory.make(for: persistence.mode)
+        AppLaunchPerformance.record(.container)
+        return PreparedContainer(
+            persistence: persistence,
+            modelContainer: modelContainer
+        )
+    }
 }
 
 @MainActor
@@ -282,6 +362,15 @@ private enum UITestSessionFixture {
     private static let todayMeasurementReminderID = uuid(
         "00000000-0000-4000-8000-00000000f082"
     )
+    private static let m1PersonalRecordSessionID = uuid(
+        "00000000-0000-4000-8000-00000000f090"
+    )
+    private static let m1PersonalRecordSetID = uuid(
+        "00000000-0000-4000-8000-00000000f091"
+    )
+    private static let familyWeightExerciseID = uuid(
+        "00000000-0000-4000-8000-00000000f010"
+    )
     private static let installedAt = Date(timeIntervalSince1970: 1_700_000_000)
 
     static func install(scenario: AppUITestScenario, in modelContext: ModelContext) throws {
@@ -304,6 +393,13 @@ private enum UITestSessionFixture {
             try installPhaseTransition(in: modelContext)
         case .trainingHistory:
             try installTrainingHistory(in: modelContext)
+        case .m1AcceptanceCatalog:
+            try installM1AcceptanceCatalog(in: modelContext)
+        case .m1PRBaseline:
+            try installMeasurementFamilies(in: modelContext)
+        case .m1PRNew:
+            try installMeasurementFamilies(in: modelContext)
+            try installM1PersonalRecord(in: modelContext)
         case .todayTrain:
             try prepareTodayAlerts(in: modelContext, persistChanges: false)
         case .todayRest:
@@ -326,6 +422,58 @@ private enum UITestSessionFixture {
              .todayEmptyOnce, .todayErrorOnce:
             return
         }
+    }
+
+    private static func installM1AcceptanceCatalog(
+        in modelContext: ModelContext
+    ) throws {
+        let exercises = try modelContext.fetch(FetchDescriptor<ExerciseTemplate>())
+        guard exercises.count == 27 else {
+            throw UITestSessionFixtureError.missingSeededProgram
+        }
+        for exercise in exercises {
+            exercise.targetSets = 1
+            exercise.updatedAt = .now
+        }
+        try modelContext.save()
+    }
+
+    private static func installM1PersonalRecord(
+        in modelContext: ModelContext
+    ) throws {
+        let existingSessions = try modelContext.fetch(FetchDescriptor<WorkoutSession>())
+        guard !existingSessions.contains(where: { $0.id == m1PersonalRecordSessionID }) else {
+            return
+        }
+        guard let exercise = try modelContext.fetch(FetchDescriptor<ExerciseTemplate>())
+            .first(where: { $0.id == familyWeightExerciseID }) else {
+            throw UITestSessionFixtureError.missingSeededProgram
+        }
+        let completedAt = installedAt.addingTimeInterval(-3_600)
+        let session = WorkoutSession(
+            id: m1PersonalRecordSessionID,
+            createdAt: completedAt,
+            updatedAt: completedAt,
+            date: completedAt,
+            status: .completed,
+            workoutDayTemplateId: familyDayID
+        )
+        modelContext.insert(session)
+        modelContext.insert(
+            SetLog(
+                id: m1PersonalRecordSetID,
+                createdAt: completedAt,
+                updatedAt: completedAt,
+                exerciseTemplateId: exercise.id,
+                setIndex: 1,
+                weightKg: 10,
+                reps: 8,
+                rir: 2,
+                completedAt: completedAt,
+                workoutSession: session
+            )
+        )
+        try modelContext.save()
     }
 
     private static func prepareTodayAlerts(

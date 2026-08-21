@@ -10,13 +10,16 @@ public struct TodayView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private let viewModel: TodayViewModel
+    private let exposesLaunchPerformanceEvidence: Bool
     private let onPerformAction: @MainActor (TodayMainAction) -> Void
 
     public init(
         viewModel: TodayViewModel,
+        exposesLaunchPerformanceEvidence: Bool = false,
         onPerformAction: @escaping @MainActor (TodayMainAction) -> Void = { _ in }
     ) {
         self.viewModel = viewModel
+        self.exposesLaunchPerformanceEvidence = exposesLaunchPerformanceEvidence
         self.onPerformAction = onPerformAction
     }
 
@@ -89,20 +92,23 @@ public struct TodayView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("root.today.content")
 
-            Text(
-                format(
-                    "today.phase.format",
-                    presentation.phase.name,
-                    Int64(presentation.phase.position),
-                    Int64(presentation.phase.count)
+            VStack(alignment: .leading, spacing: AppSpacing.standard) {
+                Text(
+                    format(
+                        "today.phase.format",
+                        presentation.phase.name,
+                        Int64(presentation.phase.position),
+                        Int64(presentation.phase.count)
+                    )
                 )
-            )
-            .font(AppTypography.label)
-            .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityIdentifier("today.phase")
+                .font(AppTypography.label)
+                .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
 
-            directiveCard(presentation.directive)
+                directiveCard(presentation.directive)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("today.accessibility.summary")
 
             if let alert = presentation.alert {
                 alertCard(alert, additionalCount: presentation.additionalAlertCount)
@@ -120,7 +126,8 @@ public struct TodayView: View {
             proteinCard(targetG: presentation.proteinTargetG)
 
             #if DEBUG
-            if let elapsed = presentation.firstMeaningfulContentElapsed {
+            if exposesLaunchPerformanceEvidence,
+               let elapsed = presentation.firstMeaningfulContentElapsed {
                 Text(text("today.performance.marker"))
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))

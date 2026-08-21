@@ -439,6 +439,9 @@ final class SessionViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.currentVariantOptions, [.pallof, .plank])
         XCTAssertEqual(viewModel.currentSetDraft?.prefillSource, .guidance)
         XCTAssertEqual(viewModel.currentSetDraft?.measurement.durationSec, 30)
+        XCTAssertNil(viewModel.currentSetDraft?.measurement.weightKg)
+        XCTAssertNil(viewModel.currentSetDraft?.measurement.reps)
+        XCTAssertNil(viewModel.currentSetDraft?.measurement.distanceSteps)
         XCTAssertEqual(viewModel.currentSetDraft?.measurement.performedVariant, "pallof")
         XCTAssertEqual(viewModel.recommendationReason, .weeklyPallof(.pallofDue))
 
@@ -450,6 +453,7 @@ final class SessionViewModelTests: XCTestCase {
             repository.saveSetRequests[0].measurement.performedVariant,
             "plank"
         )
+        XCTAssertNil(repository.saveSetRequests[0].measurement.reps)
         XCTAssertEqual(viewModel.currentSetDraft?.measurement.performedVariant, "plank")
     }
 

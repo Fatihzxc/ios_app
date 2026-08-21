@@ -6,6 +6,7 @@ import SwiftUI
 @MainActor
 public struct ExerciseStageView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @AccessibilityFocusState private var isExerciseHeadingFocused: Bool
     @Bindable private var viewModel: SessionViewModel
     private let presentation: SessionPresentation
 
@@ -51,6 +52,12 @@ public struct ExerciseStageView: View {
             .padding(.vertical, AppSpacing.large)
         }
         .accessibilityIdentifier("session.stage.exercise")
+        .task {
+            isExerciseHeadingFocused = true
+        }
+        .onChange(of: viewModel.displayedExercise?.id) { _, _ in
+            isExerciseHeadingFocused = true
+        }
     }
 
     private func exerciseHeader(_ exercise: SessionExerciseSnapshot) -> some View {
@@ -70,6 +77,7 @@ public struct ExerciseStageView: View {
                 .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("session.exercise.name")
+                .accessibilityFocused($isExerciseHeadingFocused)
             Text(targetText(exercise))
                 .font(AppTypography.numericRow)
                 .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
@@ -115,6 +123,7 @@ public struct ExerciseStageView: View {
                             systemImage: "exclamationmark.triangle",
                             style: .warning
                         )
+                        .accessibilityIdentifier("session.exercise.safety.heading")
                         Text(safetyNote)
                             .font(AppTypography.body)
                             .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
@@ -220,22 +229,36 @@ public struct ExerciseStageView: View {
             PrimaryActionButton(
                 title: localized("session.exercise.next"),
                 accessibilityLabel: localized("session.exercise.next"),
+                minimumHeight: 52,
                 action: {
                     Task { await viewModel.advanceExercise() }
                 }
             )
             .accessibilityIdentifier("session.exercise.next")
+            .accessibilityHint(
+                String(localized: "session.exercise.next.hint", bundle: .module)
+            )
             HStack(spacing: AppSpacing.standard) {
-                Button(localized("session.exercise.back")) {
+                Button {
                     Task { await viewModel.goBack() }
+                } label: {
+                    Text(localized("session.exercise.back"))
+                        .frame(maxWidth: .infinity, minHeight: 53)
+                        .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
                 .accessibilityIdentifier("session.exercise.back")
 
-                Button(localized("session.exercise.finishIncomplete"), role: .destructive) {
+                Button(role: .destructive) {
                     Task { await viewModel.finishIncomplete() }
+                } label: {
+                    Text(localized("session.exercise.finishIncomplete"))
+                        .frame(maxWidth: .infinity, minHeight: 53)
+                        .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
                 .accessibilityIdentifier("session.exercise.finish-incomplete")
             }
             .font(AppTypography.label)

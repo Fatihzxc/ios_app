@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 public struct SetEntryBar: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Bindable private var draft: SetDraft
     private let saveState: SessionSetSaveState
     private let recommendationReason: SessionRecommendationReason
@@ -68,9 +69,13 @@ public struct SetEntryBar: View {
                     title: localized("session.set.save"),
                     accessibilityLabel: localized("session.set.save"),
                     isLoading: saveState == .saving,
+                    minimumHeight: 52,
                     action: save
                 )
                 .accessibilityIdentifier("session.set.save")
+                .accessibilityHint(
+                    String(localized: "session.set.save.hint", bundle: .module)
+                )
             }
         }
     }
@@ -199,15 +204,33 @@ public struct SetEntryBar: View {
     private var variantControl: some View {
         if draft.enabledFields.contains(.performedVariant) {
             if variantOptions.isEmpty {
-                TextField(
-                    localized("session.set.variant"),
-                    text: Binding(
-                        get: { draft.measurement.performedVariant ?? "" },
-                        set: { draft.selectPerformedVariant($0) }
-                    )
-                )
-                .textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier("session.set.variant")
+                VStack(alignment: .leading, spacing: AppSpacing.compact) {
+                    Text(localized("session.set.variant"))
+                        .font(AppTypography.label)
+                        .foregroundStyle(
+                            AppColors.color(.inkPrimary, scheme: colorScheme)
+                        )
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("session.set.variant.label")
+
+                    TextField(
+                        text: Binding(
+                            get: { draft.measurement.performedVariant ?? "" },
+                            set: { draft.selectPerformedVariant($0) }
+                        ),
+                        prompt: Text(verbatim: String()),
+                        axis: .vertical
+                    ) {
+                        Text(localized("session.set.variant"))
+                    }
+                    .font(AppTypography.body)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(minHeight: 52)
+                    .accessibilityLabel(localized("session.set.variant"))
+                    .accessibilityIdentifier("session.set.variant")
+                }
             } else {
                 VStack(alignment: .leading, spacing: AppSpacing.compact) {
                     Text(localized("session.set.variant.choice"))
@@ -230,7 +253,7 @@ public struct SetEntryBar: View {
         } label: {
             Text(variantLabel(option))
                 .font(AppTypography.label)
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .frame(maxWidth: .infinity, minHeight: 52)
                 .background(
                     AppColors.color(
                         isSelected ? .accentAction : .backgroundSunken,
@@ -265,7 +288,7 @@ public struct SetEntryBar: View {
                 .font(AppTypography.label)
                 .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: AppSpacing.compact) {
+                HStack(spacing: AppSpacing.standard) {
                     rirButton(value: nil, label: "—")
                     ForEach(0...10, id: \.self) { value in
                         rirButton(value: value, label: String(value))
@@ -291,6 +314,7 @@ public struct SetEntryBar: View {
                 Spacer()
                 Button(localized("session.set.retry"), action: retry)
                     .font(AppTypography.label)
+                    .frame(minWidth: 52, minHeight: 52)
                     .accessibilityIdentifier("session.set.retry")
             }
         case .idle, .saving, .saved:
@@ -316,6 +340,7 @@ public struct SetEntryBar: View {
         )
     }
 
+    @ViewBuilder
     private func valueControl(
         title: String,
         value: String,
@@ -324,46 +349,98 @@ public struct SetEntryBar: View {
         decrement: @escaping () -> Void,
         increment: @escaping () -> Void
     ) -> some View {
-        HStack(spacing: AppSpacing.standard) {
-            Text(title)
-                .font(AppTypography.label)
-                .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
-            Spacer()
-            Button {
-                decrement()
-                selectionChanged()
-            } label: {
-                Image(systemName: "minus")
-                    .frame(width: 44, height: 44)
+        if dynamicTypeSize >= DynamicTypeSize.accessibility3 {
+            VStack(alignment: .leading, spacing: AppSpacing.compact) {
+                valueTitle(title)
+                HStack(spacing: AppSpacing.standard) {
+                    decrementButton(
+                        title: title,
+                        identifier: decrementIdentifier,
+                        action: decrement
+                    )
+                    measurementValue(value)
+                    incrementButton(
+                        title: title,
+                        identifier: incrementIdentifier,
+                        action: increment
+                    )
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .accessibilityLabel(
-                String(
-                    format: localized("session.set.decrement"),
-                    locale: .current,
-                    title
+        } else {
+            HStack(spacing: AppSpacing.standard) {
+                valueTitle(title)
+                Spacer()
+                decrementButton(
+                    title: title,
+                    identifier: decrementIdentifier,
+                    action: decrement
                 )
-            )
-            .accessibilityIdentifier(decrementIdentifier)
-            Text(value)
-                .font(AppTypography.numericRow)
-                .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
-                .frame(minWidth: 56)
-            Button {
-                increment()
-                selectionChanged()
-            } label: {
-                Image(systemName: "plus")
-                    .frame(width: 44, height: 44)
+                measurementValue(value)
+                incrementButton(
+                    title: title,
+                    identifier: incrementIdentifier,
+                    action: increment
+                )
             }
-            .accessibilityLabel(
-                String(
-                    format: localized("session.set.increment"),
-                    locale: .current,
-                    title
-                )
-            )
-            .accessibilityIdentifier(incrementIdentifier)
         }
+    }
+
+    private func valueTitle(_ title: String) -> some View {
+        Text(title)
+            .font(AppTypography.label)
+            .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
+    }
+
+    private func measurementValue(_ value: String) -> some View {
+        Text(value)
+            .font(AppTypography.numericRow)
+            .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
+            .frame(minWidth: 64, minHeight: 52)
+    }
+
+    private func decrementButton(
+        title: String,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            action()
+            selectionChanged()
+        } label: {
+            Image(systemName: "minus")
+                .frame(minWidth: 52, minHeight: 52)
+        }
+        .accessibilityLabel(
+            String(
+                format: localized("session.set.decrement"),
+                locale: .current,
+                title
+            )
+        )
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func incrementButton(
+        title: String,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            action()
+            selectionChanged()
+        } label: {
+            Image(systemName: "plus")
+                .frame(minWidth: 52, minHeight: 52)
+        }
+        .accessibilityLabel(
+            String(
+                format: localized("session.set.increment"),
+                locale: .current,
+                title
+            )
+        )
+        .accessibilityIdentifier(identifier)
     }
 
     private func rirButton(value: Int?, label: String) -> some View {
@@ -373,7 +450,7 @@ public struct SetEntryBar: View {
         } label: {
             Text(label)
                 .font(AppTypography.label)
-                .frame(minWidth: 44, minHeight: 44)
+                .frame(minWidth: 52, minHeight: 52)
                 .background(
                     AppColors.color(
                         isSelected ? .accentAction : .backgroundSunken,

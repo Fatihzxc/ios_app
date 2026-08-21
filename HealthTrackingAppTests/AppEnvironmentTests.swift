@@ -13,6 +13,7 @@ final class AppEnvironmentTests: XCTestCase {
     // Mutation caught: dropping Sendable from stable configuration or store errors
     // would make app-environment failures unsafe to carry across concurrency domains.
     func testEnvironmentErrorsRemainEquatableAndSendable() {
+        requireSendable(AppEnvironment.self)
         requireSendable(AppEnvironment.ConfigurationError.self)
         requireSendable(AppEnvironment.StorePathError.self)
 

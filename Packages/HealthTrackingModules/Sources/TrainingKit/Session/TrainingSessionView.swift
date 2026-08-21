@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 public struct TrainingSessionView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Bindable private var viewModel: SessionViewModel
     private let workoutDayID: UUID
     private let onClose: @MainActor () -> Void
@@ -95,60 +96,91 @@ public struct TrainingSessionView: View {
 
     @ViewBuilder
     private func activeContent(_ presentation: SessionPresentation) -> some View {
-        if case .awaitingPreviousSessionResponse = viewModel.ohpSafetyState {
-            OHPPriorSymptomQuestionView { response in
-                Task { await viewModel.answerPreviousOHPSymptom(response) }
-            }
-        } else if case let .recommendation(reason, trainingWeekIndex) =
-                    viewModel.deloadState {
-            DeloadRecommendationView(
-                reason: reason,
-                trainingWeekIndex: trainingWeekIndex
-            ) { action in
-                Task { await viewModel.respondToDeload(action) }
-            }
-        } else {
-            VStack(spacing: 0) {
-                if case .active = viewModel.deloadState {
-                    DeloadActiveBanner()
+        Group {
+            if case .awaitingPreviousSessionResponse = viewModel.ohpSafetyState {
+                OHPPriorSymptomQuestionView { response in
+                    Task { await viewModel.answerPreviousOHPSymptom(response) }
                 }
-                switch presentation.progress.stage {
-                case .warmup:
-                    WarmupStageView(
-                        presentation: presentation,
-                        toggleItem: { id in
-                            Task { await viewModel.toggleWarmupItem(id: id) }
-                        },
-                        complete: {
-                            Task { await viewModel.completeWarmup() }
-                        },
-                        skip: {
-                            Task { await viewModel.skipWarmup() }
-                        }
-                    )
-                case .movement:
-                    ExerciseStageView(viewModel: viewModel, presentation: presentation)
-                case .cooldown:
-                    CooldownStageView(
-                        presentation: presentation,
-                        toggleItem: { id in
-                            Task { await viewModel.toggleCooldownItem(id: id) }
-                        },
-                        goBack: {
-                            Task { await viewModel.goBack() }
-                        },
-                        complete: {
-                            Task { await viewModel.completeCooldown() }
-                        },
-                        skip: {
-                            Task { await viewModel.skipCooldown() }
-                        }
-                    )
-                case .summary:
-                    SessionSummaryView(viewModel: viewModel, presentation: presentation)
+            } else if case let .recommendation(reason, trainingWeekIndex) =
+                        viewModel.deloadState {
+                DeloadRecommendationView(
+                    reason: reason,
+                    trainingWeekIndex: trainingWeekIndex
+                ) { action in
+                    Task { await viewModel.respondToDeload(action) }
+                }
+            } else {
+                VStack(spacing: 0) {
+                    if case .active = viewModel.deloadState {
+                        DeloadActiveBanner()
+                    }
+                    switch presentation.progress.stage {
+                    case .warmup:
+                        WarmupStageView(
+                            presentation: presentation,
+                            toggleItem: { id in
+                                Task { await viewModel.toggleWarmupItem(id: id) }
+                            },
+                            complete: {
+                                Task { await viewModel.completeWarmup() }
+                            },
+                            skip: {
+                                Task { await viewModel.skipWarmup() }
+                            }
+                        )
+                    case .movement:
+                        ExerciseStageView(viewModel: viewModel, presentation: presentation)
+                    case .cooldown:
+                        CooldownStageView(
+                            presentation: presentation,
+                            toggleItem: { id in
+                                Task { await viewModel.toggleCooldownItem(id: id) }
+                            },
+                            goBack: {
+                                Task { await viewModel.goBack() }
+                            },
+                            complete: {
+                                Task { await viewModel.completeCooldown() }
+                            },
+                            skip: {
+                                Task { await viewModel.skipCooldown() }
+                            }
+                        )
+                    case .summary:
+                        SessionSummaryView(viewModel: viewModel, presentation: presentation)
+                    }
                 }
             }
         }
+        .id(activeContentIdentity(presentation))
+        .transition(stageTransition)
+        .animation(stageAnimation, value: activeContentIdentity(presentation))
+    }
+
+    private func activeContentIdentity(_ presentation: SessionPresentation) -> String {
+        if case .awaitingPreviousSessionResponse = viewModel.ohpSafetyState {
+            return "ohp-question"
+        }
+        if case .recommendation = viewModel.deloadState {
+            return "deload-recommendation"
+        }
+        return "\(presentation.progress.stage.rawValue)-\(presentation.currentExerciseIndex ?? -1)"
+    }
+
+    private var stageTransition: AnyTransition {
+        if accessibilityReduceMotion {
+            return .opacity
+        }
+        return .asymmetric(
+            insertion: .move(edge: .trailing).combined(with: .opacity),
+            removal: .move(edge: .leading).combined(with: .opacity)
+        )
+    }
+
+    private var stageAnimation: Animation {
+        accessibilityReduceMotion
+            ? .easeOut(duration: 0.12)
+            : .snappy(duration: 0.28)
     }
 
     private var navigationTitle: String {

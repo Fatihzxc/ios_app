@@ -18,6 +18,9 @@ enum AppUITestScenario: String {
     case deloadReactive = "deload-reactive"
     case phaseTransition = "phase-transition"
     case trainingHistory = "training-history"
+    case m1AcceptanceCatalog = "m1-acceptance-catalog"
+    case m1PRBaseline = "m1-pr-baseline"
+    case m1PRNew = "m1-pr-new"
     case todayTrain = "today-train"
     case todayRest = "today-rest"
     case todayResume = "today-resume"
@@ -30,6 +33,8 @@ enum AppUITestScenario: String {
 }
 
 struct AppUITestLaunchConfiguration {
+    static let launchPerformanceEvidenceFlag = "-ui-test-launch-performance-evidence"
+
     enum Appearance: String {
         case light
         case dark
@@ -45,13 +50,15 @@ struct AppUITestLaunchConfiguration {
     let scenario: AppUITestScenario
     let appearance: Appearance
     let persistentStoreIdentifier: UUID?
+    let exposesLaunchPerformanceEvidence: Bool
 
     static func resolve(arguments: [String] = ProcessInfo.processInfo.arguments) -> Self? {
         guard arguments.filter({ $0 == "-ui-testing" }).count == 1,
               let scenarioValue = uniqueValue(after: "-ui-test-scenario", in: arguments),
               let scenario = AppUITestScenario(rawValue: scenarioValue),
               let appearanceValue = uniqueValue(after: "-ui-test-appearance", in: arguments),
-              let appearance = Appearance(rawValue: appearanceValue) else {
+              let appearance = Appearance(rawValue: appearanceValue),
+              arguments.filter({ $0 == launchPerformanceEvidenceFlag }).count <= 1 else {
             return nil
         }
 
@@ -69,7 +76,10 @@ struct AppUITestLaunchConfiguration {
         return Self(
             scenario: scenario,
             appearance: appearance,
-            persistentStoreIdentifier: persistentStoreIdentifier
+            persistentStoreIdentifier: persistentStoreIdentifier,
+            exposesLaunchPerformanceEvidence: arguments.contains(
+                launchPerformanceEvidenceFlag
+            )
         )
     }
 

@@ -7,6 +7,7 @@ public struct PrimaryActionButton: View {
     private let accessibilityLabel: String
     private let isLoading: Bool
     private let isEnabled: Bool
+    private let minimumHeight: CGFloat
     private let action: () -> Void
 
     public init(
@@ -14,12 +15,14 @@ public struct PrimaryActionButton: View {
         accessibilityLabel: String,
         isLoading: Bool = false,
         isEnabled: Bool = true,
+        minimumHeight: CGFloat = 44,
         action: @escaping () -> Void
     ) {
         self.title = title
         self.accessibilityLabel = accessibilityLabel
         self.isLoading = isLoading
         self.isEnabled = isEnabled
+        self.minimumHeight = minimumHeight
         self.action = action
     }
 
@@ -34,12 +37,12 @@ public struct PrimaryActionButton: View {
                     .font(AppTypography.label)
                     .multilineTextAlignment(.center)
             }
-            .frame(maxWidth: .infinity, minHeight: 44)
+            .frame(maxWidth: .infinity, minHeight: minimumHeight)
         }
         .buttonStyle(.plain)
         .foregroundStyle(AppColors.color(.accentOnAction, scheme: colorScheme))
         .padding(.horizontal, AppSpacing.comfortable)
-        .frame(minWidth: 44, minHeight: 44)
+        .frame(minWidth: minimumHeight, minHeight: minimumHeight)
         .background(AppColors.color(.accentAction, scheme: colorScheme))
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.action, style: .continuous))
         .opacity(isEnabled && !isLoading ? 1.0 : 0.55)

@@ -52,7 +52,8 @@ public struct DeloadRecommendationView: View {
 
                 PrimaryActionButton(
                     title: localized("session.deload.action.accept"),
-                    accessibilityLabel: localized("session.deload.action.accept")
+                    accessibilityLabel: localized("session.deload.action.accept"),
+                    minimumHeight: 52
                 ) {
                     respond(.accepted)
                 }
