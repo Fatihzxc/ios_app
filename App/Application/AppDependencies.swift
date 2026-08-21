@@ -26,10 +26,23 @@ final class AppDependencies: AppDependencyLoading {
     private let hapticControllerReference: TrainingHapticControllerReference
     let trainingRepository: any TrainingRepository
     let todayViewModel: TodayViewModel
-    let foundationViewModel: FoundationProgramViewModel
-    let phaseTransitionViewModel: PhaseTransitionViewModel
-    let trainingHistoryViewModel: TrainingHistoryViewModel
-    let makeSessionViewModel: @MainActor () -> SessionViewModel
+    private lazy var deferredTrainingDependencies = DeferredTrainingDependencies(
+        repository: trainingRepository,
+        todayViewModel: todayViewModel,
+        hapticControllerReference: hapticControllerReference
+    )
+    var foundationViewModel: FoundationProgramViewModel {
+        deferredTrainingDependencies.foundationViewModel
+    }
+    var phaseTransitionViewModel: PhaseTransitionViewModel {
+        deferredTrainingDependencies.phaseTransitionViewModel
+    }
+    var trainingHistoryViewModel: TrainingHistoryViewModel {
+        deferredTrainingDependencies.trainingHistoryViewModel
+    }
+    var makeSessionViewModel: @MainActor () -> SessionViewModel {
+        deferredTrainingDependencies.makeSessionViewModel
+    }
     lazy var nutritionRepository: any NutritionRepository = SwiftDataNutritionRepository(
         modelContext: mainContext
     )
@@ -153,33 +166,13 @@ final class AppDependencies: AppDependencyLoading {
         shouldLoadFoundation = true
         #endif
 
-        let todayModel = TodayViewModel(
+        todayViewModel = TodayViewModel(
             repository: trainingRepository,
             launchStartedAt: AppLaunchPerformance.startedAt,
             onFirstMeaningfulContent: { elapsed in
                 AppLaunchPerformance.finish(elapsed)
             }
         )
-        let foundationModel = FoundationProgramViewModel(repository: trainingRepository)
-        let phaseModel = PhaseTransitionViewModel(repository: trainingRepository)
-        todayViewModel = todayModel
-        foundationViewModel = foundationModel
-        phaseTransitionViewModel = phaseModel
-        trainingHistoryViewModel = TrainingHistoryViewModel(
-            repository: trainingRepository,
-            onHistoryChanged: { [weak todayModel, weak foundationModel, weak phaseModel] in
-                await todayModel?.load()
-                await foundationModel?.load()
-                await phaseModel?.load()
-            }
-        )
-        let sessionRepository = trainingRepository
-        makeSessionViewModel = {
-            SessionViewModel(
-                repository: sessionRepository,
-                haptics: hapticControllerReference.value
-            )
-        }
 
         #if DEBUG
         let scenario = environment == .uiTesting
@@ -342,6 +335,40 @@ final class AppDependencyPrewarmer {
 @MainActor
 private final class TrainingHapticControllerReference {
     var value: TrainingHapticController?
+}
+
+@MainActor
+private final class DeferredTrainingDependencies {
+    let foundationViewModel: FoundationProgramViewModel
+    let phaseTransitionViewModel: PhaseTransitionViewModel
+    let trainingHistoryViewModel: TrainingHistoryViewModel
+    let makeSessionViewModel: @MainActor () -> SessionViewModel
+
+    init(
+        repository: any TrainingRepository,
+        todayViewModel: TodayViewModel,
+        hapticControllerReference: TrainingHapticControllerReference
+    ) {
+        let foundationViewModel = FoundationProgramViewModel(repository: repository)
+        let phaseTransitionViewModel = PhaseTransitionViewModel(repository: repository)
+        self.foundationViewModel = foundationViewModel
+        self.phaseTransitionViewModel = phaseTransitionViewModel
+        trainingHistoryViewModel = TrainingHistoryViewModel(
+            repository: repository,
+            onHistoryChanged: {
+                [weak todayViewModel, weak foundationViewModel, weak phaseTransitionViewModel] in
+                await todayViewModel?.load()
+                await foundationViewModel?.load()
+                await phaseTransitionViewModel?.load()
+            }
+        )
+        makeSessionViewModel = {
+            SessionViewModel(
+                repository: repository,
+                haptics: hapticControllerReference.value
+            )
+        }
+    }
 }
 
 #if DEBUG
