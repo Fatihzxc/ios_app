@@ -36,15 +36,21 @@ if package.is_file():
         package_text,
         re.S,
     )
-    required_guidance_targets = [("target", "GuidanceKit"), ("testTarget", "GuidanceKitTests")]
-    missing_guidance_targets = [
+    required_module_targets = [
+        ("target", "GuidanceKit"),
+        ("testTarget", "GuidanceKitTests"),
+        ("target", "NutritionKit"),
+        ("testTarget", "NutritionKitTests"),
+    ]
+    missing_module_targets = [
         declaration
-        for declaration in required_guidance_targets
+        for declaration in required_module_targets
         if declaration not in target_declarations
     ]
-    if missing_guidance_targets:
+    if missing_module_targets:
         errors.append(
-            f"Package must declare GuidanceKit library/test targets; missing {missing_guidance_targets}"
+            f"Package must declare GuidanceKit and NutritionKit library/test targets; "
+            f"missing {missing_module_targets}"
         )
 
 model_directory = root / "Packages/HealthTrackingModules/Sources/CoreModels/Models"
@@ -161,7 +167,7 @@ if project.is_file():
     ]
     expected_package_test_targets = [
         "CoreModelsTests", "GuidanceKitTests", "PersistenceKitTests", "TrainingKitTests",
-        "DesignSystemTests",
+        "DesignSystemTests", "NutritionKitTests",
     ]
     if local_package_test_targets != expected_package_test_targets:
         errors.append(

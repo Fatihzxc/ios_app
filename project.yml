@@ -81,6 +81,7 @@ schemes:
         - package: HealthTrackingModules/PersistenceKitTests
         - package: HealthTrackingModules/TrainingKitTests
         - package: HealthTrackingModules/DesignSystemTests
+        - package: HealthTrackingModules/NutritionKitTests
     archive:
       config: Release
   HealthTrackingApp-Cloud:
