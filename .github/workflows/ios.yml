@@ -78,7 +78,9 @@ jobs:
 
       - name: Test iOS app
         timeout-minutes: 50
-        run: scripts/test-ios.sh
+        # The dedicated test-cold-launch job owns this noisy performance gate.
+        # Keep the complete functional suite here without executing it twice.
+        run: scripts/test-ios.sh --skip-testing HealthTrackingAppUITests/TodayGuidanceUITests/testColdLaunchPublishesFirstMeaningfulDirectiveWithinOneSecondMedian
 
       - name: Export screenshot evidence
         timeout-minutes: 10

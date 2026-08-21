@@ -14,7 +14,7 @@ cloud_compile_only=false
 bootstrap_idempotence_only=false
 
 usage() {
-    echo "Usage: $0 [--only-testing TestBundleName|--cloud-compile-only|--verify-bootstrap-idempotence]" >&2
+    echo "Usage: $0 [--only-testing TestBundleName|--skip-testing TestIdentifier|--cloud-compile-only|--verify-bootstrap-idempotence]" >&2
 }
 
 if (( $# > 0 )); then
@@ -25,6 +25,13 @@ if (( $# > 0 )); then
                 exit 2
             fi
             xcodebuild_test_arguments+=("-only-testing:$2")
+            ;;
+        --skip-testing)
+            if (( $# != 2 )) || [[ -z "$2" ]]; then
+                usage
+                exit 2
+            fi
+            xcodebuild_test_arguments+=("-skip-testing:$2")
             ;;
         --cloud-compile-only)
             if (( $# != 1 )); then
