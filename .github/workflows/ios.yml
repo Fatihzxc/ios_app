@@ -136,7 +136,28 @@ jobs:
               for appearance in ["light", "dark"]
               for size in ["standard", "accessibility"]
           }
-          expected = shell_expected | gallery_expected | accessibility_expected | today_expected
+          training_accessibility_expected = {
+              f"m1-session-{appearance}-{size}"
+              for appearance in ["light", "dark"]
+              for size in ["default", "xxl", "ax3", "ax5"]
+          } | {
+              "m1-session-reduce-motion",
+              "m1-session-high-contrast",
+          }
+          m1_acceptance_expected = {
+              "m1-acceptance-catalog",
+              "m1-acceptance-progression-safety",
+              "m1-acceptance-personal-records",
+              "m1-acceptance-haptics-disabled",
+          }
+          expected = (
+              shell_expected
+              | gallery_expected
+              | accessibility_expected
+              | today_expected
+              | training_accessibility_expected
+              | m1_acceptance_expected
+          )
 
           owners = {
               "AppShellUITests": {
@@ -154,6 +175,14 @@ jobs:
               "TodayGuidanceUITests": {
                   "module": "HealthTrackingAppUITests",
                   "expected": today_expected,
+              },
+              "TrainingAccessibilityUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": training_accessibility_expected,
+              },
+              "M1AcceptanceUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": m1_acceptance_expected,
               },
           }
 
@@ -315,5 +344,108 @@ jobs:
           path: |
             .build/**/*.xcresult
             .build/gallery-screenshots/**
+          include-hidden-files: true
+          if-no-files-found: warn
+
+  test-small-phone:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install compatible XcodeGen
+        run: |
+          required_version="2.46.0"
+          version_at_least() {
+            local actual="$1"
+            local required="$2"
+            local actual_major actual_minor actual_patch required_major required_minor required_patch
+            IFS=. read -r actual_major actual_minor actual_patch <<< "$actual"
+            IFS=. read -r required_major required_minor required_patch <<< "$required"
+            actual_minor="${actual_minor:-0}"
+            actual_patch="${actual_patch:-0}"
+            required_minor="${required_minor:-0}"
+            required_patch="${required_patch:-0}"
+            (( actual_major > required_major )) ||
+              (( actual_major == required_major && actual_minor > required_minor )) ||
+              (( actual_major == required_major && actual_minor == required_minor && actual_patch >= required_patch ))
+          }
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          version_output="$(xcodegen --version)"
+          version="$(printf '%s\n' "$version_output" | grep -Eo '[0-9]+(\.[0-9]+){1,2}' | head -n 1)"
+          if [[ -z "$version" ]] || ! version_at_least "$version" "$required_version"; then
+            brew upgrade xcodegen
+          fi
+          xcodegen --version
+
+      - name: Test M1 on small iPhone at AX5
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          scripts/bootstrap.sh
+          destination="$(scripts/select-simulator.sh --small)"
+          result_bundle=".build/HealthTrackingApp-small.xcresult"
+          rm -rf "$result_bundle"
+          xcodebuild test \
+            -project HealthTrackingApp.xcodeproj \
+            -scheme HealthTrackingApp-Local \
+            -destination "$destination" \
+            -resultBundlePath "$result_bundle" \
+            -only-testing:HealthTrackingAppUITests/TrainingAccessibilityUITests/testSmallPhoneAX5SessionRemainsOperable \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Export small-phone screenshot evidence
+        if: success()
+        run: |
+          set -euo pipefail
+          result_bundle=".build/HealthTrackingApp-small.xcresult"
+          export_directory=".build/small-phone-screenshots"
+          rm -rf "$export_directory"
+          mkdir -p "$export_directory"
+          xcrun xcresulttool export attachments \
+            --path "$result_bundle" \
+            --output-path "$export_directory"
+          python3 - "$export_directory" <<'PY'
+          import json
+          import shutil
+          import sys
+          from pathlib import Path
+
+          export_directory = Path(sys.argv[1])
+          manifest = json.loads((export_directory / "manifest.json").read_text())
+          matches = []
+          for record in manifest:
+              identifier = record.get("testIdentifier", "")
+              if "TrainingAccessibilityUITests" not in identifier:
+                  continue
+              for attachment in record.get("attachments", []):
+                  suggested = attachment.get("suggestedHumanReadableName", "").lower()
+                  if suggested == "m1-session-small-ax5" or suggested.startswith(
+                      "m1-session-small-ax5_"
+                  ):
+                      matches.append(attachment["exportedFileName"])
+          if len(matches) != 1:
+              raise SystemExit(
+                  f"Expected one m1-session-small-ax5 screenshot; found {matches}"
+              )
+          source = export_directory / matches[0]
+          if source.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+              raise SystemExit(f"Unsupported small-phone screenshot: {source}")
+          shutil.copyfile(
+              source,
+              export_directory / f"m1-session-small-ax5{source.suffix.lower()}",
+          )
+          PY
+
+      - name: Upload small-phone test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HealthTrackingApp-small-phone-xcresult
+          path: |
+            .build/HealthTrackingApp-small.xcresult
+            .build/small-phone-screenshots/**
           include-hidden-files: true
           if-no-files-found: warn

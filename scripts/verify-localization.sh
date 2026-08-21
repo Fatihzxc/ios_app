@@ -132,6 +132,8 @@ hint_contracts = [
     ("Packages/HealthTrackingModules/Sources/SettingsKit/Foundation/SettingsFoundationView.swift", "Packages/HealthTrackingModules/Sources/SettingsKit/Resources", "settings.gallery.hint", '.accessibilityIdentifier("settings.gallery-link")', 200, True),
     ("Packages/HealthTrackingModules/Sources/TrainingKit/Foundation/FoundationProgramView.swift", "Packages/HealthTrackingModules/Sources/TrainingKit/Resources", "foundation.empty.hint", '.accessibilityIdentifier("foundation.state.empty")', 260, True),
     ("Packages/HealthTrackingModules/Sources/TrainingKit/Foundation/FoundationProgramView.swift", "Packages/HealthTrackingModules/Sources/TrainingKit/Resources", "foundation.error.hint", '.accessibilityIdentifier("foundation.state.error")', 260, True),
+    ("Packages/HealthTrackingModules/Sources/TrainingKit/Session/SetEntryBar.swift", "Packages/HealthTrackingModules/Sources/TrainingKit/Resources", "session.set.save.hint", '.accessibilityIdentifier("session.set.save")', 240, True),
+    ("Packages/HealthTrackingModules/Sources/TrainingKit/Session/ExerciseStageView.swift", "Packages/HealthTrackingModules/Sources/TrainingKit/Resources", "session.exercise.next.hint", '.accessibilityIdentifier("session.exercise.next")', 240, True),
     ("Packages/HealthTrackingModules/Sources/DesignSystem/Gallery/DesignSystemGalleryView.swift", "Packages/HealthTrackingModules/Sources/DesignSystem/Resources", "designSystem.gallery.actionHint", 'isEnabled: false,', 240, True),
     ("Packages/HealthTrackingModules/Sources/DesignSystem/Gallery/DesignSystemGalleryView.swift", "Packages/HealthTrackingModules/Sources/DesignSystem/Resources", "designSystem.gallery.emptyActionHint", 'actionFeedback = String(localized: "designSystem.gallery.emptyActionConfirmation", bundle: .module)', 320, True),
     ("Packages/HealthTrackingModules/Sources/DesignSystem/Gallery/DesignSystemGalleryView.swift", "Packages/HealthTrackingModules/Sources/DesignSystem/Resources", "designSystem.gallery.retryHint", 'actionFeedback = String(localized: "designSystem.gallery.retryConfirmation", bundle: .module)', 320, True),
@@ -211,7 +213,12 @@ for module, source_name, keys in [
     if module == 'DesignSystem':
         catalog_keys += ['designSystem.gallery.emptyActionConfirmation', 'designSystem.gallery.retryConfirmation']
     if module == 'TrainingKit':
-        catalog_keys += ['today.empty.hint', 'today.error.hint']
+        catalog_keys += [
+            'today.empty.hint',
+            'today.error.hint',
+            'session.set.save.hint',
+            'session.exercise.next.hint',
+        ]
     (resources / 'Localizable.xcstrings').write_text('{"sourceLanguage":"tr","strings":{' + ','.join(f'"{key}":{{"localizations":{{"tr":{{"stringUnit":{{"state":"translated","value":"İpucu"}}}}}}}}' for key in catalog_keys) + '}}')
     source = path / f'Packages/HealthTrackingModules/Sources/{module}/{source_name}'
     source.parent.mkdir(parents=True, exist_ok=True)
@@ -230,6 +237,15 @@ today_source.write_text('''.accessibilityIdentifier("today.state.empty")
 .accessibilityHint(String(localized: "today.empty.hint", bundle: .module))
 .accessibilityIdentifier("today.state.error")
 .accessibilityHint(String(localized: "today.error.hint", bundle: .module))
+''')
+set_entry_source = path / 'Packages/HealthTrackingModules/Sources/TrainingKit/Session/SetEntryBar.swift'
+set_entry_source.parent.mkdir(parents=True, exist_ok=True)
+set_entry_source.write_text('''.accessibilityIdentifier("session.set.save")
+.accessibilityHint(String(localized: "session.set.save.hint", bundle: .module))
+''')
+exercise_source = path / 'Packages/HealthTrackingModules/Sources/TrainingKit/Session/ExerciseStageView.swift'
+exercise_source.write_text('''.accessibilityIdentifier("session.exercise.next")
+.accessibilityHint(String(localized: "session.exercise.next.hint", bundle: .module))
 ''')
 PY
     verify_repo "$fixture"
@@ -301,6 +317,12 @@ PY
     if verify_repo "$fixture" >"$fixture/today-hint.out" 2>&1; then echo "Localization self-test expected a missing Today empty-state hint failure." >&2; return 1; fi
     grep -Fq "Missing localized accessibilityHint for 'today.empty.hint' on its intended control in Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift" "$fixture/today-hint.out"
     mv "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.valid.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift"
+
+    cp "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SetEntryBar.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SetEntryBar.valid.swift"
+    printf '%s\n' '.accessibilityIdentifier("session.set.save")' '.accessibilityHint(unrelatedHint)' > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SetEntryBar.swift"
+    if verify_repo "$fixture" >"$fixture/session-save-hint.out" 2>&1; then echo "Localization self-test expected a missing session save hint failure." >&2; return 1; fi
+    grep -Fq "Missing localized accessibilityHint for 'session.set.save.hint' on its intended control" "$fixture/session-save-hint.out"
+    mv "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SetEntryBar.valid.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SetEntryBar.swift"
 
     cp "$fixture/App/Application/AppTab.swift" "$fixture/App/Application/AppTab.valid.swift"
     python3 - "$fixture/App/Application/AppTab.swift" <<'PY'

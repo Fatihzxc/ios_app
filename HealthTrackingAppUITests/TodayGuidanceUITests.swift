@@ -27,39 +27,32 @@ final class TodayGuidanceUITests: XCTestCase {
     private struct DirectiveEvidence {
         let scenario: String
         let name: String
-        let identifier: String
     }
 
     private let evidence = [
         DirectiveEvidence(
             scenario: "today-train",
-            name: "train",
-            identifier: "today.directive.train"
+            name: "train"
         ),
         DirectiveEvidence(
             scenario: "today-rest",
-            name: "rest",
-            identifier: "today.directive.rest"
+            name: "rest"
         ),
         DirectiveEvidence(
             scenario: "today-resume",
-            name: "resume",
-            identifier: "today.directive.resume"
+            name: "resume"
         ),
         DirectiveEvidence(
             scenario: "today-deload",
-            name: "deload",
-            identifier: "today.alert.deload"
+            name: "deload"
         ),
         DirectiveEvidence(
             scenario: "today-phase",
-            name: "phase",
-            identifier: "today.alert.phase"
+            name: "phase"
         ),
         DirectiveEvidence(
             scenario: "today-reminder",
-            name: "reminder",
-            identifier: "today.alert.bloodwork"
+            name: "reminder"
         ),
     ]
 
@@ -80,28 +73,20 @@ final class TodayGuidanceUITests: XCTestCase {
                         identified("root.today.content", in: app),
                         "Every Today evidence fixture must publish meaningful content."
                     )
-                    let evidenceElement = require(
-                        identified(item.identifier, in: app),
-                        "The \(item.name) fixture must expose \(item.identifier)."
+                    let summary = require(
+                        identified("today.accessibility.summary", in: app),
+                        "Every directive class must combine phase, directive and context for VoiceOver."
                     )
-                    XCTAssertFalse(evidenceElement.label.isEmpty)
-                    let phase = require(
-                        identified("today.phase", in: app),
-                        "Every directive class must expose the active phase line."
-                    )
-                    let context = require(
-                        identified("today.directive.context", in: app),
-                        "Every directive class must explain its context."
-                    )
+                    XCTAssertFalse(summary.label.isEmpty)
                     let primaryAction = require(
                         app.buttons["today.action.primary"],
                         "Every directive class needs one real primary action."
                     )
                     if textSize == .standard {
-                        for element in [phase, evidenceElement, context, primaryAction] {
+                        for element in [summary, primaryAction] {
                             XCTAssertTrue(
                                 element.isHittable,
-                                "Phase, directive, context, alert and action must stay in the first default-Type viewport."
+                                "The Today summary and action must stay in the first default-Type viewport."
                             )
                             XCTAssertTrue(app.frame.contains(element.frame))
                         }

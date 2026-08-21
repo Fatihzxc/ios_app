@@ -199,9 +199,152 @@ if not (root / "README.md").is_file():
 if not (root / "docs/evidence/M0/acceptance.md").is_file():
     errors.append("Missing required M0 acceptance evidence: docs/evidence/M0/acceptance.md")
 
+def require_text_contract(relative_path, required_tokens):
+    path = root / relative_path
+    if not path.is_file():
+        errors.append(f"Missing required M1 acceptance file: {relative_path}")
+        return ""
+    text = path.read_text(encoding="utf-8")
+    missing_tokens = [token for token in required_tokens if token not in text]
+    if missing_tokens:
+        errors.append(
+            f"M1 contract {relative_path} is missing required tokens: {missing_tokens}"
+        )
+    return text
+
+m1_acceptance = require_text_contract(
+    "HealthTrackingAppUITests/M1AcceptanceUITests.swift",
+    [
+        "testWeekABCAndAllTwentySevenSeedExercisesPublishMeasurementAndSafety",
+        "testMissingRIRAndUnansweredOHPCannotPublishAnIncrease",
+        "testFirstPerformanceIsBaselineAndOnlyARealImprovementIsPresentedAsPR",
+        "testHapticKillSwitchPersistsAcrossRelaunch",
+        "m1-acceptance-catalog",
+        "m1-acceptance-progression-safety",
+        "m1-acceptance-personal-records",
+        "m1-acceptance-haptics-disabled",
+    ],
+)
+expected_m1_exercises = [
+    "Goblet Squat", "Chin-up", "DB Floor Press", "DB Romanian Deadlift",
+    "Prone Y-T-W", "Face Pull (bant)", "Tek Bacak Calf Raise", "Plank / Pallof",
+    "DB RDL (çift)", "Tek Kol DB Row", "Push-up", "DB Overhead Press",
+    "Bulgarian Split Squat", "Glute Bridge / Hip Thrust", "Wall Slide", "Dead Bug",
+    "Copenhagen Plank", "Reverse Lunge (DB)", "Nordic Hamstring Curl",
+    "Pull-up / bantlı", "Bantlı / Tek Kol Row", "Half-Kneeling DB Press",
+    "DB Lateral Raise", "Farmer's Carry", "Curl", "Triceps", "Side Plank / Pallof",
+]
+missing_exercises = [name for name in expected_m1_exercises if name not in m1_acceptance]
+if missing_exercises:
+    errors.append(
+        f"M1 acceptance UI inventory must name all 27 exact seed exercises; missing {missing_exercises}"
+    )
+
+require_text_contract(
+    "HealthTrackingAppUITests/TrainingAccessibilityUITests.swift",
+    [
+        "testVoiceOverOrderValuesActionsAndFiftyTwoPointSessionTargets",
+        "testLightDarkAndDynamicTypeMatrixPassesSessionAudit",
+        "testReduceMotionAndHighContrastFlowsRemainOperable",
+        "testSmallPhoneAX5SessionRemainsOperable",
+        "UICTContentSizeCategoryXXL",
+        "UICTContentSizeCategoryAccessibilityXL",
+        "UICTContentSizeCategoryAccessibilityXXXL",
+        "performAccessibilityAudit",
+    ],
+)
+require_text_contract(
+    ".github/workflows/ios.yml",
+    [
+        "training_accessibility_expected",
+        "m1_acceptance_expected",
+        "test-small-phone",
+        "scripts/select-simulator.sh --small",
+        "m1-session-small-ax5",
+        "HealthTrackingApp-small-phone-xcresult",
+    ],
+)
+require_text_contract(
+    "scripts/select-simulator.sh",
+    ["--small", "iPhone SE (3rd generation)", "iPhone 13 mini"],
+)
+require_text_contract(
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift",
+    ["today.accessibility.summary", ".accessibilityElement(children: .combine)"],
+)
+require_text_contract(
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/SetEntryBar.swift",
+    [
+        "@Environment(\\.dynamicTypeSize)",
+        ".accessibility3",
+        "minWidth: 52",
+        "minHeight: 52",
+        "session.set.save.hint",
+    ],
+)
+require_text_contract(
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/TrainingSessionView.swift",
+    ["@Environment(\\.accessibilityReduceMotion)", ".transition(", "0.12"],
+)
+for stage_file in [
+    "WarmupStageView.swift",
+    "ExerciseStageView.swift",
+    "CooldownStageView.swift",
+    "SessionSummaryView.swift",
+]:
+    required = ["@AccessibilityFocusState", ".accessibilityFocused("]
+    if stage_file == "ExerciseStageView.swift":
+        required.append("session.exercise.next.hint")
+    require_text_contract(
+        f"Packages/HealthTrackingModules/Sources/TrainingKit/Session/{stage_file}",
+        required,
+    )
+require_text_contract(
+    "App/Support/AppUITestLaunchConfiguration.swift",
+    ["m1AcceptanceCatalog", "m1PRBaseline", "m1PRNew"],
+)
+require_text_contract(
+    "App/Application/AppDependencies.swift",
+    ["installM1AcceptanceCatalog", "installM1PersonalRecord"],
+)
+require_text_contract(
+    "README.md",
+    ["## M1 training", "M1.16"],
+)
+if not (root / "docs/evidence/M1/acceptance.md").is_file():
+    errors.append("Missing required M1 acceptance evidence: docs/evidence/M1/acceptance.md")
+
+coverage_contracts = {
+    "HealthTrackingAppUITests/TrainingSessionFlowUITests.swift": [
+        "testGuidedOrderTapBudgetsSafetyAndOptionalSummary",
+        "testResumeRestoresTheSameMovementAcrossRelaunch",
+        "testMissingRIRHistoryNeverDisplaysALoadIncrease",
+    ],
+    "HealthTrackingAppUITests/OHPSafetyFlowUITests.swift": [
+        "testPriorQuestionPrecedesWarmupAndCurrentSymptomsRouteToHalfKneeling",
+    ],
+    "HealthTrackingAppUITests/DeloadFlowUITests.swift": [
+        "testScheduledWeekShowsVisibleWarningAndAcceptedDeloadLoad",
+        "testReactiveTechniqueReviewSuppressesOnlyTheCurrentWeekWithoutMutation",
+    ],
+    "HealthTrackingAppUITests/PhaseTransitionFlowUITests.swift": [
+        "testStayKeepsChecklistAccessibleThenExplicitAndManualSelectionsPersist",
+    ],
+    "HealthTrackingAppUITests/TrainingHistoryUITests.swift": [
+        "testHistoryEditDeleteAndMissingTemplateRecoveryUseRealRoutes",
+    ],
+    "Packages/HealthTrackingModules/Tests/TrainingKitTests/TrainingHapticControllerTests.swift": [
+        "testSemanticEventsMapToExactFeedbackAndConditionalSuccessStaysSilent",
+        "testSelectionUsesInjectedMonotonicClockAndOneHundredMillisecondThrottle",
+        "testKillSwitchPersistsAcrossControllerReconstruction",
+    ],
+}
+for relative_path, tokens in coverage_contracts.items():
+    require_text_contract(relative_path, tokens)
+
 if errors:
     raise SystemExit("\n".join(errors))
-print("M0 requirements verification passed.")
+print("M0/M1 requirements verification passed.")
 PY
 }
 
@@ -209,16 +352,136 @@ self_test() {
     self_test_fixture="$(mktemp -d)"
     trap 'rm -rf -- "$self_test_fixture"' EXIT
     local fixture="$self_test_fixture"
-    mkdir -p "$fixture/Packages/HealthTrackingModules/Sources/CoreModels/Models" "$fixture/Packages/HealthTrackingModules/Sources/GuidanceKit" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit" "$fixture/App" "$fixture/docs/evidence/M0"
+    mkdir -p "$fixture/Packages/HealthTrackingModules/Sources/CoreModels/Models" "$fixture/Packages/HealthTrackingModules/Sources/GuidanceKit" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit" "$fixture/App" "$fixture/docs/evidence/M0" "$fixture/docs/evidence/M1"
     cp "$repo_root/Packages/HealthTrackingModules/Package.swift" "$fixture/Packages/HealthTrackingModules/Package.swift"
     cp "$repo_root/project.yml" "$fixture/project.yml"
     cp "$repo_root/.gitignore" "$fixture/.gitignore"
     git -C "$fixture" init --quiet
-    touch "$fixture/README.md" "$fixture/docs/evidence/M0/acceptance.md"
+    touch "$fixture/docs/evidence/M0/acceptance.md" "$fixture/docs/evidence/M1/acceptance.md"
     for model in AppReminder AppSetting BloodworkResult BodyMetric CooldownItem DailyNutritionLog ExerciseTemplate Food HealthCheckReminder MealEntry MoodLog PostureMetric Program ProgramPhase ProgramState ProgressPhoto Recipe SetLog SleepLog UserProfile WarmupItem WorkoutDayTemplate WorkoutSession WorkoutSessionProgress; do
         printf '@Model\npublic final class %s {}\n' "$model" > "$fixture/Packages/HealthTrackingModules/Sources/CoreModels/Models/$model.swift"
     done
+    python3 - "$fixture" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+exercise_names = [
+    "Goblet Squat", "Chin-up", "DB Floor Press", "DB Romanian Deadlift",
+    "Prone Y-T-W", "Face Pull (bant)", "Tek Bacak Calf Raise", "Plank / Pallof",
+    "DB RDL (çift)", "Tek Kol DB Row", "Push-up", "DB Overhead Press",
+    "Bulgarian Split Squat", "Glute Bridge / Hip Thrust", "Wall Slide", "Dead Bug",
+    "Copenhagen Plank", "Reverse Lunge (DB)", "Nordic Hamstring Curl",
+    "Pull-up / bantlı", "Bantlı / Tek Kol Row", "Half-Kneeling DB Press",
+    "DB Lateral Raise", "Farmer's Carry", "Curl", "Triceps", "Side Plank / Pallof",
+]
+contracts = {
+    "README.md": ["## M1 training", "M1.16"],
+    "HealthTrackingAppUITests/M1AcceptanceUITests.swift": [
+        "testWeekABCAndAllTwentySevenSeedExercisesPublishMeasurementAndSafety",
+        "testMissingRIRAndUnansweredOHPCannotPublishAnIncrease",
+        "testFirstPerformanceIsBaselineAndOnlyARealImprovementIsPresentedAsPR",
+        "testHapticKillSwitchPersistsAcrossRelaunch",
+        "m1-acceptance-catalog",
+        "m1-acceptance-progression-safety",
+        "m1-acceptance-personal-records",
+        "m1-acceptance-haptics-disabled",
+        *exercise_names,
+    ],
+    "HealthTrackingAppUITests/TrainingAccessibilityUITests.swift": [
+        "testVoiceOverOrderValuesActionsAndFiftyTwoPointSessionTargets",
+        "testLightDarkAndDynamicTypeMatrixPassesSessionAudit",
+        "testReduceMotionAndHighContrastFlowsRemainOperable",
+        "testSmallPhoneAX5SessionRemainsOperable",
+        "UICTContentSizeCategoryXXL",
+        "UICTContentSizeCategoryAccessibilityXL",
+        "UICTContentSizeCategoryAccessibilityXXXL",
+        "performAccessibilityAudit",
+    ],
+    ".github/workflows/ios.yml": [
+        "training_accessibility_expected",
+        "m1_acceptance_expected",
+        "test-small-phone",
+        "scripts/select-simulator.sh --small",
+        "m1-session-small-ax5",
+        "HealthTrackingApp-small-phone-xcresult",
+    ],
+    "scripts/select-simulator.sh": [
+        "--small", "iPhone SE (3rd generation)", "iPhone 13 mini",
+    ],
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift": [
+        "today.accessibility.summary", ".accessibilityElement(children: .combine)",
+    ],
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/SetEntryBar.swift": [
+        "@Environment(\\.dynamicTypeSize)", ".accessibility3", "minWidth: 52",
+        "minHeight: 52", "session.set.save.hint",
+    ],
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/TrainingSessionView.swift": [
+        "@Environment(\\.accessibilityReduceMotion)", ".transition(", "0.12",
+    ],
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/WarmupStageView.swift": [
+        "@AccessibilityFocusState", ".accessibilityFocused(",
+    ],
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/ExerciseStageView.swift": [
+        "@AccessibilityFocusState", ".accessibilityFocused(", "session.exercise.next.hint",
+    ],
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/CooldownStageView.swift": [
+        "@AccessibilityFocusState", ".accessibilityFocused(",
+    ],
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionSummaryView.swift": [
+        "@AccessibilityFocusState", ".accessibilityFocused(",
+    ],
+    "App/Support/AppUITestLaunchConfiguration.swift": [
+        "m1AcceptanceCatalog", "m1PRBaseline", "m1PRNew",
+    ],
+    "App/Application/AppDependencies.swift": [
+        "installM1AcceptanceCatalog", "installM1PersonalRecord",
+    ],
+    "HealthTrackingAppUITests/TrainingSessionFlowUITests.swift": [
+        "testGuidedOrderTapBudgetsSafetyAndOptionalSummary",
+        "testResumeRestoresTheSameMovementAcrossRelaunch",
+        "testMissingRIRHistoryNeverDisplaysALoadIncrease",
+    ],
+    "HealthTrackingAppUITests/OHPSafetyFlowUITests.swift": [
+        "testPriorQuestionPrecedesWarmupAndCurrentSymptomsRouteToHalfKneeling",
+    ],
+    "HealthTrackingAppUITests/DeloadFlowUITests.swift": [
+        "testScheduledWeekShowsVisibleWarningAndAcceptedDeloadLoad",
+        "testReactiveTechniqueReviewSuppressesOnlyTheCurrentWeekWithoutMutation",
+    ],
+    "HealthTrackingAppUITests/PhaseTransitionFlowUITests.swift": [
+        "testStayKeepsChecklistAccessibleThenExplicitAndManualSelectionsPersist",
+    ],
+    "HealthTrackingAppUITests/TrainingHistoryUITests.swift": [
+        "testHistoryEditDeleteAndMissingTemplateRecoveryUseRealRoutes",
+    ],
+    "Packages/HealthTrackingModules/Tests/TrainingKitTests/TrainingHapticControllerTests.swift": [
+        "testSemanticEventsMapToExactFeedbackAndConditionalSuccessStaysSilent",
+        "testSelectionUsesInjectedMonotonicClockAndOneHundredMillisecondThrottle",
+        "testKillSwitchPersistsAcrossControllerReconstruction",
+    ],
+}
+for relative, tokens in contracts.items():
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(tokens) + "\n", encoding="utf-8")
+PY
     verify_repo "$fixture"
+    cp "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.valid.swift"
+    sed '/today\.accessibility\.summary/d' "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.valid.swift" > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift"
+    if verify_repo "$fixture" >"$fixture/m1-today-summary.out" 2>&1; then
+        echo "Requirements self-test expected a missing M1 Today summary contract failure." >&2
+        return 1
+    fi
+    grep -Fq 'M1 contract Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift is missing required tokens' "$fixture/m1-today-summary.out"
+    mv "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.valid.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift"
+    mv "$fixture/docs/evidence/M1/acceptance.md" "$fixture/docs/evidence/M1/acceptance.valid.md"
+    if verify_repo "$fixture" >"$fixture/m1-evidence.out" 2>&1; then
+        echo "Requirements self-test expected a missing M1 evidence failure." >&2
+        return 1
+    fi
+    grep -Fq 'Missing required M1 acceptance evidence: docs/evidence/M1/acceptance.md' "$fixture/m1-evidence.out"
+    mv "$fixture/docs/evidence/M1/acceptance.valid.md" "$fixture/docs/evidence/M1/acceptance.md"
     python3 - "$fixture/Packages/HealthTrackingModules/Package.swift" <<'PY'
 from pathlib import Path
 path = Path(__import__('sys').argv[1])
