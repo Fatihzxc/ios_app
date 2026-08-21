@@ -180,7 +180,12 @@ final class AccessibilitySmokeUITests: XCTestCase {
 
     private func assertVisibleWithinApp(_ element: XCUIElement, named name: String, in app: XCUIApplication) {
         XCTAssertFalse(element.frame.isEmpty, "\(name) must have a rendered frame at accessibility XXXL.")
-        XCTAssertTrue(app.frame.contains(element.frame), "\(name) must be fully contained by the app window at accessibility XXXL.")
+        let pixelRoundingBounds = app.frame.insetBy(dx: -0.5, dy: -0.5)
+        XCTAssertTrue(
+            pixelRoundingBounds.contains(element.frame),
+            "\(name) must be fully contained by the app window at accessibility XXXL. "
+                + "App frame: \(app.frame); element frame: \(element.frame)."
+        )
     }
 
     @discardableResult

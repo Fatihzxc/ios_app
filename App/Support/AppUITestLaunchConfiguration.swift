@@ -30,6 +30,10 @@ enum AppUITestScenario: String {
     case todayPriority = "today-priority"
     case todayEmptyOnce = "today-empty-once"
     case todayErrorOnce = "today-error-once"
+    case nutritionContent = "nutrition-content"
+    case nutritionEmpty = "nutrition-empty"
+    case nutritionErrorOnce = "nutrition-error-once"
+    case nutritionDeleteErrorOnce = "nutrition-delete-error-once"
 }
 
 struct AppUITestLaunchConfiguration {

@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import NutritionKit
 import PersistenceKit
 import SettingsKit
 import SwiftData
@@ -25,10 +26,55 @@ final class AppDependencies: AppDependencyLoading {
     private let hapticControllerReference: TrainingHapticControllerReference
     let trainingRepository: any TrainingRepository
     let todayViewModel: TodayViewModel
-    let foundationViewModel: FoundationProgramViewModel
-    let phaseTransitionViewModel: PhaseTransitionViewModel
-    let trainingHistoryViewModel: TrainingHistoryViewModel
-    let makeSessionViewModel: @MainActor () -> SessionViewModel
+    private lazy var deferredTrainingDependencies = DeferredTrainingDependencies(
+        repository: trainingRepository,
+        todayViewModel: todayViewModel,
+        hapticControllerReference: hapticControllerReference
+    )
+    var foundationViewModel: FoundationProgramViewModel {
+        deferredTrainingDependencies.foundationViewModel
+    }
+    var phaseTransitionViewModel: PhaseTransitionViewModel {
+        deferredTrainingDependencies.phaseTransitionViewModel
+    }
+    var trainingHistoryViewModel: TrainingHistoryViewModel {
+        deferredTrainingDependencies.trainingHistoryViewModel
+    }
+    var makeSessionViewModel: @MainActor () -> SessionViewModel {
+        deferredTrainingDependencies.makeSessionViewModel
+    }
+    lazy var nutritionRepository: any NutritionRepository = SwiftDataNutritionRepository(
+        modelContext: mainContext
+    )
+    private lazy var nutritionDayRepository: any NutritionDayViewRepository = {
+        #if DEBUG
+        switch AppUITestLaunchConfiguration.resolve()?.scenario {
+        case .nutritionErrorOnce:
+            return UITestNutritionDayRepository(
+                repository: nutritionRepository,
+                failsFirstLoad: true
+            )
+        case .nutritionDeleteErrorOnce:
+            return UITestNutritionDayRepository(
+                repository: nutritionRepository,
+                failsFirstDelete: true
+            )
+        default:
+            return nutritionRepository
+        }
+        #else
+        return nutritionRepository
+        #endif
+    }()
+    lazy var nutritionDayViewModel = NutritionDayViewModel(
+        repository: nutritionDayRepository
+    )
+    lazy var foodLibraryViewModel = FoodLibraryViewModel(
+        repository: nutritionRepository
+    )
+    lazy var recipeLibraryViewModel = RecipeLibraryViewModel(
+        repository: nutritionRepository
+    )
     private(set) var trainingHapticController: TrainingHapticController?
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
@@ -105,7 +151,9 @@ final class AppDependencies: AppDependencyLoading {
                  .progressionMissingRIR, .weeklyPallof, .ohpSafety, .deloadScheduled,
                  .deloadReactive, .phaseTransition, .trainingHistory, .todayTrain,
                  .todayRest, .todayResume, .todayDeload, .todayPhase, .todayReminder,
-                 .todayPriority, .m1AcceptanceCatalog, .m1PRBaseline, .m1PRNew:
+                 .todayPriority, .m1AcceptanceCatalog, .m1PRBaseline, .m1PRNew,
+                 .nutritionContent, .nutritionEmpty, .nutritionErrorOnce,
+                 .nutritionDeleteErrorOnce:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -118,33 +166,13 @@ final class AppDependencies: AppDependencyLoading {
         shouldLoadFoundation = true
         #endif
 
-        let todayModel = TodayViewModel(
+        todayViewModel = TodayViewModel(
             repository: trainingRepository,
             launchStartedAt: AppLaunchPerformance.startedAt,
             onFirstMeaningfulContent: { elapsed in
                 AppLaunchPerformance.finish(elapsed)
             }
         )
-        let foundationModel = FoundationProgramViewModel(repository: trainingRepository)
-        let phaseModel = PhaseTransitionViewModel(repository: trainingRepository)
-        todayViewModel = todayModel
-        foundationViewModel = foundationModel
-        phaseTransitionViewModel = phaseModel
-        trainingHistoryViewModel = TrainingHistoryViewModel(
-            repository: trainingRepository,
-            onHistoryChanged: { [weak todayModel, weak foundationModel, weak phaseModel] in
-                await todayModel?.load()
-                await foundationModel?.load()
-                await phaseModel?.load()
-            }
-        )
-        let sessionRepository = trainingRepository
-        makeSessionViewModel = {
-            SessionViewModel(
-                repository: sessionRepository,
-                haptics: hapticControllerReference.value
-            )
-        }
 
         #if DEBUG
         let scenario = environment == .uiTesting
@@ -309,7 +337,116 @@ private final class TrainingHapticControllerReference {
     var value: TrainingHapticController?
 }
 
+@MainActor
+private final class DeferredTrainingDependencies {
+    let foundationViewModel: FoundationProgramViewModel
+    let phaseTransitionViewModel: PhaseTransitionViewModel
+    let trainingHistoryViewModel: TrainingHistoryViewModel
+    let makeSessionViewModel: @MainActor () -> SessionViewModel
+
+    init(
+        repository: any TrainingRepository,
+        todayViewModel: TodayViewModel,
+        hapticControllerReference: TrainingHapticControllerReference
+    ) {
+        let foundationViewModel = FoundationProgramViewModel(repository: repository)
+        let phaseTransitionViewModel = PhaseTransitionViewModel(repository: repository)
+        self.foundationViewModel = foundationViewModel
+        self.phaseTransitionViewModel = phaseTransitionViewModel
+        trainingHistoryViewModel = TrainingHistoryViewModel(
+            repository: repository,
+            onHistoryChanged: {
+                [weak todayViewModel, weak foundationViewModel, weak phaseTransitionViewModel] in
+                await todayViewModel?.load()
+                await foundationViewModel?.load()
+                await phaseTransitionViewModel?.load()
+            }
+        )
+        makeSessionViewModel = {
+            SessionViewModel(
+                repository: repository,
+                haptics: hapticControllerReference.value
+            )
+        }
+    }
+}
+
 #if DEBUG
+@MainActor
+private final class UITestNutritionDayRepository: NutritionDayViewRepository {
+    private enum FixtureFailure: Error {
+        case load
+        case delete
+    }
+
+    private let repository: any NutritionDayViewRepository
+    private var failsNextLoad: Bool
+    private var failsNextDelete: Bool
+
+    init(
+        repository: any NutritionDayViewRepository,
+        failsFirstLoad: Bool = false,
+        failsFirstDelete: Bool = false
+    ) {
+        self.repository = repository
+        failsNextLoad = failsFirstLoad
+        failsNextDelete = failsFirstDelete
+    }
+
+    func fetchNutritionTargets() async throws -> NutritionMacroTargets? {
+        try await repository.fetchNutritionTargets()
+    }
+
+    func fetchNutritionDay(containing date: Date) async throws -> NutritionDaySnapshot? {
+        try await repository.fetchNutritionDay(containing: date)
+    }
+
+    func fetchOrCreateNutritionDay(
+        containing date: Date
+    ) async throws -> NutritionDaySnapshot {
+        try await repository.fetchOrCreateNutritionDay(containing: date)
+    }
+
+    func fetchNutritionDays() async throws -> [NutritionDaySnapshot] {
+        try await repository.fetchNutritionDays()
+    }
+
+    func deleteNutritionDay(id: UUID) async throws {
+        try await repository.deleteNutritionDay(id: id)
+    }
+
+    func fetchMealEntries(
+        containing date: Date
+    ) async throws -> NutritionDayEntriesSnapshot {
+        if failsNextLoad {
+            failsNextLoad = false
+            throw FixtureFailure.load
+        }
+        return try await repository.fetchMealEntries(containing: date)
+    }
+
+    func createMealEntry(
+        _ request: MealEntryCreateRequest
+    ) async throws -> NutritionDayEntriesSnapshot {
+        try await repository.createMealEntry(request)
+    }
+
+    func updateMealEntry(
+        id: UUID,
+        update: MealEntryUpdate
+    ) async throws -> NutritionDayEntriesSnapshot {
+        try await repository.updateMealEntry(id: id, update: update)
+    }
+
+    func deleteMealEntry(id: UUID) async throws -> NutritionDayEntriesSnapshot {
+        if failsNextDelete {
+            failsNextDelete = false
+            throw FixtureFailure.delete
+        }
+        return try await repository.deleteMealEntry(id: id)
+    }
+}
+
 @MainActor
 private enum UITestSessionFixture {
     private static let familyDayID = uuid("00000000-0000-4000-8000-00000000f001")
@@ -368,6 +505,18 @@ private enum UITestSessionFixture {
     private static let m1PersonalRecordSetID = uuid(
         "00000000-0000-4000-8000-00000000f091"
     )
+    private static let nutritionFoodID = uuid(
+        "00000000-0000-4000-8000-00000000d001"
+    )
+    private static let nutritionDayID = uuid(
+        "00000000-0000-4000-8000-00000000d100"
+    )
+    private static let nutritionBreakfastEntryID = uuid(
+        "00000000-0000-4000-8000-00000000d101"
+    )
+    private static let nutritionCustomEntryID = uuid(
+        "00000000-0000-4000-8000-00000000d102"
+    )
     private static let familyWeightExerciseID = uuid(
         "00000000-0000-4000-8000-00000000f010"
     )
@@ -418,10 +567,86 @@ private enum UITestSessionFixture {
             try prepareTodayReminder(in: modelContext)
         case .todayPriority:
             try installTodayPriority(in: modelContext)
+        case .nutritionContent, .nutritionErrorOnce, .nutritionDeleteErrorOnce:
+            try installNutritionContent(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow,
-             .todayEmptyOnce, .todayErrorOnce:
+             .todayEmptyOnce, .todayErrorOnce, .nutritionEmpty:
             return
         }
+    }
+
+    private static func installNutritionContent(
+        in modelContext: ModelContext
+    ) throws {
+        let existingLogs = try modelContext.fetch(FetchDescriptor<DailyNutritionLog>())
+        guard !existingLogs.contains(where: { $0.id == nutritionDayID }) else { return }
+
+        let now = Date.now
+        let calendar = Calendar.autoupdatingCurrent
+        guard let day = calendar.dateInterval(of: .day, for: now),
+              let secondTimestamp = calendar.date(
+                  byAdding: .minute,
+                  value: 1,
+                  to: day.start
+              ) else {
+            throw UITestSessionFixtureError.missingSeededProgram
+        }
+        let log = DailyNutritionLog(
+            id: nutritionDayID,
+            createdAt: day.start,
+            updatedAt: secondTimestamp,
+            date: day.start
+        )
+        let food = Food(
+            id: nutritionFoodID,
+            createdAt: day.start,
+            updatedAt: day.start,
+            name: "Yoğurt",
+            brand: "Sentetik test",
+            servingSize: 1,
+            servingUnit: "kase",
+            caloriesPerServing: 250,
+            proteinG: 20,
+            carbG: 30,
+            fatG: 5,
+            source: .userCreated
+        )
+        let breakfast = MealEntry(
+            id: nutritionBreakfastEntryID,
+            createdAt: day.start,
+            updatedAt: day.start,
+            category: try MealCategory(kind: .breakfast),
+            foodId: food.id,
+            quantity: 1,
+            caloriesResolved: 250,
+            proteinResolved: 20,
+            carbResolved: 30,
+            fatResolved: 5,
+            loggedAt: day.start,
+            dailyNutritionLog: log
+        )
+        let custom = MealEntry(
+            id: nutritionCustomEntryID,
+            createdAt: secondTimestamp,
+            updatedAt: secondTimestamp,
+            category: try MealCategory(
+                kind: .custom,
+                customName: "Antrenman sonrası"
+            ),
+            adhocName: "Sentetik shake",
+            quantity: 1,
+            caloriesResolved: 120,
+            proteinResolved: 15,
+            carbResolved: 10,
+            fatResolved: 2,
+            loggedAt: secondTimestamp,
+            dailyNutritionLog: log
+        )
+        modelContext.insert(log)
+        modelContext.insert(food)
+        modelContext.insert(breakfast)
+        modelContext.insert(custom)
+        try modelContext.save()
     }
 
     private static func installM1AcceptanceCatalog(

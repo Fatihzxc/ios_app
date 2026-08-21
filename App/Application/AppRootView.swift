@@ -11,6 +11,9 @@ struct AppRootView: View {
     let foundationViewModel: FoundationProgramViewModel
     let phaseTransitionViewModel: PhaseTransitionViewModel
     let trainingHistoryViewModel: TrainingHistoryViewModel
+    let nutritionDayViewModel: NutritionDayViewModel
+    let foodLibraryViewModel: FoodLibraryViewModel
+    let recipeLibraryViewModel: RecipeLibraryViewModel
     let makeSessionViewModel: @MainActor () -> SessionViewModel
     let trainingHapticController: TrainingHapticController?
     let shouldLoadFoundation: Bool
@@ -117,7 +120,11 @@ struct AppRootView: View {
                 onOpenSession: openSession
             )
         case .nutrition:
-            NutritionFoundationView()
+            NutritionFoundationView(
+                dayViewModel: nutritionDayViewModel,
+                foodLibraryViewModel: foodLibraryViewModel,
+                recipeLibraryViewModel: recipeLibraryViewModel
+            )
         case .progress:
             ReportsFoundationView()
         case .settings:
