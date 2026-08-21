@@ -1078,6 +1078,7 @@ extension SwiftDataNutritionRepository {
         let timestamp = now()
         let log: DailyNutritionLog
         if let existing = try uniqueDayLog(for: day) {
+            existing.date = day.start
             existing.updatedAt = timestamp
             log = existing
         } else {
