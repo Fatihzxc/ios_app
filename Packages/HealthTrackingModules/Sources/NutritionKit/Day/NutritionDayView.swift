@@ -147,8 +147,8 @@ public struct NutritionDayView: View {
                 isEmpty ? "nutrition.day.empty-content" : "nutrition.day.content"
             )
 
-            if case let .deleteError(entryID) = viewModel.mutationState {
-                deleteError(entryID: entryID)
+            if case .deleteError = viewModel.mutationState {
+                deleteError
             }
         }
         .accessibilityElement(children: .contain)
@@ -351,7 +351,7 @@ public struct NutritionDayView: View {
         }
     }
 
-    private func deleteError(entryID: UUID) -> some View {
+    private var deleteError: some View {
         AppCard {
             VStack(alignment: .leading, spacing: AppSpacing.standard) {
                 Text(localized("nutrition.day.delete.error"))
@@ -369,7 +369,6 @@ public struct NutritionDayView: View {
                 .accessibilityIdentifier("nutrition.day.mutation.retry")
             }
         }
-        .accessibilityValue(entryID.uuidString)
     }
 
     @ToolbarContentBuilder

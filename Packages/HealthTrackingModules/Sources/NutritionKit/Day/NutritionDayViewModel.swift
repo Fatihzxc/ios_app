@@ -133,11 +133,23 @@ public final class NutritionDayViewModel {
     }
 
     public func deleteEntry(id: UUID) async {
-        guard canBeginDelete(id: id),
+        guard case let .content(presentation) = state,
+              presentation.day == selectedDay,
               let originalSnapshot = currentSnapshot,
+              originalSnapshot.day == selectedDay,
               originalSnapshot.entries.contains(where: { $0.id == id }) else {
             return
         }
+
+        switch mutationState {
+        case .idle:
+            break
+        case let .deleteError(entryID) where entryID == id:
+            break
+        case .deleting, .deleteError:
+            return
+        }
+
         let mutationDay = selectedDay
         let mutationGeneration = loadGeneration
         let targets = currentTargets
@@ -153,15 +165,21 @@ public final class NutritionDayViewModel {
             try publish(snapshot: optimisticSnapshot, targets: targets)
 
             let repositorySnapshot = try await repository.deleteMealEntry(id: id)
-            guard loadGeneration == mutationGeneration,
-                  selectedDay == mutationDay else { return }
+            guard isCurrentDelete(
+                id: id,
+                day: mutationDay,
+                generation: mutationGeneration
+            ) else { return }
             try validate(repositorySnapshot, belongsTo: mutationDay)
             currentSnapshot = repositorySnapshot
             try publish(snapshot: repositorySnapshot, targets: targets)
             mutationState = .idle
         } catch {
-            guard loadGeneration == mutationGeneration,
-                  selectedDay == mutationDay else { return }
+            guard isCurrentDelete(
+                id: id,
+                day: mutationDay,
+                generation: mutationGeneration
+            ) else { return }
             currentSnapshot = originalSnapshot
             try? publish(snapshot: originalSnapshot, targets: targets)
             mutationState = .deleteError(entryID: id)
@@ -176,17 +194,6 @@ public final class NutritionDayViewModel {
     public func dismissMutationError() {
         if case .deleteError = mutationState {
             mutationState = .idle
-        }
-    }
-
-    private func canBeginDelete(id: UUID) -> Bool {
-        switch mutationState {
-        case .idle:
-            return true
-        case let .deleteError(failedID):
-            return failedID == id
-        case .deleting:
-            return false
         }
     }
 
@@ -224,6 +231,16 @@ public final class NutritionDayViewModel {
             currentTargets = nil
             state = .error(NutritionDayRetryContext(day: day))
         }
+    }
+
+    private func isCurrentDelete(
+        id: UUID,
+        day: NutritionDayKey,
+        generation: Int
+    ) -> Bool {
+        selectedDay == day
+            && loadGeneration == generation
+            && mutationState == .deleting(entryID: id)
     }
 
     private func validate(

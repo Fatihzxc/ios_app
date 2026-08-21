@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 
 final class NutritionDayUITests: XCTestCase {
@@ -161,10 +162,20 @@ final class NutritionDayUITests: XCTestCase {
             in: error,
             label: "Yeniden dene"
         )
+        let selectedDate = identified("nutrition.day.date", in: error).value as? String
         retry.tap()
         require(
-            identified("nutrition.day.content", in: error),
+            identified("nutrition.day.loaded", in: error),
             "Retry must reload the same selected day through the real repository path."
+        )
+        require(
+            identified("nutrition.day.entry.\(fixtureEntryID)", in: error),
+            "Retry must publish the repository-backed content fixture."
+        )
+        XCTAssertEqual(
+            identified("nutrition.day.date", in: error).value as? String,
+            selectedDate,
+            "Retry must retain the selected local day."
         )
         XCTAssertFalse(identified("nutrition.day.state.error", in: error).exists)
     }
@@ -191,6 +202,17 @@ final class NutritionDayUITests: XCTestCase {
             "A failed optimistic delete must publish an accessible retryable error."
         )
         XCTAssertFalse(mutationError.label.isEmpty)
+        let exposesRawEntryID = app.descendants(matching: .any)
+            .allElementsBoundByIndex
+            .contains { element in
+                let value = element.value as? String
+                return element.label.localizedCaseInsensitiveContains(fixtureEntryID)
+                    || value?.localizedCaseInsensitiveContains(fixtureEntryID) == true
+            }
+        XCTAssertFalse(
+            exposesRawEntryID,
+            "VoiceOver must not expose an opaque persistence identifier."
+        )
         require(entry, "A failed optimistic delete must restore the original row.")
         XCTAssertEqual(total.value as? String, initialTotal)
 
