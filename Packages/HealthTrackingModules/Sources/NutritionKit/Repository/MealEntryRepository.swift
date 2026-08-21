@@ -37,8 +37,12 @@ public protocol MealEntryRepository {
 }
 
 @MainActor
-public protocol NutritionRepository:
+public protocol NutritionDayViewRepository:
     NutritionDayRepository,
-    FoodLibraryRepository,
-    RecipeLibraryRepository,
     MealEntryRepository {}
+
+@MainActor
+public protocol NutritionRepository:
+    NutritionDayViewRepository,
+    FoodLibraryRepository,
+    RecipeLibraryRepository {}
