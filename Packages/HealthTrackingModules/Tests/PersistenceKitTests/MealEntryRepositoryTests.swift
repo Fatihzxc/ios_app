@@ -147,6 +147,51 @@ final class MealEntryRepositoryTests: XCTestCase {
         assertEquatableSendable(result)
     }
 
+    func testCreateNormalizesAnExistingLogicalDayInsideTheEntryTransaction() async throws {
+        let fixture = try makeFixture()
+        let entryID = uuid("00000000-0000-4000-8000-000000000807")
+        let originalTimestamp = Date(timeIntervalSinceReferenceDate: 7_500)
+        let writer = ModelContext(fixture.container)
+        writer.insert(
+            DailyNutritionLog(
+                id: fixture.dayID,
+                createdAt: originalTimestamp,
+                updatedAt: originalTimestamp,
+                date: fixture.selectedDate
+            )
+        )
+        try writer.save()
+
+        let result = try await fixture.repository.createMealEntry(
+            try request(
+                id: entryID,
+                date: fixture.selectedDate,
+                category: MealCategory(kind: .dinner),
+                source: .adhoc(
+                    name: "Kase",
+                    quantity: 1,
+                    resolvedMacros: try macros()
+                )
+            )
+        )
+
+        let expectedStart = fixture.calendar.startOfDay(for: fixture.selectedDate)
+        XCTAssertEqual(result.log?.id, fixture.dayID)
+        XCTAssertEqual(result.log?.day.start, expectedStart)
+        XCTAssertEqual(result.entries.map(\.id), [entryID])
+
+        let reader = ModelContext(fixture.container)
+        let logs = try reader.fetch(FetchDescriptor<DailyNutritionLog>())
+        XCTAssertEqual(logs.count, 1)
+        XCTAssertEqual(logs.first?.date, expectedStart)
+        XCTAssertEqual(logs.first?.createdAt, originalTimestamp)
+        XCTAssertEqual(logs.first?.updatedAt, fixture.now)
+        XCTAssertEqual(
+            try reader.fetchCount(FetchDescriptor<MealEntry>()),
+            1
+        )
+    }
+
     func testCreateRejectsMissingDuplicateArchivedAndUnsupportedSources() async throws {
         let recipeID = uuid("00000000-0000-4000-8000-000000000811")
         let foodID = uuid("00000000-0000-4000-8000-000000000812")
