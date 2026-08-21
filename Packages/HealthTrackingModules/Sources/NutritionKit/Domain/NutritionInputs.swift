@@ -1,3 +1,4 @@
+import CoreModels
 import Foundation
 
 public enum FoodInputField: String, CaseIterable, Equatable, Sendable {
@@ -110,6 +111,115 @@ public struct FoodInput: Equatable, Sendable {
     private static func inputField(
         _ field: NutritionMacroField
     ) -> FoodInputField {
+        switch field {
+        case .calories: return .calories
+        case .proteinG: return .proteinG
+        case .carbG: return .carbG
+        case .fatG: return .fatG
+        }
+    }
+
+    private static func trim(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+public enum RecipeInputField: String, CaseIterable, Equatable, Sendable {
+    case servings
+    case calories
+    case proteinG
+    case carbG
+    case fatG
+}
+
+public enum RecipeInputError: Error, Equatable, Sendable {
+    case emptyName
+    case nonFinite(RecipeInputField)
+    case nonPositiveServings
+    case negative(RecipeInputField)
+    case invalidCategory
+    case notRepresentable(RecipeInputField)
+}
+
+public struct RecipeInput: Equatable, Sendable {
+    public let name: String
+    public let category: MealCategory
+    public let servings: Decimal
+    public let totalMacros: NutritionMacros
+    public let note: String?
+
+    public init(
+        name: String,
+        category: MealCategory,
+        servings: Decimal,
+        caloriesTotal: Decimal,
+        proteinTotalG: Decimal,
+        carbTotalG: Decimal,
+        fatTotalG: Decimal,
+        note: String?
+    ) throws {
+        let name = Self.trim(name)
+        guard !name.isEmpty else { throw RecipeInputError.emptyName }
+        guard servings.isFinite else {
+            throw RecipeInputError.nonFinite(.servings)
+        }
+        guard servings > 0 else {
+            throw RecipeInputError.nonPositiveServings
+        }
+
+        let canonicalCategory: MealCategory
+        do {
+            canonicalCategory = try MealCategory(
+                kind: category.kind,
+                customName: category.customName
+            )
+        } catch {
+            throw RecipeInputError.invalidCategory
+        }
+
+        self.name = name
+        self.category = canonicalCategory
+        self.servings = servings
+        totalMacros = try Self.makeMacros(
+            calories: caloriesTotal,
+            proteinG: proteinTotalG,
+            carbG: carbTotalG,
+            fatG: fatTotalG
+        )
+        self.note = note.flatMap { value in
+            let normalized = Self.trim(value)
+            return normalized.isEmpty ? nil : normalized
+        }
+    }
+
+    private static func makeMacros(
+        calories: Decimal,
+        proteinG: Decimal,
+        carbG: Decimal,
+        fatG: Decimal
+    ) throws -> NutritionMacros {
+        do {
+            return try NutritionMacros(
+                calories: calories,
+                proteinG: proteinG,
+                carbG: carbG,
+                fatG: fatG
+            )
+        } catch let error as NutritionNumericError {
+            switch error {
+            case let .nonFiniteMacro(field):
+                throw RecipeInputError.nonFinite(inputField(field))
+            case let .negativeMacro(field):
+                throw RecipeInputError.negative(inputField(field))
+            default:
+                throw RecipeInputError.notRepresentable(.calories)
+            }
+        }
+    }
+
+    private static func inputField(
+        _ field: NutritionMacroField
+    ) -> RecipeInputField {
         switch field {
         case .calories: return .calories
         case .proteinG: return .proteinG

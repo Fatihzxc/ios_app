@@ -106,8 +106,51 @@ private struct FoodPersistenceValues {
     let fiberG: Double?
 }
 
+private enum RecipePersistenceValueError: Error {
+    case notRepresentable
+}
+
+private enum RecipePersistenceValueMapper {
+    private static let posix = Locale(identifier: "en_US_POSIX")
+
+    static func decimal(from value: Double) throws -> Decimal {
+        guard value.isFinite,
+              let result = Decimal(string: String(value), locale: posix),
+              result.isFinite else {
+            throw RecipePersistenceValueError.notRepresentable
+        }
+        return result
+    }
+
+    static func double(from value: Decimal) throws -> Double {
+        guard value.isFinite else {
+            throw RecipePersistenceValueError.notRepresentable
+        }
+        let decimalString = NSDecimalNumber(decimal: value).stringValue
+        guard let result = Double(decimalString),
+              result.isFinite,
+              value == 0 || result != 0,
+              let roundTrip = Decimal(string: String(result), locale: posix),
+              roundTrip == value else {
+            throw RecipePersistenceValueError.notRepresentable
+        }
+        return result
+    }
+}
+
+private struct RecipePersistenceValues {
+    let servings: Double
+    let calories: Double
+    let proteinG: Double
+    let carbG: Double
+    let fatG: Double
+}
+
 @MainActor
-public final class SwiftDataNutritionRepository: NutritionDayRepository, FoodLibraryRepository {
+public final class SwiftDataNutritionRepository:
+    NutritionDayRepository,
+    FoodLibraryRepository,
+    RecipeLibraryRepository {
     private let modelContext: ModelContext
     private let calendar: Calendar
     private let now: @MainActor () -> Date
@@ -124,6 +167,12 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository, FoodLib
     private let fetchFoodsOperation: @MainActor (
         FetchDescriptor<Food>
     ) throws -> [Food]
+    private let fetchRecipesOperation: @MainActor (
+        FetchDescriptor<Recipe>
+    ) throws -> [Recipe]
+    private let fetchSettingsOperation: @MainActor (
+        FetchDescriptor<AppSetting>
+    ) throws -> [AppSetting]
     private let saveOperation: @MainActor () throws -> Void
     private let rollbackOperation: @MainActor () -> Void
 
@@ -141,6 +190,8 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository, FoodLib
         fetchEntriesOperation = { try modelContext.fetch($0) }
         fetchProfilesOperation = { try modelContext.fetch($0) }
         fetchFoodsOperation = { try modelContext.fetch($0) }
+        fetchRecipesOperation = { try modelContext.fetch($0) }
+        fetchSettingsOperation = { try modelContext.fetch($0) }
         saveOperation = { try modelContext.save() }
         rollbackOperation = { modelContext.rollback() }
     }
@@ -161,6 +212,8 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository, FoodLib
         fetchEntriesOperation = { try modelContext.fetch($0) }
         fetchProfilesOperation = { try modelContext.fetch($0) }
         fetchFoodsOperation = { try modelContext.fetch($0) }
+        fetchRecipesOperation = { try modelContext.fetch($0) }
+        fetchSettingsOperation = { try modelContext.fetch($0) }
         saveOperation = save
         rollbackOperation = rollback
     }
@@ -184,6 +237,8 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository, FoodLib
         fetchEntriesOperation = { try modelContext.fetch($0) }
         fetchProfilesOperation = fetchProfiles
         fetchFoodsOperation = { try modelContext.fetch($0) }
+        fetchRecipesOperation = { try modelContext.fetch($0) }
+        fetchSettingsOperation = { try modelContext.fetch($0) }
         saveOperation = save
         rollbackOperation = rollback
     }
@@ -210,6 +265,8 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository, FoodLib
         fetchEntriesOperation = fetchEntries
         fetchProfilesOperation = { try modelContext.fetch($0) }
         fetchFoodsOperation = { try modelContext.fetch($0) }
+        fetchRecipesOperation = { try modelContext.fetch($0) }
+        fetchSettingsOperation = { try modelContext.fetch($0) }
         saveOperation = save
         rollbackOperation = rollback
     }
@@ -333,6 +390,170 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository, FoodLib
         }
         modelContext.delete(food)
         try saveMutation(or: .deleteFailed)
+    }
+
+    public func fetchRecipeLibrary(
+        matching query: String,
+        category: MealCategory.Kind?
+    ) async throws -> RecipeLibrarySnapshot {
+        let recipes = try fetchRecipeModels(FetchDescriptor<Recipe>())
+        try validateUniqueRecipeIDs(recipes)
+        let archive = try archiveState()
+        let persistedIDs = Set(recipes.map(\.id))
+        if let missingID = archive.ids
+            .subtracting(persistedIDs)
+            .sorted(by: { $0.uuidString < $1.uuidString })
+            .first {
+            throw RecipeRepositoryIntegrityError.archivedRecipeMissing(id: missingID)
+        }
+
+        var active: [RecipeSnapshot] = []
+        var archived: [RecipeSnapshot] = []
+        for recipe in recipes {
+            let snapshot = try recipeSnapshot(recipe)
+            if archive.ids.contains(recipe.id) {
+                archived.append(snapshot)
+            } else {
+                active.append(snapshot)
+            }
+        }
+        return RecipeSearch.library(
+            active: active,
+            archived: archived,
+            matching: query,
+            category: category
+        )
+    }
+
+    public func createRecipe(
+        _ input: RecipeInput
+    ) async throws -> RecipeSnapshot {
+        let id = makeID()
+        guard try matchingRecipes(id: id).isEmpty else {
+            throw RecipeRepositoryIntegrityError.recipeIDCollision(id: id)
+        }
+        let values = try recipePersistenceValues(input)
+        let timestamp = now()
+        let recipe = Recipe(
+            id: id,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            name: input.name,
+            category: input.category,
+            servings: values.servings,
+            isDirectMacros: true,
+            caloriesTotal: values.calories,
+            proteinTotalG: values.proteinG,
+            carbTotalG: values.carbG,
+            fatTotalG: values.fatG,
+            note: input.note
+        )
+        modelContext.insert(recipe)
+        try saveMutation(or: .saveFailed)
+        return try recipeSnapshot(recipe)
+    }
+
+    public func updateRecipe(
+        id: UUID,
+        input: RecipeInput
+    ) async throws -> RecipeSnapshot {
+        let matches = try matchingRecipes(id: id)
+        guard !matches.isEmpty else {
+            throw RecipeRepositoryMutationError.recipeNotFound(id: id)
+        }
+        guard matches.count == 1, let recipe = matches.first else {
+            throw RecipeRepositoryIntegrityError.duplicateRecipeIDs(
+                id: id,
+                count: matches.count
+            )
+        }
+        guard recipe.isDirectMacros else {
+            throw RecipeRepositoryIntegrityError.invalidPersistedRecipe(id: id)
+        }
+
+        let values = try recipePersistenceValues(input)
+        recipe.name = input.name
+        recipe.category = input.category
+        recipe.servings = values.servings
+        recipe.isDirectMacros = true
+        recipe.caloriesTotal = values.calories
+        recipe.proteinTotalG = values.proteinG
+        recipe.carbTotalG = values.carbG
+        recipe.fatTotalG = values.fatG
+        recipe.note = input.note
+        recipe.updatedAt = now()
+        try saveMutation(or: .saveFailed)
+        return try recipeSnapshot(recipe)
+    }
+
+    public func removeRecipe(id: UUID) async throws -> RecipeRemovalResult {
+        let matches = try matchingRecipes(id: id)
+        guard !matches.isEmpty else {
+            throw RecipeRepositoryMutationError.recipeNotFound(id: id)
+        }
+        guard matches.count == 1, let recipe = matches.first else {
+            throw RecipeRepositoryIntegrityError.duplicateRecipeIDs(
+                id: id,
+                count: matches.count
+            )
+        }
+        _ = try recipeSnapshot(recipe)
+
+        let archive = try archiveState()
+        let isReferenced = try fetchEntries(FetchDescriptor<MealEntry>())
+            .contains { $0.recipeId == id }
+        if isReferenced {
+            var archivedIDs = archive.ids
+            archivedIDs.insert(id)
+            try writeArchive(
+                archivedIDs,
+                setting: archive.setting,
+                timestamp: now()
+            )
+            try saveMutation(or: .deleteFailed)
+            return .archived
+        }
+
+        if archive.ids.contains(id) {
+            var archivedIDs = archive.ids
+            archivedIDs.remove(id)
+            try writeArchive(
+                archivedIDs,
+                setting: archive.setting,
+                timestamp: now()
+            )
+        }
+        modelContext.delete(recipe)
+        try saveMutation(or: .deleteFailed)
+        return .deleted
+    }
+
+    public func restoreRecipe(id: UUID) async throws -> RecipeSnapshot {
+        let matches = try matchingRecipes(id: id)
+        guard !matches.isEmpty else {
+            throw RecipeRepositoryMutationError.recipeNotFound(id: id)
+        }
+        guard matches.count == 1, let recipe = matches.first else {
+            throw RecipeRepositoryIntegrityError.duplicateRecipeIDs(
+                id: id,
+                count: matches.count
+            )
+        }
+        let snapshot = try recipeSnapshot(recipe)
+        let archive = try archiveState()
+        guard archive.ids.contains(id) else {
+            throw RecipeRepositoryMutationError.recipeNotArchived(id: id)
+        }
+
+        var archivedIDs = archive.ids
+        archivedIDs.remove(id)
+        try writeArchive(
+            archivedIDs,
+            setting: archive.setting,
+            timestamp: now()
+        )
+        try saveMutation(or: .saveFailed)
+        return snapshot
     }
 
     public func fetchNutritionDay(
@@ -534,6 +755,153 @@ public final class SwiftDataNutritionRepository: NutritionDayRepository, FoodLib
             )
         } catch {
             throw FoodRepositoryMutationError.invalidInput
+        }
+    }
+
+    private func matchingRecipes(id: UUID) throws -> [Recipe] {
+        let requestedID = id
+        return try fetchRecipeModels(
+            FetchDescriptor<Recipe>(
+                predicate: #Predicate { $0.id == requestedID }
+            )
+        )
+    }
+
+    private func fetchRecipeModels(
+        _ descriptor: FetchDescriptor<Recipe>
+    ) throws -> [Recipe] {
+        do {
+            return try fetchRecipesOperation(descriptor)
+        } catch {
+            throw NutritionRepositoryOperationError.loadFailed
+        }
+    }
+
+    private func fetchSettings(
+        _ descriptor: FetchDescriptor<AppSetting>
+    ) throws -> [AppSetting] {
+        do {
+            return try fetchSettingsOperation(descriptor)
+        } catch {
+            throw NutritionRepositoryOperationError.loadFailed
+        }
+    }
+
+    private func validateUniqueRecipeIDs(_ recipes: [Recipe]) throws {
+        let duplicate = Dictionary(grouping: recipes, by: \.id)
+            .filter { $0.value.count > 1 }
+            .sorted { $0.key.uuidString < $1.key.uuidString }
+            .first
+        if let (id, matches) = duplicate {
+            throw RecipeRepositoryIntegrityError.duplicateRecipeIDs(
+                id: id,
+                count: matches.count
+            )
+        }
+    }
+
+    private func recipeSnapshot(_ recipe: Recipe) throws -> RecipeSnapshot {
+        guard recipe.isDirectMacros else {
+            throw RecipeRepositoryIntegrityError.invalidPersistedRecipe(id: recipe.id)
+        }
+        do {
+            let input = try RecipeInput(
+                name: recipe.name,
+                category: recipe.category,
+                servings: try RecipePersistenceValueMapper.decimal(
+                    from: recipe.servings
+                ),
+                caloriesTotal: try RecipePersistenceValueMapper.decimal(
+                    from: recipe.caloriesTotal
+                ),
+                proteinTotalG: try RecipePersistenceValueMapper.decimal(
+                    from: recipe.proteinTotalG
+                ),
+                carbTotalG: try RecipePersistenceValueMapper.decimal(
+                    from: recipe.carbTotalG
+                ),
+                fatTotalG: try RecipePersistenceValueMapper.decimal(
+                    from: recipe.fatTotalG
+                ),
+                note: recipe.note
+            )
+            return RecipeSnapshot(
+                id: recipe.id,
+                createdAt: recipe.createdAt,
+                updatedAt: recipe.updatedAt,
+                name: input.name,
+                category: input.category,
+                servings: input.servings,
+                isDirectMacros: true,
+                totalMacros: input.totalMacros,
+                note: input.note
+            )
+        } catch {
+            throw RecipeRepositoryIntegrityError.invalidPersistedRecipe(id: recipe.id)
+        }
+    }
+
+    private func recipePersistenceValues(
+        _ input: RecipeInput
+    ) throws -> RecipePersistenceValues {
+        do {
+            return RecipePersistenceValues(
+                servings: try RecipePersistenceValueMapper.double(
+                    from: input.servings
+                ),
+                calories: try RecipePersistenceValueMapper.double(
+                    from: input.totalMacros.calories
+                ),
+                proteinG: try RecipePersistenceValueMapper.double(
+                    from: input.totalMacros.proteinG
+                ),
+                carbG: try RecipePersistenceValueMapper.double(
+                    from: input.totalMacros.carbG
+                ),
+                fatG: try RecipePersistenceValueMapper.double(
+                    from: input.totalMacros.fatG
+                )
+            )
+        } catch {
+            throw RecipeRepositoryMutationError.invalidInput
+        }
+    }
+
+    private func archiveState() throws -> (
+        setting: AppSetting?,
+        ids: Set<UUID>
+    ) {
+        let settings = try fetchSettings(FetchDescriptor<AppSetting>())
+            .filter { $0.key == RecipeArchiveCodec.settingKey }
+        guard settings.count <= 1 else {
+            throw RecipeRepositoryIntegrityError.duplicateArchiveSettings(
+                count: settings.count
+            )
+        }
+        guard let setting = settings.first else {
+            return (nil, [])
+        }
+        return (setting, try RecipeArchiveCodec.decode(setting.value))
+    }
+
+    private func writeArchive(
+        _ ids: Set<UUID>,
+        setting: AppSetting?,
+        timestamp: Date
+    ) throws {
+        let value = try RecipeArchiveCodec.encode(ids)
+        if let setting {
+            setting.value = value
+            setting.updatedAt = timestamp
+        } else {
+            modelContext.insert(
+                AppSetting(
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                    key: RecipeArchiveCodec.settingKey,
+                    value: value
+                )
+            )
         }
     }
 

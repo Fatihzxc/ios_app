@@ -79,6 +79,34 @@ public struct NutritionMacros: Equatable, Sendable {
         )
     }
 
+    public func scaled(
+        by factor: Decimal,
+        dividedBy divisor: Decimal
+    ) throws -> NutritionMacros {
+        try NutritionMacros(
+            calories: NutritionDecimalMath.multiplyThenDivide(
+                calories,
+                multiplier: factor,
+                divisor: divisor
+            ),
+            proteinG: NutritionDecimalMath.multiplyThenDivide(
+                proteinG,
+                multiplier: factor,
+                divisor: divisor
+            ),
+            carbG: NutritionDecimalMath.multiplyThenDivide(
+                carbG,
+                multiplier: factor,
+                divisor: divisor
+            ),
+            fatG: NutritionDecimalMath.multiplyThenDivide(
+                fatG,
+                multiplier: factor,
+                divisor: divisor
+            )
+        )
+    }
+
     private init(
         canonicalCalories: Decimal,
         canonicalProteinG: Decimal,

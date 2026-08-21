@@ -111,6 +111,32 @@ enum NutritionDecimalMath {
         return try canonicalResult(result)
     }
 
+    static func multiplyThenDivide(
+        _ value: Decimal,
+        multiplier: Decimal,
+        divisor: Decimal
+    ) throws -> Decimal {
+        guard multiplier.isFinite else {
+            throw NutritionNumericError.nonFiniteScale
+        }
+        guard multiplier >= 0 else {
+            throw NutritionNumericError.negativeScale
+        }
+        guard divisor.isFinite, divisor > 0 else {
+            throw NutritionNumericError.divisionByZero
+        }
+
+        var value = value
+        var multiplier = multiplier
+        var product = Decimal()
+        try validate(NSDecimalMultiply(&product, &value, &multiplier, .bankers))
+
+        var divisor = divisor
+        var result = Decimal()
+        try validate(NSDecimalDivide(&result, &product, &divisor, .bankers))
+        return try canonicalResult(result)
+    }
+
     private static func canonicalResult(_ value: Decimal) throws -> Decimal {
         let result = rounded(value)
         guard result.isFinite else {
