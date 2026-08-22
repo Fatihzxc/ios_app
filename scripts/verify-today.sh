@@ -38,6 +38,8 @@ if "case .today:" not in root_text or "TodayView(" not in root_text:
     raise SystemExit("AppRootView must route the Today tab through TodayView.")
 if "todayViewModel" not in root_text:
     raise SystemExit("AppRootView must receive the composed TodayViewModel.")
+if "todayNutritionViewModel" not in root_text or "openTodayQuickAdd" not in root_text:
+    raise SystemExit("AppRootView must own Today nutrition state and the meal route.")
 
 view_model_text = view_model.read_text(encoding="utf-8")
 snapshot_call = "repository.fetchTodaySnapshot()"
@@ -56,13 +58,24 @@ required_identifiers = {
     "today.state.empty",
     "today.state.error",
     "today.performance.firstMeaningful",
+    "today.protein.consumed",
+    "today.protein.progress",
+    "today.nutrition.action",
 }
 missing_identifiers = sorted(identifier for identifier in required_identifiers if identifier not in today_text)
 if missing_identifiers:
     raise SystemExit(f"TodayView is missing accessibility contracts: {missing_identifiers}")
-for forbidden in ["today.protein.consumed", "today.protein.progress", "today.nutrition.action"]:
-    if forbidden in source_text:
-        raise SystemExit(f"Unavailable Today capability must not be exposed: {forbidden}")
+
+training_sources = list(
+    (root / "Packages/HealthTrackingModules/Sources/TrainingKit").rglob("*.swift")
+)
+nutrition_sources = list(
+    (root / "Packages/HealthTrackingModules/Sources/NutritionKit").rglob("*.swift")
+)
+if any("import NutritionKit" in path.read_text(encoding="utf-8") for path in training_sources):
+    raise SystemExit("TrainingKit must not import NutritionKit.")
+if any("import TrainingKit" in path.read_text(encoding="utf-8") for path in nutrition_sources):
+    raise SystemExit("NutritionKit must not import TrainingKit.")
 
 scenario_text = scenarios.read_text(encoding="utf-8")
 required_scenarios = {
@@ -86,11 +99,17 @@ self_test() {
         "$fixture/App/Support" \
         "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today" \
         "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Repository"
-    printf '%s\n' 'case .today: TodayView(todayViewModel)' 'let todayViewModel = value' > "$fixture/App/Application/AppRootView.swift"
+    printf '%s\n' \
+        'case .today: TodayView(todayViewModel)' \
+        'let todayViewModel = value' \
+        'let todayNutritionViewModel = value' \
+        'func openTodayQuickAdd() {}' \
+        > "$fixture/App/Application/AppRootView.swift"
     printf '%s\n' 'repository.fetchTodaySnapshot()' > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayViewModel.swift"
     printf '%s\n' \
         'root.today.content today.phase today.directive.context today.action.primary' \
         'today.state.loading today.state.empty today.state.error today.performance.firstMeaningful' \
+        'today.protein.consumed today.protein.progress today.nutrition.action' \
         > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift"
     printf '%s\n' 'func fetchTodaySnapshot() {}' > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Repository/TrainingRepository.swift"
     printf '%s\n' \

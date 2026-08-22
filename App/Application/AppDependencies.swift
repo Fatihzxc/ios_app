@@ -46,6 +46,8 @@ final class AppDependencies: AppDependencyLoading {
     lazy var nutritionRepository: any NutritionRepository = SwiftDataNutritionRepository(
         modelContext: mainContext
     )
+    let nutritionCalendar: Calendar = .autoupdatingCurrent
+    let nutritionNow: @MainActor () -> Date = { .now }
     private lazy var nutritionDayRepository: any NutritionDayViewRepository = {
         #if DEBUG
         switch AppUITestLaunchConfiguration.resolve()?.scenario {
@@ -66,8 +68,30 @@ final class AppDependencies: AppDependencyLoading {
         return nutritionRepository
         #endif
     }()
+    private lazy var nutritionQuickAddRepository: any NutritionQuickAddRepository = {
+        #if DEBUG
+        switch AppUITestLaunchConfiguration.resolve()?.scenario {
+        case .nutritionQuickAddErrorOnce:
+            return UITestNutritionQuickAddRepository(
+                repository: nutritionRepository,
+                failsFirstCreate: true
+            )
+        default:
+            return nutritionRepository
+        }
+        #else
+        return nutritionRepository
+        #endif
+    }()
     lazy var nutritionDayViewModel = NutritionDayViewModel(
-        repository: nutritionDayRepository
+        repository: nutritionDayRepository,
+        calendar: nutritionCalendar,
+        now: nutritionNow
+    )
+    lazy var todayNutritionViewModel = TodayNutritionViewModel(
+        repository: nutritionRepository,
+        calendar: nutritionCalendar,
+        now: nutritionNow
     )
     lazy var foodLibraryViewModel = FoodLibraryViewModel(
         repository: nutritionRepository
@@ -75,6 +99,22 @@ final class AppDependencies: AppDependencyLoading {
     lazy var recipeLibraryViewModel = RecipeLibraryViewModel(
         repository: nutritionRepository
     )
+    lazy var makeNutritionQuickAddViewModel: @MainActor (
+        NutritionDayKey,
+        MealCategory
+    ) -> NutritionQuickAddViewModel = { [unowned self] day, category in
+        let dayViewModel = nutritionDayViewModel
+        let todayNutritionViewModel = todayNutritionViewModel
+        return NutritionQuickAddViewModel(
+            repository: nutritionQuickAddRepository,
+            day: day,
+            initialCategory: category,
+            onSnapshotChange: { [weak dayViewModel, weak todayNutritionViewModel] snapshot in
+                try? dayViewModel?.applyQuickAddSnapshot(snapshot)
+                todayNutritionViewModel?.apply(snapshot: snapshot)
+            }
+        )
+    }
     private(set) var trainingHapticController: TrainingHapticController?
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
@@ -153,7 +193,8 @@ final class AppDependencies: AppDependencyLoading {
                  .todayRest, .todayResume, .todayDeload, .todayPhase, .todayReminder,
                  .todayPriority, .m1AcceptanceCatalog, .m1PRBaseline, .m1PRNew,
                  .nutritionContent, .nutritionEmpty, .nutritionErrorOnce,
-                 .nutritionDeleteErrorOnce:
+                 .nutritionDeleteErrorOnce, .nutritionQuickAdd,
+                 .nutritionQuickAddErrorOnce:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -448,6 +489,57 @@ private final class UITestNutritionDayRepository: NutritionDayViewRepository {
 }
 
 @MainActor
+private final class UITestNutritionQuickAddRepository: NutritionQuickAddRepository {
+    private enum FixtureFailure: Error {
+        case create
+    }
+
+    private let repository: any NutritionQuickAddRepository
+    private var failsNextCreate: Bool
+
+    init(
+        repository: any NutritionQuickAddRepository,
+        failsFirstCreate: Bool
+    ) {
+        self.repository = repository
+        failsNextCreate = failsFirstCreate
+    }
+
+    func fetchQuickAddRecipes(
+        for category: MealCategory
+    ) async throws -> [RecipeSnapshot] {
+        try await repository.fetchQuickAddRecipes(for: category)
+    }
+
+    func fetchMealEntries(
+        containing date: Date
+    ) async throws -> NutritionDayEntriesSnapshot {
+        try await repository.fetchMealEntries(containing: date)
+    }
+
+    func createMealEntry(
+        _ request: MealEntryCreateRequest
+    ) async throws -> NutritionDayEntriesSnapshot {
+        if failsNextCreate {
+            failsNextCreate = false
+            throw FixtureFailure.create
+        }
+        return try await repository.createMealEntry(request)
+    }
+
+    func updateMealEntry(
+        id: UUID,
+        update: MealEntryUpdate
+    ) async throws -> NutritionDayEntriesSnapshot {
+        try await repository.updateMealEntry(id: id, update: update)
+    }
+
+    func deleteMealEntry(id: UUID) async throws -> NutritionDayEntriesSnapshot {
+        try await repository.deleteMealEntry(id: id)
+    }
+}
+
+@MainActor
 private enum UITestSessionFixture {
     private static let familyDayID = uuid("00000000-0000-4000-8000-00000000f001")
     private static let familyWarmupID = uuid("00000000-0000-4000-8000-00000000f002")
@@ -517,6 +609,18 @@ private enum UITestSessionFixture {
     private static let nutritionCustomEntryID = uuid(
         "00000000-0000-4000-8000-00000000d102"
     )
+    private static let nutritionQuickBreakfastRecipeID = uuid(
+        "00000000-0000-4000-8000-00000000d201"
+    )
+    private static let nutritionQuickLunchRecipeID = uuid(
+        "00000000-0000-4000-8000-00000000d202"
+    )
+    private static let nutritionQuickDinnerRecipeID = uuid(
+        "00000000-0000-4000-8000-00000000d203"
+    )
+    private static let nutritionQuickSnackRecipeID = uuid(
+        "00000000-0000-4000-8000-00000000d204"
+    )
     private static let familyWeightExerciseID = uuid(
         "00000000-0000-4000-8000-00000000f010"
     )
@@ -569,9 +673,48 @@ private enum UITestSessionFixture {
             try installTodayPriority(in: modelContext)
         case .nutritionContent, .nutritionErrorOnce, .nutritionDeleteErrorOnce:
             try installNutritionContent(in: modelContext)
+        case .nutritionQuickAdd, .nutritionQuickAddErrorOnce:
+            try installNutritionQuickAdd(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow,
              .todayEmptyOnce, .todayErrorOnce, .nutritionEmpty:
             return
+        }
+    }
+
+    private static func installNutritionQuickAdd(
+        in modelContext: ModelContext
+    ) throws {
+        try installNutritionContent(in: modelContext)
+        let existingIDs = Set(
+            try modelContext.fetch(FetchDescriptor<Recipe>()).map(\.id)
+        )
+        let fixtures: [(UUID, String, MealCategory.Kind)] = [
+            (nutritionQuickBreakfastRecipeID, "Hızlı kahvaltı", .breakfast),
+            (nutritionQuickLunchRecipeID, "Hızlı öğle", .lunch),
+            (nutritionQuickDinnerRecipeID, "Hızlı akşam", .dinner),
+            (nutritionQuickSnackRecipeID, "Hızlı ara öğün", .snack),
+        ]
+        var inserted = false
+        for fixture in fixtures where !existingIDs.contains(fixture.0) {
+            modelContext.insert(
+                Recipe(
+                    id: fixture.0,
+                    createdAt: .now,
+                    updatedAt: .now,
+                    name: fixture.1,
+                    category: try MealCategory(kind: fixture.2),
+                    servings: 1,
+                    isDirectMacros: true,
+                    caloriesTotal: 200,
+                    proteinTotalG: 15,
+                    carbTotalG: 20,
+                    fatTotalG: 6
+                )
+            )
+            inserted = true
+        }
+        if inserted {
+            try modelContext.save()
         }
     }
 

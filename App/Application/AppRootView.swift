@@ -1,3 +1,4 @@
+import CoreModels
 import Foundation
 import NutritionKit
 import ReportsKit
@@ -8,12 +9,19 @@ import TrainingKit
 @MainActor
 struct AppRootView: View {
     let todayViewModel: TodayViewModel
+    let todayNutritionViewModel: TodayNutritionViewModel
     let foundationViewModel: FoundationProgramViewModel
     let phaseTransitionViewModel: PhaseTransitionViewModel
     let trainingHistoryViewModel: TrainingHistoryViewModel
     let nutritionDayViewModel: NutritionDayViewModel
     let foodLibraryViewModel: FoodLibraryViewModel
     let recipeLibraryViewModel: RecipeLibraryViewModel
+    let makeNutritionQuickAddViewModel: @MainActor (
+        NutritionDayKey,
+        MealCategory
+    ) -> NutritionQuickAddViewModel
+    let nutritionCalendar: Calendar
+    let nutritionNow: @MainActor () -> Date
     let makeSessionViewModel: @MainActor () -> SessionViewModel
     let trainingHapticController: TrainingHapticController?
     let shouldLoadFoundation: Bool
@@ -21,7 +29,9 @@ struct AppRootView: View {
 
     @State private var selectedTab = AppTab.today
     @State private var hasStartedFoundationLoad = false
+    @State private var hasStartedNutritionLoad = false
     @State private var sessionRoute: SessionRoute?
+    @State private var nutritionQuickAddRoute: NutritionQuickAddRoute?
 
     var body: some View {
         Group {
@@ -58,6 +68,10 @@ struct AppRootView: View {
             if todayViewModel.state == .loading {
                 await todayViewModel.load()
             }
+            if !hasStartedNutritionLoad {
+                hasStartedNutritionLoad = true
+                Task { await todayNutritionViewModel.load() }
+            }
             await foundationViewModel.load()
             await phaseTransitionViewModel.load()
         }
@@ -75,6 +89,14 @@ struct AppRootView: View {
                     }
                 }
             )
+        }
+        .sheet(item: $nutritionQuickAddRoute) { route in
+            NutritionQuickAddView(
+                viewModel: route.viewModel,
+                onSaved: { nutritionQuickAddRoute = nil },
+                onCancel: { nutritionQuickAddRoute = nil }
+            )
+            .presentationDetents([.medium, .large])
         }
     }
 
@@ -109,8 +131,13 @@ struct AppRootView: View {
         case .today:
             TodayView(
                 viewModel: todayViewModel,
+                nutritionState: todayNutritionViewModel.state,
                 exposesLaunchPerformanceEvidence: exposesLaunchPerformanceEvidence,
-                onPerformAction: performTodayAction
+                onPerformAction: performTodayAction,
+                onAddMeal: openTodayQuickAdd,
+                onRetryNutrition: {
+                    Task { await todayNutritionViewModel.retry() }
+                }
             )
         case .training:
             FoundationProgramView(
@@ -123,7 +150,8 @@ struct AppRootView: View {
             NutritionFoundationView(
                 dayViewModel: nutritionDayViewModel,
                 foodLibraryViewModel: foodLibraryViewModel,
-                recipeLibraryViewModel: recipeLibraryViewModel
+                recipeLibraryViewModel: recipeLibraryViewModel,
+                onAddMeal: openNutritionQuickAdd
             )
         case .progress:
             ReportsFoundationView()
@@ -157,6 +185,37 @@ struct AppRootView: View {
         openSession(workoutDayID: action.workoutDayID)
     }
 
+    private func openTodayQuickAdd() {
+        let date = nutritionNow()
+        guard let day = try? NutritionDayKey(
+            containing: date,
+            calendar: nutritionCalendar
+        ) else { return }
+        let category = MealCategorySuggestion.category(
+            at: date,
+            calendar: nutritionCalendar
+        )
+        selectedTab = .nutrition
+
+        if nutritionDayViewModel.selectedDay == day {
+            openNutritionQuickAdd(day: day, category: category)
+        } else {
+            Task {
+                await nutritionDayViewModel.selectDay(containing: date)
+                openNutritionQuickAdd(day: day, category: category)
+            }
+        }
+    }
+
+    private func openNutritionQuickAdd(
+        day: NutritionDayKey,
+        category: MealCategory
+    ) {
+        nutritionQuickAddRoute = NutritionQuickAddRoute(
+            viewModel: makeNutritionQuickAddViewModel(day, category)
+        )
+    }
+
     private var exposesLaunchPerformanceEvidence: Bool {
         #if DEBUG
         AppUITestLaunchConfiguration.resolve()?.exposesLaunchPerformanceEvidence == true
@@ -170,4 +229,10 @@ private struct SessionRoute: Identifiable {
     let id = UUID()
     let workoutDayID: UUID
     let viewModel: SessionViewModel
+}
+
+@MainActor
+private struct NutritionQuickAddRoute: Identifiable {
+    let id = UUID()
+    let viewModel: NutritionQuickAddViewModel
 }

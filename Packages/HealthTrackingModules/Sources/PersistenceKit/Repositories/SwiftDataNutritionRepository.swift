@@ -423,6 +423,40 @@ public final class SwiftDataNutritionRepository:
         )
     }
 
+    public func fetchQuickAddRecipes(
+        for category: MealCategory
+    ) async throws -> [RecipeSnapshot] {
+        let recipes = try fetchRecipeModels(FetchDescriptor<Recipe>())
+        try validateUniqueRecipeIDs(recipes)
+        let archive = try archiveState()
+        let persistedIDs = Set(recipes.map(\.id))
+        if let missingID = archive.ids
+            .subtracting(persistedIDs)
+            .sorted(by: { $0.uuidString < $1.uuidString })
+            .first {
+            throw RecipeRepositoryIntegrityError.archivedRecipeMissing(id: missingID)
+        }
+
+        let active = try recipes
+            .filter {
+                $0.category == category && !archive.ids.contains($0.id)
+            }
+            .map(recipeSnapshot)
+        let entries = try fetchEntries(FetchDescriptor<MealEntry>())
+        try validateUniqueMealEntryIDs(entries)
+        let usage = entries.compactMap { entry -> RecipeUsageEvent? in
+            guard let recipeID = entry.recipeId else { return nil }
+            return RecipeUsageEvent(
+                recipeID: recipeID,
+                loggedAt: entry.loggedAt
+            )
+        }
+        return NutritionQuickAddRanking.sorted(
+            recipes: active,
+            usage: usage
+        )
+    }
+
     public func createRecipe(
         _ input: RecipeInput
     ) async throws -> RecipeSnapshot {

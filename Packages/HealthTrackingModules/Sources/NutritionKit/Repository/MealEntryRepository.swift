@@ -42,7 +42,15 @@ public protocol NutritionDayViewRepository:
     MealEntryRepository {}
 
 @MainActor
+public protocol NutritionQuickAddRepository: MealEntryRepository {
+    func fetchQuickAddRecipes(
+        for category: MealCategory
+    ) async throws -> [RecipeSnapshot]
+}
+
+@MainActor
 public protocol NutritionRepository:
     NutritionDayViewRepository,
+    NutritionQuickAddRepository,
     FoodLibraryRepository,
     RecipeLibraryRepository {}

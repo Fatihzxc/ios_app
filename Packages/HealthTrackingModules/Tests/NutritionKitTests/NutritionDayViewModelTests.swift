@@ -583,6 +583,110 @@ final class NutritionDayViewModelTests: XCTestCase {
         await navigationTask.value
     }
 
+    func testQuickAddSnapshotPublishesImmediatelyAndInvalidatesAnOlderSameDayLoad() async throws {
+        let calendar = makeCalendar(timeZoneID: "Europe/Istanbul")
+        let now = makeDate(
+            year: 2026,
+            month: 8,
+            day: 21,
+            hour: 9,
+            calendar: calendar
+        )
+        let day = try NutritionDayKey(containing: now, calendar: calendar)
+        let repository = DayRepositoryStub(calendar: calendar)
+        let viewModel = NutritionDayViewModel(
+            repository: repository,
+            calendar: calendar,
+            now: { now }
+        )
+        await viewModel.load()
+
+        repository.suspendsEntryLoads = true
+        let staleLoad = Task { await viewModel.load() }
+        await waitUntil { repository.pendingEntryDays.contains(day) }
+        let optimisticEntry = try makeEntry(
+            id: uuid("00000000-0000-4000-8000-000000000981"),
+            category: MealCategory(kind: .breakfast),
+            name: "Hızlı öğün",
+            day: day,
+            value: 30
+        )
+        let optimistic = try makeSnapshot(day: day, entries: [optimisticEntry])
+
+        try viewModel.applyQuickAddSnapshot(optimistic)
+
+        var presentation = try contentPresentation(from: viewModel.state)
+        XCTAssertEqual(presentation.totalMacros.calories, 30)
+        repository.finishEntryLoad(
+            for: day,
+            with: .success(try makeSnapshot(day: day, entries: []))
+        )
+        await staleLoad.value
+
+        presentation = try contentPresentation(from: viewModel.state)
+        XCTAssertEqual(
+            presentation.sections[0].entries.map(\.id),
+            [optimisticEntry.id],
+            "A load started before quick-add must not overwrite its newer snapshot."
+        )
+    }
+
+    func testQuickAddBeforeInitialLoadPublishesImmediatelyThenReconcilesTargets() async throws {
+        let calendar = makeCalendar(timeZoneID: "Europe/Istanbul")
+        let now = makeDate(
+            year: 2026,
+            month: 8,
+            day: 21,
+            hour: 9,
+            calendar: calendar
+        )
+        let day = try NutritionDayKey(containing: now, calendar: calendar)
+        let repository = DayRepositoryStub(calendar: calendar)
+        repository.targets = NutritionMacroTargets(
+            calories: nil,
+            proteinG: 120,
+            carbG: nil,
+            fatG: nil
+        )
+        let viewModel = NutritionDayViewModel(
+            repository: repository,
+            calendar: calendar,
+            now: { now }
+        )
+        let entry = try makeEntry(
+            id: uuid("00000000-0000-4000-8000-000000000982"),
+            category: MealCategory(kind: .breakfast),
+            name: "İlk hızlı öğün",
+            day: day,
+            value: 30
+        )
+
+        try viewModel.applyQuickAddSnapshot(
+            try makeSnapshot(day: day, entries: [entry])
+        )
+
+        var presentation = try contentPresentation(from: viewModel.state)
+        XCTAssertEqual(
+            presentation.targets.proteinG,
+            .total(consumed: 30),
+            "The meal total must publish synchronously before target I/O finishes."
+        )
+        await waitUntil { repository.targetFetchCount == 1 }
+        await waitUntil {
+            guard case let .content(updated) = viewModel.state else { return false }
+            return updated.targets.proteinG == .targeted(
+                consumed: 30,
+                target: 120,
+                remaining: 90,
+                progress: 0.25
+            )
+        }
+
+        presentation = try contentPresentation(from: viewModel.state)
+        XCTAssertEqual(presentation.totalMacros.calories, 30)
+        XCTAssertEqual(presentation.sections[0].entries.map(\.id), [entry.id])
+    }
+
     private func contentPresentation(
         from state: NutritionDayViewState
     ) throws -> NutritionDayPresentation {
@@ -697,6 +801,7 @@ private final class DayRepositoryStub: NutritionDayViewRepository {
 
     private(set) var requestedEntryDays: [NutritionDayKey] = []
     private(set) var deletedEntryIDs: [UUID] = []
+    private(set) var targetFetchCount = 0
     private var entryContinuations: [
         Date: CheckedContinuation<NutritionDayEntriesSnapshot, Error>
     ] = [:]
@@ -740,7 +845,8 @@ private final class DayRepositoryStub: NutritionDayViewRepository {
     }
 
     func fetchNutritionTargets() async throws -> NutritionMacroTargets? {
-        targets
+        targetFetchCount += 1
+        return targets
     }
 
     func fetchMealEntries(

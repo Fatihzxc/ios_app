@@ -149,6 +149,77 @@ final class RecipeRepositoryTests: XCTestCase {
         assertEquatableSendable(all)
     }
 
+    func testQuickAddQueryRanksHistoricalUsageAndExcludesArchivedOrOtherCategories() async throws {
+        let fixture = try makeFixture()
+        let writer = ModelContext(fixture.container)
+        let breakfast = try MealCategory(kind: .breakfast)
+        let lunch = try MealCategory(kind: .lunch)
+        let frequentID = uuid("00000000-0000-4000-8000-000000000701")
+        let lessRecentID = uuid("00000000-0000-4000-8000-000000000702")
+        let unusedID = uuid("00000000-0000-4000-8000-000000000703")
+        let archivedID = uuid("00000000-0000-4000-8000-000000000704")
+        let lunchID = uuid("00000000-0000-4000-8000-000000000705")
+        let log = DailyNutritionLog(
+            id: uuid("00000000-0000-4000-8000-000000000799"),
+            date: Date(timeIntervalSinceReferenceDate: 0)
+        )
+        for recipe in [
+            persistedRecipe(id: frequentID, name: "Sık", category: breakfast),
+            persistedRecipe(id: lessRecentID, name: "Eski", category: breakfast),
+            persistedRecipe(id: unusedID, name: "Kullanılmadı", category: breakfast),
+            persistedRecipe(id: archivedID, name: "Arşiv", category: breakfast),
+            persistedRecipe(id: lunchID, name: "Öğle", category: lunch),
+        ] {
+            writer.insert(recipe)
+        }
+        writer.insert(log)
+
+        let usage: [(UUID, UUID, TimeInterval)] = [
+            (uuid("00000000-0000-4000-8000-000000000711"), frequentID, 100),
+            (uuid("00000000-0000-4000-8000-000000000712"), frequentID, 300),
+            (uuid("00000000-0000-4000-8000-000000000713"), lessRecentID, 100),
+            (uuid("00000000-0000-4000-8000-000000000714"), lessRecentID, 200),
+            (uuid("00000000-0000-4000-8000-000000000715"), archivedID, 100),
+            (uuid("00000000-0000-4000-8000-000000000716"), archivedID, 200),
+            (uuid("00000000-0000-4000-8000-000000000717"), archivedID, 400),
+            (uuid("00000000-0000-4000-8000-000000000718"), lunchID, 500),
+        ]
+        for item in usage {
+            let timestamp = Date(timeIntervalSinceReferenceDate: item.2)
+            writer.insert(
+                MealEntry(
+                    id: item.0,
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                    category: breakfast,
+                    recipeId: item.1,
+                    quantity: 1,
+                    caloriesResolved: 200,
+                    proteinResolved: 15,
+                    carbResolved: 20,
+                    fatResolved: 6,
+                    loggedAt: timestamp,
+                    dailyNutritionLog: log
+                )
+            )
+        }
+        writer.insert(
+            AppSetting(
+                key: RecipeArchiveCodec.settingKey,
+                value: try RecipeArchiveCodec.encode([archivedID])
+            )
+        )
+        try writer.save()
+
+        let recipes = try await fixture.repository.fetchQuickAddRecipes(
+            for: breakfast
+        )
+
+        XCTAssertEqual(recipes.map(\.id), [frequentID, lessRecentID, unusedID])
+        XCTAssertFalse(recipes.contains(where: { $0.id == archivedID }))
+        XCTAssertFalse(recipes.contains(where: { $0.id == lunchID }))
+    }
+
     func testReferencedRemoveArchivesAndRestorePreservesMealEntrySnapshot() async throws {
         let fixture = try makeFixture()
         let recipeID = uuid("00000000-0000-4000-8000-000000000621")

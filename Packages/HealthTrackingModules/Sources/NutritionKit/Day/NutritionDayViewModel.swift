@@ -197,6 +197,45 @@ public final class NutritionDayViewModel {
         }
     }
 
+    public func applyQuickAddSnapshot(
+        _ snapshot: NutritionDayEntriesSnapshot
+    ) throws {
+        try validate(snapshot, belongsTo: selectedDay)
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        mutationState = .idle
+        currentSnapshot = snapshot
+        try publish(snapshot: snapshot, targets: currentTargets)
+        if currentTargets == nil {
+            Task { [weak self] in
+                await self?.reconcileTargetsIfNeeded(
+                    for: snapshot.day,
+                    generation: generation
+                )
+            }
+        }
+    }
+
+    private func reconcileTargetsIfNeeded(
+        for day: NutritionDayKey,
+        generation: Int
+    ) async {
+        do {
+            let targets = try await repository.fetchNutritionTargets()
+            guard generation == loadGeneration,
+                  selectedDay == day,
+                  let snapshot = currentSnapshot,
+                  snapshot.day == day else {
+                return
+            }
+            try publish(snapshot: snapshot, targets: targets)
+            currentTargets = targets
+        } catch {
+            // The already-valid optimistic/canonical snapshot remains useful
+            // without targets. A later explicit load can retry target retrieval.
+        }
+    }
+
     private func moveSelectedDay(by value: Int) async {
         guard let destination = adjacentDay(by: value) else {
             state = .error(NutritionDayRetryContext(day: selectedDay))

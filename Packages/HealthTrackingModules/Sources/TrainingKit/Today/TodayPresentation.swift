@@ -277,3 +277,48 @@ public enum TodayViewState: Equatable, Sendable {
     case empty
     case error
 }
+
+public struct TodayNutritionMetricPresentation: Equatable, Sendable {
+    public let consumed: Decimal
+    public let target: Decimal?
+    public let remaining: Decimal?
+    public let progress: Decimal?
+
+    public init(
+        consumed: Decimal,
+        target: Decimal?,
+        remaining: Decimal?,
+        progress: Decimal?
+    ) {
+        self.consumed = consumed
+        self.target = target
+        self.remaining = remaining
+        self.progress = progress
+    }
+}
+
+public struct TodayNutritionPresentation: Equatable, Sendable {
+    public let calories: TodayNutritionMetricPresentation
+    public let protein: TodayNutritionMetricPresentation
+    public let carbs: TodayNutritionMetricPresentation
+    public let fat: TodayNutritionMetricPresentation
+
+    public init(
+        calories: TodayNutritionMetricPresentation,
+        protein: TodayNutritionMetricPresentation,
+        carbs: TodayNutritionMetricPresentation,
+        fat: TodayNutritionMetricPresentation
+    ) {
+        self.calories = calories
+        self.protein = protein
+        self.carbs = carbs
+        self.fat = fat
+    }
+}
+
+public enum TodayNutritionViewState: Equatable, Sendable {
+    case loading
+    case empty(TodayNutritionPresentation)
+    case content(TodayNutritionPresentation)
+    case error
+}

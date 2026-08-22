@@ -22,12 +22,16 @@ final class TrainingHapticCompositionTests: XCTestCase {
         session.stepperChanged()
         _ = AppRootView(
             todayViewModel: dependencies.todayViewModel,
+            todayNutritionViewModel: dependencies.todayNutritionViewModel,
             foundationViewModel: dependencies.foundationViewModel,
             phaseTransitionViewModel: dependencies.phaseTransitionViewModel,
             trainingHistoryViewModel: dependencies.trainingHistoryViewModel,
             nutritionDayViewModel: dependencies.nutritionDayViewModel,
             foodLibraryViewModel: dependencies.foodLibraryViewModel,
             recipeLibraryViewModel: dependencies.recipeLibraryViewModel,
+            makeNutritionQuickAddViewModel: dependencies.makeNutritionQuickAddViewModel,
+            nutritionCalendar: dependencies.nutritionCalendar,
+            nutritionNow: dependencies.nutritionNow,
             makeSessionViewModel: dependencies.makeSessionViewModel,
             trainingHapticController: dependencies.trainingHapticController,
             shouldLoadFoundation: dependencies.shouldLoadFoundation,

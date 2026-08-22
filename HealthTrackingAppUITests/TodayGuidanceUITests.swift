@@ -91,18 +91,27 @@ final class TodayGuidanceUITests: XCTestCase {
                             XCTAssertTrue(app.frame.contains(element.frame))
                         }
                     }
-                    XCTAssertFalse(
-                        identified("today.protein.consumed", in: app).exists,
-                        "M1 must not fabricate consumed protein."
+                    let consumedProtein = require(
+                        identified("today.protein.consumed", in: app),
+                        "M2 must expose an explicit zero-consumed protein summary for an empty day."
                     )
-                    XCTAssertFalse(
-                        identified("today.protein.progress", in: app).exists,
-                        "M1 must not fabricate nutrition progress."
+                    let proteinAnnouncement = [
+                        consumedProtein.label,
+                        consumedProtein.value as? String ?? "",
+                    ].joined(separator: " ")
+                    XCTAssertTrue(
+                        proteinAnnouncement.contains("0 /"),
+                        "An empty nutrition day must announce zero consumed against its real target."
                     )
-                    XCTAssertFalse(
-                        identified("today.nutrition.action", in: app).exists,
-                        "M1 must not expose an unavailable meal action."
+                    require(
+                        identified("today.protein.progress", in: app),
+                        "A targeted empty day must expose truthful zero progress."
                     )
+                    let nutritionAction = require(
+                        identified("today.nutrition.action", in: app),
+                        "Every loaded or empty nutrition state must expose the app-owned meal route."
+                    )
+                    XCTAssertFalse(nutritionAction.label.isEmpty)
                     attachScreenshot(
                         named: "today-\(item.name)-\(appearance.rawValue)-\(textSize.rawValue)"
                     )

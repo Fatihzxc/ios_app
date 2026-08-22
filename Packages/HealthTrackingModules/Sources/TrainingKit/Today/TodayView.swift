@@ -10,17 +10,26 @@ public struct TodayView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private let viewModel: TodayViewModel
+    private let nutritionState: TodayNutritionViewState
     private let exposesLaunchPerformanceEvidence: Bool
     private let onPerformAction: @MainActor (TodayMainAction) -> Void
+    private let onAddMeal: @MainActor () -> Void
+    private let onRetryNutrition: @MainActor () -> Void
 
     public init(
         viewModel: TodayViewModel,
+        nutritionState: TodayNutritionViewState = .loading,
         exposesLaunchPerformanceEvidence: Bool = false,
-        onPerformAction: @escaping @MainActor (TodayMainAction) -> Void = { _ in }
+        onPerformAction: @escaping @MainActor (TodayMainAction) -> Void = { _ in },
+        onAddMeal: @escaping @MainActor () -> Void = {},
+        onRetryNutrition: @escaping @MainActor () -> Void = {}
     ) {
         self.viewModel = viewModel
+        self.nutritionState = nutritionState
         self.exposesLaunchPerformanceEvidence = exposesLaunchPerformanceEvidence
         self.onPerformAction = onPerformAction
+        self.onAddMeal = onAddMeal
+        self.onRetryNutrition = onRetryNutrition
     }
 
     public var body: some View {
@@ -123,7 +132,10 @@ public struct TodayView: View {
             .accessibilityIdentifier("today.action.primary")
             .accessibilityHint(text("today.action.hint"))
 
-            proteinCard(targetG: presentation.proteinTargetG)
+            nutritionContent(
+                state: nutritionState,
+                fallbackProteinTargetG: presentation.proteinTargetG
+            )
 
             #if DEBUG
             if exposesLaunchPerformanceEvidence,
@@ -279,6 +291,155 @@ public struct TodayView: View {
             }
         }
         .accessibilityIdentifier("today.protein.target")
+    }
+
+    @ViewBuilder
+    private func nutritionContent(
+        state: TodayNutritionViewState,
+        fallbackProteinTargetG: Double
+    ) -> some View {
+        switch state {
+        case .loading:
+            proteinCard(targetG: fallbackProteinTargetG)
+                .accessibilityIdentifier("today.nutrition.loading")
+        case let .empty(presentation):
+            mealActionButton
+            nutritionCard(presentation)
+        case let .content(presentation):
+            mealActionButton
+            nutritionCard(presentation)
+        case .error:
+            mealActionButton
+            AppCard {
+                VStack(alignment: .leading, spacing: AppSpacing.standard) {
+                    Text(text("today.nutrition.error"))
+                        .font(AppTypography.body)
+                        .foregroundStyle(AppColors.color(.stateDanger, scheme: colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                    PrimaryActionButton(
+                        title: text("today.nutrition.retry"),
+                        accessibilityLabel: text("today.nutrition.retry")
+                    ) {
+                        onRetryNutrition()
+                    }
+                    .accessibilityIdentifier("today.nutrition.retry")
+                }
+            }
+            .accessibilityIdentifier("today.nutrition.error")
+        }
+    }
+
+    private func nutritionCard(
+        _ presentation: TodayNutritionPresentation
+    ) -> some View {
+        AppCard {
+            VStack(alignment: .leading, spacing: AppSpacing.standard) {
+                Text(text("today.nutrition.title"))
+                    .font(AppTypography.titleMedium)
+                    .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                nutritionMetric(
+                    title: text("today.nutrition.calories"),
+                    unit: text("today.nutrition.unit.kcal"),
+                    metric: presentation.calories,
+                    consumedIdentifier: "today.calories.consumed",
+                    progressIdentifier: "today.calories.progress"
+                )
+                nutritionMetric(
+                    title: text("today.nutrition.protein"),
+                    unit: text("today.nutrition.unit.gram"),
+                    metric: presentation.protein,
+                    consumedIdentifier: "today.protein.consumed",
+                    progressIdentifier: "today.protein.progress"
+                )
+                nutritionMetric(
+                    title: text("today.nutrition.carbs"),
+                    unit: text("today.nutrition.unit.gram"),
+                    metric: presentation.carbs,
+                    consumedIdentifier: "today.carbs.consumed",
+                    progressIdentifier: "today.carbs.progress"
+                )
+                nutritionMetric(
+                    title: text("today.nutrition.fat"),
+                    unit: text("today.nutrition.unit.gram"),
+                    metric: presentation.fat,
+                    consumedIdentifier: "today.fat.consumed",
+                    progressIdentifier: "today.fat.progress"
+                )
+            }
+        }
+        .accessibilityIdentifier("today.nutrition.content")
+    }
+
+    @ViewBuilder
+    private func nutritionMetric(
+        title: String,
+        unit: String,
+        metric: TodayNutritionMetricPresentation,
+        consumedIdentifier: String,
+        progressIdentifier: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.small) {
+            Text(title)
+                .font(AppTypography.label)
+                .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
+            Text(nutritionMetricValue(metric, unit: unit))
+                .font(AppTypography.numericRow)
+                .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(consumedIdentifier)
+            if let progress = metric.progress {
+                ProgressView(
+                    value: NSDecimalNumber(
+                        decimal: min(max(progress, 0), 1)
+                    ).doubleValue
+                )
+                .tint(AppColors.color(.accentAction, scheme: colorScheme))
+                .accessibilityIdentifier(progressIdentifier)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityValue(nutritionMetricValue(metric, unit: unit))
+    }
+
+    private var mealActionButton: some View {
+        PrimaryActionButton(
+            title: text("today.nutrition.add"),
+            accessibilityLabel: text("today.nutrition.add")
+        ) {
+            onAddMeal()
+        }
+        .accessibilityHint(text("today.nutrition.add.hint"))
+        .accessibilityIdentifier("today.nutrition.action")
+    }
+
+    private func nutritionMetricValue(
+        _ metric: TodayNutritionMetricPresentation,
+        unit: String
+    ) -> String {
+        if let target = metric.target, let remaining = metric.remaining {
+            return format(
+                "today.nutrition.metric.targeted",
+                formatted(metric.consumed),
+                formatted(target),
+                formatted(remaining),
+                unit
+            )
+        }
+        return format(
+            "today.nutrition.metric.total",
+            formatted(metric.consumed),
+            unit
+        )
+    }
+
+    private func formatted(_ value: Decimal) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = .current
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 3
+        return formatter.string(from: NSDecimalNumber(decimal: value)) ?? ""
     }
 
     private func restContext(
