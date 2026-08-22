@@ -34,6 +34,7 @@ enum AppUITestScenario: String {
     case nutritionEmpty = "nutrition-empty"
     case nutritionErrorOnce = "nutrition-error-once"
     case nutritionDeleteErrorOnce = "nutrition-delete-error-once"
+    case nutritionQuickAdd = "nutrition-quick-add"
 }
 
 struct AppUITestLaunchConfiguration {

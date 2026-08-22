@@ -270,6 +270,10 @@ public final class SwiftDataNutritionRepository:
     }
 
     public func fetchNutritionTargets() async throws -> NutritionMacroTargets? {
+        try nutritionTargetsSnapshot()
+    }
+
+    private func nutritionTargetsSnapshot() throws -> NutritionMacroTargets? {
         let profiles = try fetchProfiles(FetchDescriptor<UserProfile>())
         guard profiles.count <= 1 else {
             throw NutritionRepositoryIntegrityError.duplicateUserProfiles(
@@ -394,6 +398,16 @@ public final class SwiftDataNutritionRepository:
         matching query: String,
         category: MealCategory.Kind?
     ) async throws -> RecipeLibrarySnapshot {
+        let library = try recipeLibrarySnapshot()
+        return RecipeSearch.library(
+            active: library.active,
+            archived: library.archived,
+            matching: query,
+            category: category
+        )
+    }
+
+    private func recipeLibrarySnapshot() throws -> RecipeLibrarySnapshot {
         let recipes = try fetchRecipeModels(FetchDescriptor<Recipe>())
         try validateUniqueRecipeIDs(recipes)
         let archive = try archiveState()
@@ -415,12 +429,7 @@ public final class SwiftDataNutritionRepository:
                 active.append(snapshot)
             }
         }
-        return RecipeSearch.library(
-            active: active,
-            archived: archived,
-            matching: query,
-            category: category
-        )
+        return RecipeLibrarySnapshot(active: active, archived: archived)
     }
 
     public func createRecipe(
@@ -1031,6 +1040,41 @@ private struct MealEntryPersistenceValues {
 }
 
 extension SwiftDataNutritionRepository {
+    public func fetchQuickAddContext(
+        containing date: Date
+    ) async throws -> NutritionQuickAddContext {
+        let day = try NutritionDayKey(containing: date, calendar: calendar)
+        let daySnapshot = try mealEntriesSnapshot(
+            day: day,
+            log: uniqueDayLog(for: day)
+        )
+        let targets = try nutritionTargetsSnapshot()
+        let recipes = try recipeLibrarySnapshot()
+        let allEntries = try fetchEntries(FetchDescriptor<MealEntry>())
+        try validateUniqueMealEntryIDs(allEntries)
+        let usage = try allEntries.compactMap { entry -> RecipeUsageEvent? in
+            let snapshot = try mealEntrySnapshot(
+                entry,
+                resolvingSourceNames: false
+            )
+            guard case let .recipe(recipeID, _) = snapshot.source else { return nil }
+            return RecipeUsageEvent(
+                recipeID: recipeID,
+                category: snapshot.category,
+                loggedAt: snapshot.loggedAt
+            )
+        }.sorted { lhs, rhs in
+            if lhs.loggedAt != rhs.loggedAt { return lhs.loggedAt > rhs.loggedAt }
+            return lhs.recipeID.uuidString < rhs.recipeID.uuidString
+        }
+        return NutritionQuickAddContext(
+            daySnapshot: daySnapshot,
+            targets: targets,
+            activeRecipes: recipes.active,
+            usage: usage
+        )
+    }
+
     public func fetchMealEntries(
         containing date: Date
     ) async throws -> NutritionDayEntriesSnapshot {

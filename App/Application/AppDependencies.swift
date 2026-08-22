@@ -75,6 +75,13 @@ final class AppDependencies: AppDependencyLoading {
     lazy var recipeLibraryViewModel = RecipeLibraryViewModel(
         repository: nutritionRepository
     )
+    lazy var nutritionQuickAddViewModel = NutritionQuickAddViewModel(
+        repository: nutritionRepository,
+        makeID: { Self.makeNutritionQuickAddRequestID() }
+    )
+    lazy var todayNutritionViewModel = TodayNutritionViewModel(
+        repository: nutritionRepository
+    )
     private(set) var trainingHapticController: TrainingHapticController?
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
@@ -153,7 +160,7 @@ final class AppDependencies: AppDependencyLoading {
                  .todayRest, .todayResume, .todayDeload, .todayPhase, .todayReminder,
                  .todayPriority, .m1AcceptanceCatalog, .m1PRBaseline, .m1PRNew,
                  .nutritionContent, .nutritionEmpty, .nutritionErrorOnce,
-                 .nutritionDeleteErrorOnce:
+                 .nutritionDeleteErrorOnce, .nutritionQuickAdd:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -252,6 +259,15 @@ final class AppDependencies: AppDependencyLoading {
         hapticControllerReference.value = controller
         phaseTransitionViewModel.installHaptics(controller)
         return controller
+    }
+
+    private static func makeNutritionQuickAddRequestID() -> UUID {
+        #if DEBUG
+        if AppUITestLaunchConfiguration.resolve()?.scenario == .nutritionQuickAdd {
+            return UUID(uuidString: "00000000-0000-4000-8000-00000000d201")!
+        }
+        #endif
+        return UUID()
     }
 
     #if DEBUG
@@ -517,6 +533,9 @@ private enum UITestSessionFixture {
     private static let nutritionCustomEntryID = uuid(
         "00000000-0000-4000-8000-00000000d102"
     )
+    private static let nutritionQuickAddRecipeID = uuid(
+        "00000000-0000-4000-8000-00000000d200"
+    )
     private static let familyWeightExerciseID = uuid(
         "00000000-0000-4000-8000-00000000f010"
     )
@@ -569,6 +588,8 @@ private enum UITestSessionFixture {
             try installTodayPriority(in: modelContext)
         case .nutritionContent, .nutritionErrorOnce, .nutritionDeleteErrorOnce:
             try installNutritionContent(in: modelContext)
+        case .nutritionQuickAdd:
+            try installNutritionQuickAdd(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow,
              .todayEmptyOnce, .todayErrorOnce, .nutritionEmpty:
             return
@@ -646,6 +667,33 @@ private enum UITestSessionFixture {
         modelContext.insert(food)
         modelContext.insert(breakfast)
         modelContext.insert(custom)
+        try modelContext.save()
+    }
+
+    private static func installNutritionQuickAdd(
+        in modelContext: ModelContext
+    ) throws {
+        let recipes = try modelContext.fetch(FetchDescriptor<Recipe>())
+        guard !recipes.contains(where: { $0.id == nutritionQuickAddRecipeID }) else {
+            return
+        }
+        let now = Date.now
+        modelContext.insert(
+            Recipe(
+                id: nutritionQuickAddRecipeID,
+                createdAt: now,
+                updatedAt: now,
+                name: "Yulaf kasesi",
+                category: try MealCategory(kind: .breakfast),
+                servings: 1,
+                isDirectMacros: true,
+                caloriesTotal: 300,
+                proteinTotalG: 25,
+                carbTotalG: 35,
+                fatTotalG: 8,
+                note: "Sentetik hızlı ekleme testi"
+            )
+        )
         try modelContext.save()
     }
 

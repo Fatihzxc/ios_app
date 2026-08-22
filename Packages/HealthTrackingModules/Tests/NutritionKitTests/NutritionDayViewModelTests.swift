@@ -583,6 +583,105 @@ final class NutritionDayViewModelTests: XCTestCase {
         await navigationTask.value
     }
 
+    func testQuickAddSnapshotPublishesImmediatelyAndInvalidatesAnOlderSameDayLoad() async throws {
+        let calendar = makeCalendar(timeZoneID: "Europe/Istanbul")
+        let now = makeDate(
+            year: 2026,
+            month: 8,
+            day: 21,
+            hour: 9,
+            calendar: calendar
+        )
+        let day = try NutritionDayKey(containing: now, calendar: calendar)
+        let repository = DayRepositoryStub(calendar: calendar)
+        repository.snapshotsByStart[day.start] = try makeSnapshot(day: day, entries: [])
+        let viewModel = NutritionDayViewModel(
+            repository: repository,
+            calendar: calendar,
+            now: { now }
+        )
+        await viewModel.load()
+        repository.suspendsEntryLoads = true
+        let staleLoad = Task { await viewModel.load() }
+        await waitUntil { repository.pendingEntryDays.contains(day) }
+        let optimistic = try makeSnapshot(
+            day: day,
+            entries: [try makeEntry(
+                id: uuid("00000000-0000-4000-8000-000000000981"),
+                category: MealCategory(kind: .breakfast),
+                name: "Optimistic",
+                day: day,
+                value: 25
+            )]
+        )
+        let targets = NutritionMacroTargets(
+            calories: nil,
+            proteinG: 120,
+            carbG: nil,
+            fatG: nil
+        )
+
+        viewModel.applyQuickAdd(snapshot: optimistic, targets: targets)
+
+        XCTAssertEqual(try contentPresentation(from: viewModel.state).totalMacros, try macros(25))
+        repository.finishEntryLoad(
+            for: day,
+            with: .success(try makeSnapshot(day: day, entries: []))
+        )
+        await staleLoad.value
+        XCTAssertEqual(
+            try contentPresentation(from: viewModel.state).sections[0].entries.map(\.id),
+            optimistic.entries.map(\.id),
+            "A load started before the optimistic publication must not erase it."
+        )
+    }
+
+    func testQuickAddSnapshotForAnotherDayCannotOverwriteTheSelectedDay() async throws {
+        let calendar = makeCalendar(timeZoneID: "Europe/Istanbul")
+        let now = makeDate(
+            year: 2026,
+            month: 8,
+            day: 21,
+            hour: 9,
+            calendar: calendar
+        )
+        let day = try NutritionDayKey(containing: now, calendar: calendar)
+        let otherDay = try NutritionDayKey(
+            containing: makeDate(
+                year: 2026,
+                month: 8,
+                day: 22,
+                hour: 9,
+                calendar: calendar
+            ),
+            calendar: calendar
+        )
+        let repository = DayRepositoryStub(calendar: calendar)
+        repository.snapshotsByStart[day.start] = try makeSnapshot(day: day, entries: [])
+        let viewModel = NutritionDayViewModel(
+            repository: repository,
+            calendar: calendar,
+            now: { now }
+        )
+        await viewModel.load()
+        let initial = viewModel.state
+        let foreign = try makeSnapshot(
+            day: otherDay,
+            entries: [try makeEntry(
+                id: uuid("00000000-0000-4000-8000-000000000982"),
+                category: MealCategory(kind: .breakfast),
+                name: "Başka gün",
+                day: otherDay,
+                value: 30
+            )]
+        )
+
+        viewModel.applyQuickAdd(snapshot: foreign, targets: nil)
+
+        XCTAssertEqual(viewModel.state, initial)
+        XCTAssertEqual(viewModel.selectedDay, day)
+    }
+
     private func contentPresentation(
         from state: NutritionDayViewState
     ) throws -> NutritionDayPresentation {

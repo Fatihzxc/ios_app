@@ -45,4 +45,5 @@ public protocol NutritionDayViewRepository:
 public protocol NutritionRepository:
     NutritionDayViewRepository,
     FoodLibraryRepository,
-    RecipeLibraryRepository {}
+    RecipeLibraryRepository,
+    NutritionQuickAddRepository {}

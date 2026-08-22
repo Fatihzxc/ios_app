@@ -56,13 +56,24 @@ required_identifiers = {
     "today.state.empty",
     "today.state.error",
     "today.performance.firstMeaningful",
+    "today.protein.consumed",
+    "today.protein.progress",
+    "today.nutrition.action",
 }
 missing_identifiers = sorted(identifier for identifier in required_identifiers if identifier not in today_text)
 if missing_identifiers:
     raise SystemExit(f"TodayView is missing accessibility contracts: {missing_identifiers}")
-for forbidden in ["today.protein.consumed", "today.protein.progress", "today.nutrition.action"]:
-    if forbidden in source_text:
-        raise SystemExit(f"Unavailable Today capability must not be exposed: {forbidden}")
+
+training_sources = list(
+    (root / "Packages/HealthTrackingModules/Sources/TrainingKit").rglob("*.swift")
+)
+nutrition_sources = list(
+    (root / "Packages/HealthTrackingModules/Sources/NutritionKit").rglob("*.swift")
+)
+if any("import NutritionKit" in path.read_text(encoding="utf-8") for path in training_sources):
+    raise SystemExit("TrainingKit must not import NutritionKit for Today composition.")
+if any("import TrainingKit" in path.read_text(encoding="utf-8") for path in nutrition_sources):
+    raise SystemExit("NutritionKit must not import TrainingKit for Today composition.")
 
 scenario_text = scenarios.read_text(encoding="utf-8")
 required_scenarios = {
@@ -91,6 +102,7 @@ self_test() {
     printf '%s\n' \
         'root.today.content today.phase today.directive.context today.action.primary' \
         'today.state.loading today.state.empty today.state.error today.performance.firstMeaningful' \
+        'today.protein.consumed today.protein.progress today.nutrition.action' \
         > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift"
     printf '%s\n' 'func fetchTodaySnapshot() {}' > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Repository/TrainingRepository.swift"
     printf '%s\n' \
@@ -113,6 +125,30 @@ self_test() {
         return 1
     fi
     grep -Fq "exactly one compact snapshot call" "$fixture/double-fetch.out"
+
+    printf '%s\n' \
+        'root.today.content today.phase today.directive.context today.action.primary' \
+        'today.state.loading today.state.empty today.state.error today.performance.firstMeaningful' \
+        'today.protein.consumed today.protein.progress' \
+        > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift"
+    printf '%s\n' 'repository.fetchTodaySnapshot()' > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayViewModel.swift"
+    if verify_repo "$fixture" >"$fixture/missing-nutrition.out" 2>&1; then
+        echo "Today verifier self-test expected a missing M2 nutrition contract to fail." >&2
+        return 1
+    fi
+    grep -Fq "today.nutrition.action" "$fixture/missing-nutrition.out"
+
+    printf '%s\n' \
+        'root.today.content today.phase today.directive.context today.action.primary' \
+        'today.state.loading today.state.empty today.state.error today.performance.firstMeaningful' \
+        'today.protein.consumed today.protein.progress today.nutrition.action' \
+        > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift"
+    printf '%s\n' 'import NutritionKit' > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/ForbiddenImport.swift"
+    if verify_repo "$fixture" >"$fixture/import-boundary.out" 2>&1; then
+        echo "Today verifier self-test expected a cross-feature import to fail." >&2
+        return 1
+    fi
+    grep -Fq "TrainingKit must not import NutritionKit" "$fixture/import-boundary.out"
     echo "Today verifier self-tests passed."
 }
 

@@ -197,6 +197,24 @@ public final class NutritionDayViewModel {
         }
     }
 
+    public func applyQuickAdd(
+        snapshot: NutritionDayEntriesSnapshot,
+        targets: NutritionMacroTargets?
+    ) {
+        guard snapshot.day == selectedDay else { return }
+        loadGeneration &+= 1
+        mutationState = .idle
+        do {
+            currentSnapshot = snapshot
+            currentTargets = targets
+            try publish(snapshot: snapshot, targets: targets)
+        } catch {
+            currentSnapshot = nil
+            currentTargets = nil
+            state = .error(NutritionDayRetryContext(day: selectedDay))
+        }
+    }
+
     private func moveSelectedDay(by value: Int) async {
         guard let destination = adjacentDay(by: value) else {
             state = .error(NutritionDayRetryContext(day: selectedDay))

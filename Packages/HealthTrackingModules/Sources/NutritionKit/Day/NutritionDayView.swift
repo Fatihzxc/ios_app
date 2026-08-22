@@ -11,15 +11,18 @@ public struct NutritionDayView: View {
     @Bindable private var viewModel: NutritionDayViewModel
     private let foodLibraryViewModel: FoodLibraryViewModel
     private let recipeLibraryViewModel: RecipeLibraryViewModel
+    private let onAddMeal: @MainActor (MealCategory) -> Void
 
     public init(
         viewModel: NutritionDayViewModel,
         foodLibraryViewModel: FoodLibraryViewModel,
-        recipeLibraryViewModel: RecipeLibraryViewModel
+        recipeLibraryViewModel: RecipeLibraryViewModel,
+        onAddMeal: @escaping @MainActor (MealCategory) -> Void = { _ in }
     ) {
         self.viewModel = viewModel
         self.foodLibraryViewModel = foodLibraryViewModel
         self.recipeLibraryViewModel = recipeLibraryViewModel
+        self.onAddMeal = onAddMeal
     }
 
     public var body: some View {
@@ -294,8 +297,8 @@ public struct NutritionDayView: View {
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier(sectionIdentifier(section.category))
                     Spacer(minLength: AppSpacing.compact)
-                    NavigationLink {
-                        RecipeLibraryView(viewModel: recipeLibraryViewModel)
+                    Button {
+                        onAddMeal(section.category)
                     } label: {
                         Image(systemName: "plus")
                             .frame(width: 52, height: 52)

@@ -55,6 +55,10 @@ final class NutritionCompositionTests: XCTestCase {
             AppUITestScenario.nutritionDeleteErrorOnce.rawValue,
             "nutrition-delete-error-once"
         )
+        XCTAssertEqual(
+            AppUITestScenario.nutritionQuickAdd.rawValue,
+            "nutrition-quick-add"
+        )
     }
 
     private static let rootInitializerIsTypeChecked: () -> Void = {
@@ -64,9 +68,11 @@ final class NutritionCompositionTests: XCTestCase {
             foundationViewModel: dependencies.foundationViewModel,
             phaseTransitionViewModel: dependencies.phaseTransitionViewModel,
             trainingHistoryViewModel: dependencies.trainingHistoryViewModel,
+            todayNutritionViewModel: dependencies.todayNutritionViewModel,
             nutritionDayViewModel: dependencies.nutritionDayViewModel,
             foodLibraryViewModel: dependencies.foodLibraryViewModel,
             recipeLibraryViewModel: dependencies.recipeLibraryViewModel,
+            nutritionQuickAddViewModel: dependencies.nutritionQuickAddViewModel,
             makeSessionViewModel: dependencies.makeSessionViewModel,
             trainingHapticController: dependencies.trainingHapticController,
             shouldLoadFoundation: dependencies.shouldLoadFoundation,

@@ -10,17 +10,23 @@ public struct TodayView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private let viewModel: TodayViewModel
+    private let nutritionState: TodayNutritionViewState
     private let exposesLaunchPerformanceEvidence: Bool
     private let onPerformAction: @MainActor (TodayMainAction) -> Void
+    private let onAddMeal: @MainActor () -> Void
 
     public init(
         viewModel: TodayViewModel,
+        nutritionState: TodayNutritionViewState = .loading,
         exposesLaunchPerformanceEvidence: Bool = false,
-        onPerformAction: @escaping @MainActor (TodayMainAction) -> Void = { _ in }
+        onPerformAction: @escaping @MainActor (TodayMainAction) -> Void = { _ in },
+        onAddMeal: @escaping @MainActor () -> Void = {}
     ) {
         self.viewModel = viewModel
+        self.nutritionState = nutritionState
         self.exposesLaunchPerformanceEvidence = exposesLaunchPerformanceEvidence
         self.onPerformAction = onPerformAction
+        self.onAddMeal = onAddMeal
     }
 
     public var body: some View {
@@ -123,7 +129,24 @@ public struct TodayView: View {
             .accessibilityIdentifier("today.action.primary")
             .accessibilityHint(text("today.action.hint"))
 
-            proteinCard(targetG: presentation.proteinTargetG)
+            Button(action: onAddMeal) {
+                Label(
+                    text("today.nutrition.action"),
+                    systemImage: "plus.circle.fill"
+                )
+                .font(AppTypography.label)
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.bordered)
+            .tint(AppColors.color(.accentAction, scheme: colorScheme))
+            .accessibilityIdentifier("today.nutrition.action")
+            .accessibilityHint(text("today.nutrition.action.hint"))
+
+            nutritionCard(
+                state: nutritionState,
+                fallbackProteinTargetG: presentation.proteinTargetG
+            )
 
             #if DEBUG
             if exposesLaunchPerformanceEvidence,
@@ -279,6 +302,106 @@ public struct TodayView: View {
             }
         }
         .accessibilityIdentifier("today.protein.target")
+    }
+
+    @ViewBuilder
+    private func nutritionCard(
+        state: TodayNutritionViewState,
+        fallbackProteinTargetG: Double
+    ) -> some View {
+        switch state {
+        case let .empty(presentation), let .content(presentation):
+            trackedNutritionCard(presentation)
+        case .loading, .error:
+            proteinCard(targetG: fallbackProteinTargetG)
+        }
+    }
+
+    private func trackedNutritionCard(
+        _ presentation: TodayNutritionPresentation
+    ) -> some View {
+        AppCard {
+            VStack(alignment: .leading, spacing: AppSpacing.compact) {
+                Text(text("today.nutrition.heading"))
+                    .font(AppTypography.titleMedium)
+                    .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(text("today.protein.title"))
+                    .font(AppTypography.label)
+                    .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
+
+                Text(proteinValue(presentation.protein))
+                    .font(AppTypography.numericRow)
+                    .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityValue(proteinValue(presentation.protein))
+                    .accessibilityIdentifier("today.protein.consumed")
+
+                if let progress = presentation.protein.clampedProgress {
+                    ProgressView(value: NSDecimalNumber(decimal: progress).doubleValue)
+                        .tint(AppColors.color(.accentAction, scheme: colorScheme))
+                        .accessibilityLabel(text("today.protein.progress.label"))
+                        .accessibilityValue(proteinValue(presentation.protein))
+                        .accessibilityIdentifier("today.protein.progress")
+                }
+
+                Text(nutritionSummary(presentation))
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("today.nutrition.summary")
+    }
+
+    private func proteinValue(_ metric: TodayNutritionMetricPresentation) -> String {
+        if let target = metric.target {
+            return format(
+                "today.protein.consumedTarget.format",
+                decimal(metric.consumed),
+                decimal(target)
+            )
+        }
+        return format("today.protein.consumed.format", decimal(metric.consumed))
+    }
+
+    private func nutritionSummary(_ presentation: TodayNutritionPresentation) -> String {
+        format(
+            "today.nutrition.macros.format",
+            metricValue(presentation.calories, unit: text("today.nutrition.unit.kcal")),
+            metricValue(presentation.carbG, unit: text("today.nutrition.unit.gram")),
+            metricValue(presentation.fatG, unit: text("today.nutrition.unit.gram"))
+        )
+    }
+
+    private func metricValue(
+        _ metric: TodayNutritionMetricPresentation,
+        unit: String
+    ) -> String {
+        if let target = metric.target {
+            return format(
+                "today.nutrition.metric.targeted.format",
+                decimal(metric.consumed),
+                decimal(target),
+                unit
+            )
+        }
+        return format(
+            "today.nutrition.metric.total.format",
+            decimal(metric.consumed),
+            unit
+        )
+    }
+
+    private func decimal(_ value: Decimal) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = .current
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 3
+        formatter.minimumFractionDigits = 0
+        return formatter.string(from: NSDecimalNumber(decimal: value)) ?? "0"
     }
 
     private func restContext(

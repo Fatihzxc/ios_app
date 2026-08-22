@@ -161,6 +161,11 @@ jobs:
               "nutrition-day-reduce-motion-light",
               "nutrition-day-high-contrast-dark",
           }
+          nutrition_quick_add_expected = {
+              "nutrition-quick-add-saved-light",
+              "nutrition-quick-add-select-dark",
+              "nutrition-quick-add-confirm-ax5",
+          }
           expected = (
               shell_expected
               | gallery_expected
@@ -169,6 +174,7 @@ jobs:
               | training_accessibility_expected
               | m1_acceptance_expected
               | nutrition_day_expected
+              | nutrition_quick_add_expected
           )
 
           owners = {
@@ -199,6 +205,10 @@ jobs:
               "NutritionDayUITests": {
                   "module": "HealthTrackingAppUITests",
                   "expected": nutrition_day_expected,
+              },
+              "NutritionQuickAddUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": nutrition_quick_add_expected,
               },
           }
 

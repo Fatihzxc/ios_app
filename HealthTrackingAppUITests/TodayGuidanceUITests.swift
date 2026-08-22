@@ -91,17 +91,23 @@ final class TodayGuidanceUITests: XCTestCase {
                             XCTAssertTrue(app.frame.contains(element.frame))
                         }
                     }
-                    XCTAssertFalse(
-                        identified("today.protein.consumed", in: app).exists,
-                        "M1 must not fabricate consumed protein."
+                    let consumed = require(
+                        identified("today.protein.consumed", in: app),
+                        "M2 must publish repository-backed consumed protein."
                     )
-                    XCTAssertFalse(
-                        identified("today.protein.progress", in: app).exists,
-                        "M1 must not fabricate nutrition progress."
+                    XCTAssertFalse((consumed.value as? String)?.isEmpty ?? true)
+                    require(
+                        identified("today.protein.progress", in: app),
+                        "M2 must expose target progress without changing the workout directive."
                     )
-                    XCTAssertFalse(
-                        identified("today.nutrition.action", in: app).exists,
-                        "M1 must not expose an unavailable meal action."
+                    let mealAction = require(
+                        identified("today.nutrition.action", in: app),
+                        "M2 must expose the secondary app-owned meal route."
+                    )
+                    XCTAssertNotEqual(
+                        mealAction.identifier,
+                        primaryAction.identifier,
+                        "The nutrition route must not replace the primary training action."
                     )
                     attachScreenshot(
                         named: "today-\(item.name)-\(appearance.rawValue)-\(textSize.rawValue)"
