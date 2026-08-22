@@ -14,62 +14,61 @@ public struct RecipeLibraryView: View {
     }
 
     public var body: some View {
-        NavigationStack {
-            Group {
-                switch viewModel.state {
-                case .loading:
-                    FeatureStateView(state: .loading)
-                        .padding(AppSpacing.screenHorizontal)
-                case let .content(library):
-                    recipeList(library)
-                case .empty:
-                    stateView(
-                        message: localized("nutrition.recipe.empty.message"),
-                        actionTitle: localized("nutrition.recipe.add"),
-                        action: { editorRoute = .create }
-                    )
-                case .searchEmpty:
-                    stateView(
-                        message: localized("nutrition.recipe.search.empty"),
-                        actionTitle: localized("nutrition.recipe.search.clear"),
-                        action: {
-                            Task {
-                                await viewModel.search("")
-                                await viewModel.filter(by: nil)
-                            }
+        Group {
+            switch viewModel.state {
+            case .loading:
+                FeatureStateView(state: .loading)
+                    .padding(AppSpacing.screenHorizontal)
+            case let .content(library):
+                recipeList(library)
+            case .empty:
+                stateView(
+                    message: localized("nutrition.recipe.empty.message"),
+                    actionTitle: localized("nutrition.recipe.add"),
+                    action: { editorRoute = .create }
+                )
+            case .searchEmpty:
+                stateView(
+                    message: localized("nutrition.recipe.search.empty"),
+                    actionTitle: localized("nutrition.recipe.search.clear"),
+                    action: {
+                        Task {
+                            await viewModel.search("")
+                            await viewModel.filter(by: nil)
                         }
-                    )
-                case .error:
-                    stateView(
-                        message: localized("nutrition.recipe.load.error"),
-                        actionTitle: localized("nutrition.recipe.retry"),
-                        action: { Task { await viewModel.retry() } }
-                    )
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(AppColors.color(.backgroundBase, scheme: colorScheme))
-            .navigationTitle(localized("nutrition.recipe.title"))
-            .navigationBarTitleDisplayMode(.inline)
-            .searchable(
-                text: Binding(
-                    get: { viewModel.query },
-                    set: { query in Task { await viewModel.search(query) } }
-                ),
-                prompt: Text(localized("nutrition.recipe.search.prompt"))
-            )
-            .toolbar {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    categoryFilterMenu
-                    Button {
-                        editorRoute = .create
-                    } label: {
-                        Image(systemName: "plus")
-                            .frame(width: 52, height: 52)
                     }
-                    .accessibilityLabel(localized("nutrition.recipe.add"))
-                    .accessibilityHint(localized("nutrition.recipe.add.hint"))
+                )
+            case .error:
+                stateView(
+                    message: localized("nutrition.recipe.load.error"),
+                    actionTitle: localized("nutrition.recipe.retry"),
+                    action: { Task { await viewModel.retry() } }
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppColors.color(.backgroundBase, scheme: colorScheme))
+        .navigationTitle(localized("nutrition.recipe.title"))
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(
+            text: Binding(
+                get: { viewModel.query },
+                set: { query in Task { await viewModel.search(query) } }
+            ),
+            prompt: Text(localized("nutrition.recipe.search.prompt"))
+        )
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                categoryFilterMenu
+                Button {
+                    editorRoute = .create
+                } label: {
+                    Image(systemName: "plus")
+                        .frame(width: 52, height: 52)
                 }
+                .accessibilityLabel(localized("nutrition.recipe.add"))
+                .accessibilityHint(localized("nutrition.recipe.add.hint"))
+                .accessibilityIdentifier("nutrition.recipe.add")
             }
         }
         .sheet(item: $editorRoute) { route in
@@ -126,6 +125,7 @@ public struct RecipeLibraryView: View {
                 ?? localized("nutrition.recipe.filter.all")
         )
         .accessibilityHint(localized("nutrition.recipe.filter.hint"))
+        .accessibilityIdentifier("nutrition.recipe.filter")
     }
 
     private func recipeList(_ library: RecipeLibrarySnapshot) -> some View {
@@ -143,6 +143,9 @@ public struct RecipeLibraryView: View {
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel(rowAccessibilityLabel(recipe))
                         .accessibilityHint(localized("nutrition.recipe.edit.hint"))
+                        .accessibilityIdentifier(
+                            "nutrition.recipe.row.\(recipe.id.uuidString.lowercased())"
+                        )
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
                                 Task { await viewModel.remove(id: recipe.id) }
@@ -154,6 +157,9 @@ public struct RecipeLibraryView: View {
                             }
                             .accessibilityHint(
                                 localized("nutrition.recipe.remove.hint")
+                            )
+                            .accessibilityIdentifier(
+                                "nutrition.recipe.remove.\(recipe.id.uuidString.lowercased())"
                             )
                         }
                     }
@@ -167,6 +173,9 @@ public struct RecipeLibraryView: View {
                             recipeRow(recipe)
                                 .accessibilityElement(children: .combine)
                                 .accessibilityLabel(rowAccessibilityLabel(recipe))
+                                .accessibilityIdentifier(
+                                    "nutrition.recipe.archived.\(recipe.id.uuidString.lowercased())"
+                                )
                             Button {
                                 Task { await viewModel.restore(id: recipe.id) }
                             } label: {
@@ -179,6 +188,9 @@ public struct RecipeLibraryView: View {
                             .buttonStyle(.bordered)
                             .accessibilityHint(
                                 localized("nutrition.recipe.restore.hint")
+                            )
+                            .accessibilityIdentifier(
+                                "nutrition.recipe.restore.\(recipe.id.uuidString.lowercased())"
                             )
                         }
                         .padding(.vertical, AppSpacing.compact)

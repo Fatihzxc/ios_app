@@ -5,6 +5,7 @@ import SwiftUI
 
 @MainActor
 public struct RecipeEditorView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
 
     @State private var name: String
@@ -53,7 +54,11 @@ public struct RecipeEditorView: View {
         NavigationStack {
             Form {
                 Section(localized("nutrition.recipe.editor.identity.section")) {
-                    editorField("nutrition.recipe.field.name", text: $name)
+                    editorField(
+                        "nutrition.recipe.field.name",
+                        identifier: "nutrition.recipe.field.name",
+                        text: $name
+                    )
                     Picker(
                         localized("nutrition.recipe.field.category"),
                         selection: $category
@@ -66,15 +71,18 @@ public struct RecipeEditorView: View {
                     .accessibilityHint(
                         localized("nutrition.recipe.field.category.hint")
                     )
+                    .accessibilityIdentifier("nutrition.recipe.field.category")
 
                     if category == .custom {
                         editorField(
                             "nutrition.recipe.field.customCategory",
+                            identifier: "nutrition.recipe.field.customCategory",
                             text: $customCategoryName
                         )
                     }
                     editorField(
                         "nutrition.recipe.field.servings",
+                        identifier: "nutrition.recipe.field.servings",
                         text: $servings
                     )
                     .keyboardType(.decimalPad)
@@ -87,20 +95,27 @@ public struct RecipeEditorView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     editorField(
                         "nutrition.recipe.field.calories",
+                        identifier: "nutrition.recipe.field.calories",
                         text: $calories
                     )
                     .keyboardType(.decimalPad)
                     editorField(
                         "nutrition.recipe.field.protein",
+                        identifier: "nutrition.recipe.field.protein",
                         text: $proteinG
                     )
                     .keyboardType(.decimalPad)
                     editorField(
                         "nutrition.recipe.field.carbs",
+                        identifier: "nutrition.recipe.field.carbs",
                         text: $carbG
                     )
                     .keyboardType(.decimalPad)
-                    editorField("nutrition.recipe.field.fat", text: $fatG)
+                    editorField(
+                        "nutrition.recipe.field.fat",
+                        identifier: "nutrition.recipe.field.fat",
+                        text: $fatG
+                    )
                         .keyboardType(.decimalPad)
                 }
 
@@ -113,12 +128,15 @@ public struct RecipeEditorView: View {
                     .lineLimit(3...8)
                     .frame(minHeight: 52)
                     .accessibilityLabel(localized("nutrition.recipe.field.note"))
+                    .accessibilityIdentifier("nutrition.recipe.field.note")
                 }
 
                 if let validationMessage {
                     Text(validationMessage)
                         .font(AppTypography.body)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(
+                            AppColors.color(.stateDanger, scheme: colorScheme)
+                        )
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("nutrition.recipe.editor.error")
                 }
@@ -140,6 +158,7 @@ public struct RecipeEditorView: View {
                     .accessibilityHint(
                         localized("nutrition.recipe.editor.cancel.hint")
                     )
+                    .accessibilityIdentifier("nutrition.recipe.editor.cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(localized("nutrition.recipe.editor.save")) {
@@ -150,6 +169,7 @@ public struct RecipeEditorView: View {
                     .accessibilityHint(
                         localized("nutrition.recipe.editor.save.hint")
                     )
+                    .accessibilityIdentifier("nutrition.recipe.editor.save")
                 }
             }
         }
@@ -159,11 +179,13 @@ public struct RecipeEditorView: View {
 
     private func editorField(
         _ key: String.LocalizationValue,
+        identifier: String,
         text: Binding<String>
     ) -> some View {
         TextField(localized(key), text: text)
             .frame(minHeight: 52)
             .accessibilityLabel(localized(key))
+            .accessibilityIdentifier(identifier)
     }
 
     private func submit() async {

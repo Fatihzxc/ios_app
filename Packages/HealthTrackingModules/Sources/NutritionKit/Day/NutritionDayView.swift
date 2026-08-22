@@ -410,6 +410,7 @@ public struct NutritionDayView: View {
             }
             .accessibilityLabel(localized("nutrition.day.foodLibrary"))
             .accessibilityHint(localized("nutrition.day.foodLibrary.hint"))
+            .accessibilityIdentifier("nutrition.day.food-library")
 
             NavigationLink {
                 RecipeLibraryView(viewModel: recipeLibraryViewModel)
@@ -419,6 +420,7 @@ public struct NutritionDayView: View {
             }
             .accessibilityLabel(localized("nutrition.day.recipeLibrary"))
             .accessibilityHint(localized("nutrition.day.recipeLibrary.hint"))
+            .accessibilityIdentifier("nutrition.day.recipe-library")
         }
     }
 

@@ -4,6 +4,7 @@ import SwiftUI
 
 @MainActor
 public struct FoodEditorView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
 
     @State private var name: String
@@ -42,30 +43,68 @@ public struct FoodEditorView: View {
         NavigationStack {
             Form {
                 Section(localized("nutrition.food.editor.identity.section")) {
-                    editorField("nutrition.food.field.name", text: $name)
-                    editorField("nutrition.food.field.brand", text: $brand)
-                    editorField("nutrition.food.field.servingSize", text: $servingSize)
+                    editorField(
+                        "nutrition.food.field.name",
+                        identifier: "nutrition.food.field.name",
+                        text: $name
+                    )
+                    editorField(
+                        "nutrition.food.field.brand",
+                        identifier: "nutrition.food.field.brand",
+                        text: $brand
+                    )
+                    editorField(
+                        "nutrition.food.field.servingSize",
+                        identifier: "nutrition.food.field.servingSize",
+                        text: $servingSize
+                    )
                         .keyboardType(.decimalPad)
-                    editorField("nutrition.food.field.servingUnit", text: $servingUnit)
+                    editorField(
+                        "nutrition.food.field.servingUnit",
+                        identifier: "nutrition.food.field.servingUnit",
+                        text: $servingUnit
+                    )
                 }
 
                 Section(localized("nutrition.food.editor.macros.section")) {
-                    editorField("nutrition.food.field.calories", text: $calories)
+                    editorField(
+                        "nutrition.food.field.calories",
+                        identifier: "nutrition.food.field.calories",
+                        text: $calories
+                    )
                         .keyboardType(.decimalPad)
-                    editorField("nutrition.food.field.protein", text: $proteinG)
+                    editorField(
+                        "nutrition.food.field.protein",
+                        identifier: "nutrition.food.field.protein",
+                        text: $proteinG
+                    )
                         .keyboardType(.decimalPad)
-                    editorField("nutrition.food.field.carbs", text: $carbG)
+                    editorField(
+                        "nutrition.food.field.carbs",
+                        identifier: "nutrition.food.field.carbs",
+                        text: $carbG
+                    )
                         .keyboardType(.decimalPad)
-                    editorField("nutrition.food.field.fat", text: $fatG)
+                    editorField(
+                        "nutrition.food.field.fat",
+                        identifier: "nutrition.food.field.fat",
+                        text: $fatG
+                    )
                         .keyboardType(.decimalPad)
-                    editorField("nutrition.food.field.fiber", text: $fiberG)
+                    editorField(
+                        "nutrition.food.field.fiber",
+                        identifier: "nutrition.food.field.fiber",
+                        text: $fiberG
+                    )
                         .keyboardType(.decimalPad)
                 }
 
                 if let validationMessage {
                     Text(validationMessage)
                         .font(AppTypography.body)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(
+                            AppColors.color(.stateDanger, scheme: colorScheme)
+                        )
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("nutrition.food.editor.error")
                 }
@@ -85,6 +124,7 @@ public struct FoodEditorView: View {
                     }
                     .frame(minWidth: 52, minHeight: 52)
                     .accessibilityHint(localized("nutrition.food.editor.cancel.hint"))
+                    .accessibilityIdentifier("nutrition.food.editor.cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(localized("nutrition.food.editor.save")) {
@@ -93,6 +133,7 @@ public struct FoodEditorView: View {
                     .frame(minWidth: 52, minHeight: 52)
                     .disabled(isSaving)
                     .accessibilityHint(localized("nutrition.food.editor.save.hint"))
+                    .accessibilityIdentifier("nutrition.food.editor.save")
                 }
             }
         }
@@ -102,11 +143,13 @@ public struct FoodEditorView: View {
 
     private func editorField(
         _ key: String.LocalizationValue,
+        identifier: String,
         text: Binding<String>
     ) -> some View {
         TextField(localized(key), text: text)
             .frame(minHeight: 52)
             .accessibilityLabel(localized(key))
+            .accessibilityIdentifier(identifier)
     }
 
     private func submit() async {

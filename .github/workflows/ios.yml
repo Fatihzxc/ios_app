@@ -67,6 +67,8 @@ jobs:
           scripts/verify-today.sh
           scripts/verify-haptics.sh --self-test
           scripts/verify-haptics.sh
+          scripts/verify-nutrition.sh --self-test
+          scripts/verify-nutrition.sh
 
       - name: Fresh-clone bootstrap idempotence
         timeout-minutes: 15
@@ -77,7 +79,7 @@ jobs:
         run: scripts/test-ios.sh --only-testing HealthTrackingAppTests
 
       - name: Test iOS app
-        timeout-minutes: 50
+        timeout-minutes: 70
         # The dedicated test-cold-launch job owns this noisy performance gate.
         # Keep the complete functional suite here without executing it twice.
         run: scripts/test-ios.sh --skip-testing HealthTrackingAppUITests/TodayGuidanceUITests/testColdLaunchPublishesFirstMeaningfulDirectiveWithinOneSecondMedian
@@ -167,6 +169,19 @@ jobs:
               "nutrition-quick-add-dark",
               "nutrition-quick-add-ax5",
           }
+          m2_acceptance_expected = {
+              "m2-acceptance-food-library",
+              "m2-acceptance-food-snapshot-total",
+              "m2-acceptance-recipe-archived",
+              "m2-acceptance-recipe-snapshot-total",
+              "m2-acceptance-recipe-restored",
+          }
+          nutrition_accessibility_expected = {
+              "m2-nutrition-voiceover-ax5",
+              "m2-recipe-editor-dark-ax5",
+              "m2-nutrition-reduce-motion-total",
+              "m2-nutrition-high-contrast",
+          }
           expected = (
               shell_expected
               | gallery_expected
@@ -176,6 +191,8 @@ jobs:
               | m1_acceptance_expected
               | nutrition_day_expected
               | nutrition_quick_add_expected
+              | m2_acceptance_expected
+              | nutrition_accessibility_expected
           )
 
           owners = {
@@ -210,6 +227,14 @@ jobs:
               "NutritionQuickAddUITests": {
                   "module": "HealthTrackingAppUITests",
                   "expected": nutrition_quick_add_expected,
+              },
+              "M2AcceptanceUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": m2_acceptance_expected,
+              },
+              "NutritionAccessibilityUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": nutrition_accessibility_expected,
               },
           }
 
