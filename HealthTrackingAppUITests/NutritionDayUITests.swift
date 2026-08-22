@@ -2,6 +2,8 @@ import Foundation
 import XCTest
 
 final class NutritionDayUITests: XCTestCase {
+    private let geometryTolerance: CGFloat = 0.01
+
     private enum Scenario: String {
         case content = "nutrition-content"
         case empty = "nutrition-empty"
@@ -249,8 +251,9 @@ final class NutritionDayUITests: XCTestCase {
             makeVisible(element, in: ax5)
             XCTAssertFalse(element.frame.isEmpty)
             XCTAssertTrue(
-                ax5.frame.contains(element.frame),
-                "AX5 must wrap vertically without clipping \(identifier)."
+                isContained(element.frame, in: ax5.frame),
+                "AX5 must wrap vertically without clipping \(identifier). "
+                    + "Element frame: \(element.frame); app frame: \(ax5.frame)."
             )
         }
         attachScreenshot(named: "nutrition-day-content-ax5")
@@ -331,8 +334,16 @@ final class NutritionDayUITests: XCTestCase {
         makeHittable(element, in: app)
         XCTAssertEqual(element.label, label)
         XCTAssertTrue(element.isHittable, "\(identifier) must be hittable.")
-        XCTAssertGreaterThanOrEqual(element.frame.width, 52)
-        XCTAssertGreaterThanOrEqual(element.frame.height, 52)
+        XCTAssertGreaterThanOrEqual(
+            element.frame.width + geometryTolerance,
+            52,
+            "\(identifier) must remain at least 52 points wide. Frame: \(element.frame)"
+        )
+        XCTAssertGreaterThanOrEqual(
+            element.frame.height + geometryTolerance,
+            52,
+            "\(identifier) must remain at least 52 points tall. Frame: \(element.frame)"
+        )
         return element
     }
 
@@ -388,35 +399,45 @@ final class NutritionDayUITests: XCTestCase {
     }
 
     private func makeVisible(_ element: XCUIElement, in app: XCUIApplication) {
-        for _ in 0..<10 {
+        for _ in 0..<16 {
             let frame = element.frame
-            if !frame.isEmpty, app.frame.contains(frame) { return }
-            if frame.minY < app.frame.minY {
-                scrollDownOneThird(in: app)
+            if isContained(frame, in: app.frame) { return }
+            if frame.maxY > app.frame.maxY + geometryTolerance {
+                scrollUpSmallStep(in: app)
+            } else if frame.minY < app.frame.minY - geometryTolerance {
+                scrollDownSmallStep(in: app)
             } else {
-                scrollUpOneThird(in: app)
+                return
             }
         }
     }
 
-    private func scrollUpOneThird(in app: XCUIApplication) {
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+    private func scrollUpSmallStep(in app: XCUIApplication) {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.58))
             .press(
                 forDuration: 0.05,
                 thenDragTo: app.coordinate(
-                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)
+                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.46)
                 )
             )
     }
 
-    private func scrollDownOneThird(in app: XCUIApplication) {
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+    private func scrollDownSmallStep(in app: XCUIApplication) {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.46))
             .press(
                 forDuration: 0.05,
                 thenDragTo: app.coordinate(
-                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)
+                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.58)
                 )
             )
+    }
+
+    private func isContained(_ frame: CGRect, in container: CGRect) -> Bool {
+        !frame.isEmpty
+            && container.insetBy(
+                dx: -geometryTolerance,
+                dy: -geometryTolerance
+            ).contains(frame)
     }
 
     private func identified(_ identifier: String, in app: XCUIApplication) -> XCUIElement {

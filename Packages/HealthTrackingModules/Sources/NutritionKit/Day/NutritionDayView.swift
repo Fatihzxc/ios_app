@@ -7,6 +7,7 @@ import SwiftUI
 public struct NutritionDayView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Bindable private var viewModel: NutritionDayViewModel
     private let foodLibraryViewModel: FoodLibraryViewModel
     private let recipeLibraryViewModel: RecipeLibraryViewModel
@@ -57,51 +58,88 @@ public struct NutritionDayView: View {
                     .accessibilityValue(formattedDate(viewModel.selectedDay.start))
                     .accessibilityIdentifier("nutrition.day.date")
 
-                HStack(spacing: AppSpacing.compact) {
-                    dayNavigationButton(
-                        direction: -1,
-                        systemImage: "chevron.left",
-                        label: localized("nutrition.day.previous"),
-                        hint: localized("nutrition.day.previous.hint"),
-                        identifier: "nutrition.day.previous"
-                    ) {
-                        await viewModel.selectPreviousDay()
-                    }
-
-                    DatePicker(
-                        "",
-                        selection: Binding(
-                            get: { viewModel.selectedDay.start },
-                            set: { date in
-                                Task { await viewModel.selectDay(containing: date) }
-                            }
-                        ),
-                        displayedComponents: .date
-                    )
-                    .labelsHidden()
-                    .padding(.vertical, 9)
-                    .frame(maxWidth: .infinity, minHeight: 52)
-                    .contentShape(Rectangle())
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel(localized("nutrition.day.picker"))
-                    .accessibilityValue(formattedDate(viewModel.selectedDay.start))
-                    .accessibilityHint(localized("nutrition.day.picker.hint"))
-                    .accessibilityIdentifier("nutrition.day.date-picker")
-
-                    dayNavigationButton(
-                        direction: 1,
-                        systemImage: "chevron.right",
-                        label: localized("nutrition.day.next"),
-                        hint: localized("nutrition.day.next.hint"),
-                        identifier: "nutrition.day.next"
-                    ) {
-                        await viewModel.selectNextDay()
-                    }
-                }
+                responsiveDateNavigation
             }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("root.nutrition.content")
+    }
+
+    @ViewBuilder
+    private var responsiveDateNavigation: some View {
+        if dynamicTypeSize >= .accessibility3 {
+            accessibleDateNavigation
+        } else {
+            ViewThatFits(in: .horizontal) {
+                horizontalDateNavigation
+                accessibleDateNavigation
+            }
+        }
+    }
+
+    private var horizontalDateNavigation: some View {
+        HStack(spacing: AppSpacing.compact) {
+            previousDayButton
+            dayPicker
+            nextDayButton
+        }
+    }
+
+    private var accessibleDateNavigation: some View {
+        VStack(spacing: AppSpacing.compact) {
+            HStack(spacing: AppSpacing.compact) {
+                previousDayButton
+                Spacer(minLength: AppSpacing.compact)
+                nextDayButton
+            }
+            dayPicker
+        }
+    }
+
+    private var previousDayButton: some View {
+        dayNavigationButton(
+            direction: -1,
+            systemImage: "chevron.left",
+            label: localized("nutrition.day.previous"),
+            hint: localized("nutrition.day.previous.hint"),
+            identifier: "nutrition.day.previous"
+        ) {
+            await viewModel.selectPreviousDay()
+        }
+    }
+
+    private var nextDayButton: some View {
+        dayNavigationButton(
+            direction: 1,
+            systemImage: "chevron.right",
+            label: localized("nutrition.day.next"),
+            hint: localized("nutrition.day.next.hint"),
+            identifier: "nutrition.day.next"
+        ) {
+            await viewModel.selectNextDay()
+        }
+    }
+
+    private var dayPicker: some View {
+        DatePicker(
+            "",
+            selection: Binding(
+                get: { viewModel.selectedDay.start },
+                set: { date in
+                    Task { await viewModel.selectDay(containing: date) }
+                }
+            ),
+            displayedComponents: .date
+        )
+        .labelsHidden()
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, minHeight: 52)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(localized("nutrition.day.picker"))
+        .accessibilityValue(formattedDate(viewModel.selectedDay.start))
+        .accessibilityHint(localized("nutrition.day.picker.hint"))
+        .accessibilityIdentifier("nutrition.day.date-picker")
     }
 
     @ViewBuilder

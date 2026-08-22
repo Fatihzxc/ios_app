@@ -1,6 +1,8 @@
 import XCTest
 
 final class AccessibilitySmokeUITests: XCTestCase {
+    private let geometryTolerance: CGFloat = 0.01
+
     private enum Appearance: String {
         case light
         case dark
@@ -180,7 +182,14 @@ final class AccessibilitySmokeUITests: XCTestCase {
 
     private func assertVisibleWithinApp(_ element: XCUIElement, named name: String, in app: XCUIApplication) {
         XCTAssertFalse(element.frame.isEmpty, "\(name) must have a rendered frame at accessibility XXXL.")
-        XCTAssertTrue(app.frame.contains(element.frame), "\(name) must be fully contained by the app window at accessibility XXXL.")
+        XCTAssertTrue(
+            app.frame.insetBy(
+                dx: -geometryTolerance,
+                dy: -geometryTolerance
+            ).contains(element.frame),
+            "\(name) must be fully contained by the app window at accessibility XXXL. "
+                + "Element frame: \(element.frame); app frame: \(app.frame)."
+        )
     }
 
     @discardableResult
