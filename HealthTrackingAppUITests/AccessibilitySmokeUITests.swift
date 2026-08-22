@@ -67,12 +67,26 @@ final class AccessibilitySmokeUITests: XCTestCase {
                 // beyond that maximum emits an element-less "unsupported" issue. The
                 // default-through-AX5 session matrix owns Dynamic Type variation; this
                 // smoke pass audits the actual AX5 render for detection, hit regions and clipping.
-                try app.performAccessibilityAudit(
-                    for: [.elementDetection, .hitRegion, .textClipped]
-                )
+                try performRootAccessibilityAudit(in: app)
             }
 
             attachScreenshot(named: "accessibility-xxxl-\(appearance.rawValue)")
+        }
+    }
+
+    private func performRootAccessibilityAudit(in app: XCUIApplication) throws {
+        do {
+            try app.performAccessibilityAudit(
+                for: [.elementDetection, .hitRegion, .textClipped]
+            )
+        } catch let error as NSError
+            where error.domain == "com.apple.xcode.xctest.accessibilityAudit"
+                && error.code == -56 {
+            // Xcode occasionally times out before returning any audit issue. Retry
+            // the identical audit once; a second timeout or any real issue still fails.
+            try app.performAccessibilityAudit(
+                for: [.elementDetection, .hitRegion, .textClipped]
+            )
         }
     }
 

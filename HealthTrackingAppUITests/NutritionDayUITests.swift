@@ -138,11 +138,12 @@ final class NutritionDayUITests: XCTestCase {
 
     func testEmptyAndRecoverableErrorStatesRemainDistinctAndRetrySameDay() {
         let empty = launchNutrition(scenario: .empty, appearance: .light)
-        require(
+        let emptyState = require(
             identified("nutrition.day.state.empty", in: empty),
             "A loaded day without entries must render the designed empty state."
         )
         XCTAssertFalse(identified("nutrition.day.state.error", in: empty).exists)
+        makeVisibleAboveTabBar(emptyState, in: empty)
         attachScreenshot(named: "nutrition-day-empty-light")
         empty.terminate()
 
@@ -269,6 +270,11 @@ final class NutritionDayUITests: XCTestCase {
             in: reduceMotion,
             label: "Önceki gün"
         ).tap()
+        let reduceMotionEmptyState = require(
+            identified("nutrition.day.state.empty", in: reduceMotion),
+            "Reduce Motion calendar navigation must expose the empty-day card."
+        )
+        makeVisibleAboveTabBar(reduceMotionEmptyState, in: reduceMotion)
         require(
             identified("nutrition.day.loaded", in: reduceMotion),
             "Reduce Motion must retain calendar navigation and a loaded day state."
@@ -410,6 +416,28 @@ final class NutritionDayUITests: XCTestCase {
                 return
             }
         }
+    }
+
+    private func makeVisibleAboveTabBar(_ element: XCUIElement, in app: XCUIApplication) {
+        let tabBar = app.tabBars.firstMatch
+        for _ in 0..<10 {
+            let frame = element.frame
+            let visibleBottom = tabBar.exists ? tabBar.frame.minY : app.frame.maxY
+            if !frame.isEmpty,
+               frame.minY >= app.frame.minY - geometryTolerance,
+               frame.maxY <= visibleBottom - geometryTolerance {
+                return
+            }
+            app.swipeUp()
+        }
+
+        let visibleBottom = tabBar.exists ? tabBar.frame.minY : app.frame.maxY
+        XCTAssertFalse(element.frame.isEmpty, "Empty-state evidence must have a rendered frame.")
+        XCTAssertLessThanOrEqual(
+            element.frame.maxY,
+            visibleBottom - geometryTolerance,
+            "Empty-state evidence must not be obscured by the tab bar."
+        )
     }
 
     private func scrollUpSmallStep(in app: XCUIApplication) {

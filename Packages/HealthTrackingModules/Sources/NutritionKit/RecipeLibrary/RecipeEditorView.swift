@@ -18,6 +18,7 @@ public struct RecipeEditorView: View {
     @State private var note: String
     @State private var validationMessage: String?
     @State private var isSaving = false
+    @FocusState private var isTextFieldFocused: Bool
 
     private let recipe: RecipeSnapshot?
     private let onSave: @MainActor (RecipeInput) async -> Bool
@@ -53,7 +54,11 @@ public struct RecipeEditorView: View {
         NavigationStack {
             Form {
                 Section(localized("nutrition.recipe.editor.identity.section")) {
-                    editorField("nutrition.recipe.field.name", text: $name)
+                    editorField(
+                        "nutrition.recipe.field.name",
+                        text: $name,
+                        identifier: "nutrition.recipe.editor.name"
+                    )
                     Picker(
                         localized("nutrition.recipe.field.category"),
                         selection: $category
@@ -66,16 +71,19 @@ public struct RecipeEditorView: View {
                     .accessibilityHint(
                         localized("nutrition.recipe.field.category.hint")
                     )
+                    .accessibilityIdentifier("nutrition.recipe.editor.category")
 
                     if category == .custom {
                         editorField(
                             "nutrition.recipe.field.customCategory",
-                            text: $customCategoryName
+                            text: $customCategoryName,
+                            identifier: "nutrition.recipe.editor.custom-category"
                         )
                     }
                     editorField(
                         "nutrition.recipe.field.servings",
-                        text: $servings
+                        text: $servings,
+                        identifier: "nutrition.recipe.editor.servings"
                     )
                     .keyboardType(.decimalPad)
                 }
@@ -87,20 +95,27 @@ public struct RecipeEditorView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     editorField(
                         "nutrition.recipe.field.calories",
-                        text: $calories
+                        text: $calories,
+                        identifier: "nutrition.recipe.editor.calories"
                     )
                     .keyboardType(.decimalPad)
                     editorField(
                         "nutrition.recipe.field.protein",
-                        text: $proteinG
+                        text: $proteinG,
+                        identifier: "nutrition.recipe.editor.protein"
                     )
                     .keyboardType(.decimalPad)
                     editorField(
                         "nutrition.recipe.field.carbs",
-                        text: $carbG
+                        text: $carbG,
+                        identifier: "nutrition.recipe.editor.carbs"
                     )
                     .keyboardType(.decimalPad)
-                    editorField("nutrition.recipe.field.fat", text: $fatG)
+                    editorField(
+                        "nutrition.recipe.field.fat",
+                        text: $fatG,
+                        identifier: "nutrition.recipe.editor.fat"
+                    )
                         .keyboardType(.decimalPad)
                 }
 
@@ -111,8 +126,10 @@ public struct RecipeEditorView: View {
                         axis: .vertical
                     )
                     .lineLimit(3...8)
+                    .focused($isTextFieldFocused)
                     .frame(minHeight: 52)
                     .accessibilityLabel(localized("nutrition.recipe.field.note"))
+                    .accessibilityIdentifier("nutrition.recipe.editor.note")
                 }
 
                 if let validationMessage {
@@ -140,6 +157,7 @@ public struct RecipeEditorView: View {
                     .accessibilityHint(
                         localized("nutrition.recipe.editor.cancel.hint")
                     )
+                    .accessibilityIdentifier("nutrition.recipe.editor.cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(localized("nutrition.recipe.editor.save")) {
@@ -150,6 +168,14 @@ public struct RecipeEditorView: View {
                     .accessibilityHint(
                         localized("nutrition.recipe.editor.save.hint")
                     )
+                    .accessibilityIdentifier("nutrition.recipe.editor.save")
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button(localized("nutrition.keyboard.dismiss")) {
+                        isTextFieldFocused = false
+                    }
+                    .accessibilityIdentifier("nutrition.keyboard.dismiss")
                 }
             }
         }
@@ -159,11 +185,14 @@ public struct RecipeEditorView: View {
 
     private func editorField(
         _ key: String.LocalizationValue,
-        text: Binding<String>
+        text: Binding<String>,
+        identifier: String
     ) -> some View {
         TextField(localized(key), text: text)
+            .focused($isTextFieldFocused)
             .frame(minHeight: 52)
             .accessibilityLabel(localized(key))
+            .accessibilityIdentifier(identifier)
     }
 
     private func submit() async {

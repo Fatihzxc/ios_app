@@ -17,6 +17,7 @@ public struct FoodEditorView: View {
     @State private var fiberG: String
     @State private var validationMessage: String?
     @State private var isSaving = false
+    @FocusState private var isTextFieldFocused: Bool
 
     private let food: FoodSnapshot?
     private let onSave: @MainActor (FoodInput) async -> Bool
@@ -42,23 +43,59 @@ public struct FoodEditorView: View {
         NavigationStack {
             Form {
                 Section(localized("nutrition.food.editor.identity.section")) {
-                    editorField("nutrition.food.field.name", text: $name)
-                    editorField("nutrition.food.field.brand", text: $brand)
-                    editorField("nutrition.food.field.servingSize", text: $servingSize)
+                    editorField(
+                        "nutrition.food.field.name",
+                        text: $name,
+                        identifier: "nutrition.food.editor.name"
+                    )
+                    editorField(
+                        "nutrition.food.field.brand",
+                        text: $brand,
+                        identifier: "nutrition.food.editor.brand"
+                    )
+                    editorField(
+                        "nutrition.food.field.servingSize",
+                        text: $servingSize,
+                        identifier: "nutrition.food.editor.serving-size"
+                    )
                         .keyboardType(.decimalPad)
-                    editorField("nutrition.food.field.servingUnit", text: $servingUnit)
+                    editorField(
+                        "nutrition.food.field.servingUnit",
+                        text: $servingUnit,
+                        identifier: "nutrition.food.editor.serving-unit"
+                    )
                 }
 
                 Section(localized("nutrition.food.editor.macros.section")) {
-                    editorField("nutrition.food.field.calories", text: $calories)
+                    editorField(
+                        "nutrition.food.field.calories",
+                        text: $calories,
+                        identifier: "nutrition.food.editor.calories"
+                    )
                         .keyboardType(.decimalPad)
-                    editorField("nutrition.food.field.protein", text: $proteinG)
+                    editorField(
+                        "nutrition.food.field.protein",
+                        text: $proteinG,
+                        identifier: "nutrition.food.editor.protein"
+                    )
                         .keyboardType(.decimalPad)
-                    editorField("nutrition.food.field.carbs", text: $carbG)
+                    editorField(
+                        "nutrition.food.field.carbs",
+                        text: $carbG,
+                        identifier: "nutrition.food.editor.carbs"
+                    )
                         .keyboardType(.decimalPad)
-                    editorField("nutrition.food.field.fat", text: $fatG)
+                    editorField(
+                        "nutrition.food.field.fat",
+                        text: $fatG,
+                        identifier: "nutrition.food.editor.fat"
+                    )
                         .keyboardType(.decimalPad)
-                    editorField("nutrition.food.field.fiber", text: $fiberG)
+                    editorField(
+                        "nutrition.food.field.fiber",
+                        text: $fiberG,
+                        identifier: "nutrition.food.editor.fiber"
+                    )
                         .keyboardType(.decimalPad)
                 }
 
@@ -85,6 +122,7 @@ public struct FoodEditorView: View {
                     }
                     .frame(minWidth: 52, minHeight: 52)
                     .accessibilityHint(localized("nutrition.food.editor.cancel.hint"))
+                    .accessibilityIdentifier("nutrition.food.editor.cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(localized("nutrition.food.editor.save")) {
@@ -93,6 +131,14 @@ public struct FoodEditorView: View {
                     .frame(minWidth: 52, minHeight: 52)
                     .disabled(isSaving)
                     .accessibilityHint(localized("nutrition.food.editor.save.hint"))
+                    .accessibilityIdentifier("nutrition.food.editor.save")
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button(localized("nutrition.keyboard.dismiss")) {
+                        isTextFieldFocused = false
+                    }
+                    .accessibilityIdentifier("nutrition.keyboard.dismiss")
                 }
             }
         }
@@ -102,11 +148,14 @@ public struct FoodEditorView: View {
 
     private func editorField(
         _ key: String.LocalizationValue,
-        text: Binding<String>
+        text: Binding<String>,
+        identifier: String
     ) -> some View {
         TextField(localized(key), text: text)
+            .focused($isTextFieldFocused)
             .frame(minHeight: 52)
             .accessibilityLabel(localized(key))
+            .accessibilityIdentifier(identifier)
     }
 
     private func submit() async {

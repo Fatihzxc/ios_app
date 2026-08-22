@@ -11,6 +11,7 @@ final class NutritionCompositionTests: XCTestCase {
         try dependencies.load()
 
         XCTAssertNotNil(dependencies.nutritionRepository)
+        XCTAssertNotNil(dependencies.nutritionManualEntryViewModel)
         await dependencies.nutritionDayViewModel.load()
 
         guard case let .empty(presentation) = dependencies.nutritionDayViewModel.state else {
@@ -59,6 +60,7 @@ final class NutritionCompositionTests: XCTestCase {
             AppUITestScenario.nutritionQuickAdd.rawValue,
             "nutrition-quick-add"
         )
+        XCTAssertEqual(AppUITestScenario.m2Acceptance.rawValue, "m2-acceptance")
     }
 
     private static let rootInitializerIsTypeChecked: () -> Void = {
@@ -73,6 +75,7 @@ final class NutritionCompositionTests: XCTestCase {
             foodLibraryViewModel: dependencies.foodLibraryViewModel,
             recipeLibraryViewModel: dependencies.recipeLibraryViewModel,
             nutritionQuickAddViewModel: dependencies.nutritionQuickAddViewModel,
+            nutritionManualEntryViewModel: dependencies.nutritionManualEntryViewModel,
             makeSessionViewModel: dependencies.makeSessionViewModel,
             trainingHapticController: dependencies.trainingHapticController,
             shouldLoadFoundation: dependencies.shouldLoadFoundation,

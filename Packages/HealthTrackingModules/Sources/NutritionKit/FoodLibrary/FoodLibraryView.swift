@@ -14,56 +14,55 @@ public struct FoodLibraryView: View {
     }
 
     public var body: some View {
-        NavigationStack {
-            Group {
-                switch viewModel.state {
-                case .loading:
-                    FeatureStateView(state: .loading)
-                        .padding(AppSpacing.screenHorizontal)
-                case let .content(foods):
-                    foodList(foods)
-                case .empty:
-                    stateView(
-                        message: localized("nutrition.food.empty.message"),
-                        actionTitle: localized("nutrition.food.add"),
-                        action: { editorRoute = .create }
-                    )
-                case .searchEmpty:
-                    stateView(
-                        message: localized("nutrition.food.search.empty"),
-                        actionTitle: localized("nutrition.food.search.clear"),
-                        action: { Task { await viewModel.search("") } }
-                    )
-                case .error:
-                    stateView(
-                        message: localized("nutrition.food.load.error"),
-                        actionTitle: localized("nutrition.food.retry"),
-                        action: { Task { await viewModel.retry() } }
-                    )
-                }
+        Group {
+            switch viewModel.state {
+            case .loading:
+                FeatureStateView(state: .loading)
+                    .padding(AppSpacing.screenHorizontal)
+            case let .content(foods):
+                foodList(foods)
+            case .empty:
+                stateView(
+                    message: localized("nutrition.food.empty.message"),
+                    actionTitle: localized("nutrition.food.add"),
+                    action: { editorRoute = .create }
+                )
+            case .searchEmpty:
+                stateView(
+                    message: localized("nutrition.food.search.empty"),
+                    actionTitle: localized("nutrition.food.search.clear"),
+                    action: { Task { await viewModel.search("") } }
+                )
+            case .error:
+                stateView(
+                    message: localized("nutrition.food.load.error"),
+                    actionTitle: localized("nutrition.food.retry"),
+                    action: { Task { await viewModel.retry() } }
+                )
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(AppColors.color(.backgroundBase, scheme: colorScheme))
-            .navigationTitle(localized("nutrition.food.title"))
-            .navigationBarTitleDisplayMode(.inline)
-            .searchable(
-                text: Binding(
-                    get: { viewModel.query },
-                    set: { query in Task { await viewModel.search(query) } }
-                ),
-                prompt: Text(localized("nutrition.food.search.prompt"))
-            )
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        editorRoute = .create
-                    } label: {
-                        Image(systemName: "plus")
-                            .frame(width: 52, height: 52)
-                    }
-                    .accessibilityLabel(localized("nutrition.food.add"))
-                    .accessibilityHint(localized("nutrition.food.add.hint"))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppColors.color(.backgroundBase, scheme: colorScheme))
+        .navigationTitle(localized("nutrition.food.title"))
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(
+            text: Binding(
+                get: { viewModel.query },
+                set: { query in Task { await viewModel.search(query) } }
+            ),
+            prompt: Text(localized("nutrition.food.search.prompt"))
+        )
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    editorRoute = .create
+                } label: {
+                    Image(systemName: "plus")
+                        .frame(width: 52, height: 52)
                 }
+                .accessibilityLabel(localized("nutrition.food.add"))
+                .accessibilityHint(localized("nutrition.food.add.hint"))
+                .accessibilityIdentifier("nutrition.food.add")
             }
         }
         .sheet(item: $editorRoute) { route in
@@ -108,6 +107,9 @@ public struct FoodLibraryView: View {
             .frame(minHeight: 52)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(rowAccessibilityLabel(food))
+            .accessibilityIdentifier(
+                "nutrition.food.row.\(food.id.uuidString.lowercased())"
+            )
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 if food.source == .userCreated {
                     Button(role: .destructive) {
@@ -119,6 +121,9 @@ public struct FoodLibraryView: View {
                         )
                     }
                     .accessibilityHint(localized("nutrition.food.delete.hint"))
+                    .accessibilityIdentifier(
+                        "nutrition.food.delete.\(food.id.uuidString.lowercased())"
+                    )
                 }
             }
         }

@@ -8,6 +8,7 @@ public struct NutritionQuickAddView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
     @Bindable private var viewModel: NutritionQuickAddViewModel
+    @Bindable private var manualEntryViewModel: NutritionManualEntryViewModel
     private let intent: NutritionQuickAddIntent
     private let onPublish: @MainActor (
         NutritionDayEntriesSnapshot,
@@ -19,6 +20,7 @@ public struct NutritionQuickAddView: View {
 
     public init(
         viewModel: NutritionQuickAddViewModel,
+        manualEntryViewModel: NutritionManualEntryViewModel,
         intent: NutritionQuickAddIntent,
         onPublish: @escaping @MainActor (
             NutritionDayEntriesSnapshot,
@@ -28,6 +30,7 @@ public struct NutritionQuickAddView: View {
         onCancel: @escaping @MainActor () -> Void
     ) {
         self.viewModel = viewModel
+        self.manualEntryViewModel = manualEntryViewModel
         self.intent = intent
         self.onPublish = onPublish
         self.onComplete = onComplete
@@ -51,15 +54,30 @@ public struct NutritionQuickAddView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(localized("nutrition.quickAdd.cancel")) {
                         viewModel.dismiss()
+                        manualEntryViewModel.dismiss()
                         onCancel()
                     }
                     .frame(minWidth: 52, minHeight: 52)
-                    .disabled(viewModel.phase == .saving)
+                    .disabled(
+                        viewModel.phase == .saving
+                            || manualEntryViewModel.phase == .saving
+                    )
                     .accessibilityIdentifier("nutrition.quick-add.cancel")
                 }
             }
+            .navigationDestination(for: NutritionManualEntryMode.self) { mode in
+                NutritionManualEntryView(
+                    viewModel: manualEntryViewModel,
+                    mode: mode,
+                    intent: intent,
+                    onPublish: onPublish,
+                    onComplete: onComplete
+                )
+            }
         }
-        .interactiveDismissDisabled(viewModel.phase == .saving)
+        .interactiveDismissDisabled(
+            viewModel.phase == .saving || manualEntryViewModel.phase == .saving
+        )
         .task(id: intent.id) {
             await viewModel.begin(intent)
         }
@@ -165,7 +183,68 @@ public struct NutritionQuickAddView: View {
                     )
                 }
             }
+            manualEntryActions
         }
+    }
+
+    private var manualEntryActions: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.standard) {
+            Text(localized("nutrition.manual.options.heading"))
+                .font(AppTypography.titleMedium)
+                .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
+                .accessibilityAddTraits(.isHeader)
+            manualEntryAction(
+                mode: .food,
+                title: localized("nutrition.manual.food.action"),
+                detail: localized("nutrition.manual.food.action.detail"),
+                systemImage: "carrot",
+                identifier: "nutrition.quick-add.manual.food"
+            )
+            manualEntryAction(
+                mode: .adhoc,
+                title: localized("nutrition.manual.adhoc.action"),
+                detail: localized("nutrition.manual.adhoc.action.detail"),
+                systemImage: "square.and.pencil",
+                identifier: "nutrition.quick-add.manual.adhoc"
+            )
+        }
+    }
+
+    private func manualEntryAction(
+        mode: NutritionManualEntryMode,
+        title: String,
+        detail: String,
+        systemImage: String,
+        identifier: String
+    ) -> some View {
+        NavigationLink(value: mode) {
+            AppCard {
+                HStack(alignment: .center, spacing: AppSpacing.standard) {
+                    Image(systemName: systemImage)
+                        .frame(width: 52, height: 52)
+                        .foregroundStyle(AppColors.color(.accentAction, scheme: colorScheme))
+                    VStack(alignment: .leading, spacing: AppSpacing.small) {
+                        Text(title)
+                            .font(AppTypography.label)
+                            .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
+                        Text(detail)
+                            .font(AppTypography.caption)
+                            .foregroundStyle(
+                                AppColors.color(.inkSecondary, scheme: colorScheme)
+                            )
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(AppColors.color(.accentAction, scheme: colorScheme))
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(detail)
+        .accessibilityHint(localized("nutrition.manual.action.hint"))
+        .accessibilityIdentifier(identifier)
     }
 
     private func confirmation(

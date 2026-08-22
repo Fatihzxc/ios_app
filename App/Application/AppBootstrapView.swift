@@ -31,6 +31,7 @@ struct AppBootstrapView: View {
                     foodLibraryViewModel: dependencies.foodLibraryViewModel,
                     recipeLibraryViewModel: dependencies.recipeLibraryViewModel,
                     nutritionQuickAddViewModel: dependencies.nutritionQuickAddViewModel,
+                    nutritionManualEntryViewModel: dependencies.nutritionManualEntryViewModel,
                     makeSessionViewModel: dependencies.makeSessionViewModel,
                     trainingHapticController: dependencies.trainingHapticController,
                     shouldLoadFoundation: dependencies.shouldLoadFoundation,

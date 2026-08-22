@@ -7,6 +7,7 @@ public struct NutritionFoundationView: View {
     private let foodLibraryViewModel: FoodLibraryViewModel
     private let recipeLibraryViewModel: RecipeLibraryViewModel
     private let quickAddViewModel: NutritionQuickAddViewModel
+    private let manualEntryViewModel: NutritionManualEntryViewModel
     private let externalQuickAddIntent: NutritionQuickAddIntent?
     private let onNutritionSnapshot: @MainActor (
         NutritionDayEntriesSnapshot,
@@ -19,6 +20,7 @@ public struct NutritionFoundationView: View {
         foodLibraryViewModel: FoodLibraryViewModel,
         recipeLibraryViewModel: RecipeLibraryViewModel,
         quickAddViewModel: NutritionQuickAddViewModel,
+        manualEntryViewModel: NutritionManualEntryViewModel,
         externalQuickAddIntent: NutritionQuickAddIntent? = nil,
         onNutritionSnapshot: @escaping @MainActor (
             NutritionDayEntriesSnapshot,
@@ -29,6 +31,7 @@ public struct NutritionFoundationView: View {
         self.foodLibraryViewModel = foodLibraryViewModel
         self.recipeLibraryViewModel = recipeLibraryViewModel
         self.quickAddViewModel = quickAddViewModel
+        self.manualEntryViewModel = manualEntryViewModel
         self.externalQuickAddIntent = externalQuickAddIntent
         self.onNutritionSnapshot = onNutritionSnapshot
     }
@@ -51,6 +54,7 @@ public struct NutritionFoundationView: View {
         .sheet(item: $activeQuickAddIntent) { intent in
             NutritionQuickAddView(
                 viewModel: quickAddViewModel,
+                manualEntryViewModel: manualEntryViewModel,
                 intent: intent,
                 onPublish: publish,
                 onComplete: closeQuickAdd,
@@ -75,6 +79,8 @@ public struct NutritionFoundationView: View {
     }
 
     private func closeQuickAdd() {
+        quickAddViewModel.dismiss()
+        manualEntryViewModel.dismiss()
         activeQuickAddIntent = nil
     }
 }

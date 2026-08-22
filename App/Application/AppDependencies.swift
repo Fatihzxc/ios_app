@@ -79,6 +79,10 @@ final class AppDependencies: AppDependencyLoading {
         repository: nutritionRepository,
         makeID: { Self.makeNutritionQuickAddRequestID() }
     )
+    lazy var nutritionManualEntryViewModel = NutritionManualEntryViewModel(
+        repository: nutritionRepository,
+        foodRepository: nutritionRepository
+    )
     lazy var todayNutritionViewModel = TodayNutritionViewModel(
         repository: nutritionRepository
     )
@@ -160,7 +164,7 @@ final class AppDependencies: AppDependencyLoading {
                  .todayRest, .todayResume, .todayDeload, .todayPhase, .todayReminder,
                  .todayPriority, .m1AcceptanceCatalog, .m1PRBaseline, .m1PRNew,
                  .nutritionContent, .nutritionEmpty, .nutritionErrorOnce,
-                 .nutritionDeleteErrorOnce, .nutritionQuickAdd:
+                 .nutritionDeleteErrorOnce, .nutritionQuickAdd, .m2Acceptance:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -536,6 +540,12 @@ private enum UITestSessionFixture {
     private static let nutritionQuickAddRecipeID = uuid(
         "00000000-0000-4000-8000-00000000d200"
     )
+    private static let m2AcceptanceFoodID = uuid(
+        "00000000-0000-4000-8000-00000000d300"
+    )
+    private static let m2AcceptanceRecipeID = uuid(
+        "00000000-0000-4000-8000-00000000d301"
+    )
     private static let familyWeightExerciseID = uuid(
         "00000000-0000-4000-8000-00000000f010"
     )
@@ -590,6 +600,8 @@ private enum UITestSessionFixture {
             try installNutritionContent(in: modelContext)
         case .nutritionQuickAdd:
             try installNutritionQuickAdd(in: modelContext)
+        case .m2Acceptance:
+            try installM2Acceptance(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow,
              .todayEmptyOnce, .todayErrorOnce, .nutritionEmpty:
             return
@@ -694,6 +706,52 @@ private enum UITestSessionFixture {
                 note: "Sentetik hızlı ekleme testi"
             )
         )
+        try modelContext.save()
+    }
+
+    private static func installM2Acceptance(
+        in modelContext: ModelContext
+    ) throws {
+        let now = Date.now
+        let foods = try modelContext.fetch(FetchDescriptor<Food>())
+        if !foods.contains(where: { $0.id == m2AcceptanceFoodID }) {
+            modelContext.insert(
+                Food(
+                    id: m2AcceptanceFoodID,
+                    createdAt: now,
+                    updatedAt: now,
+                    name: "Erişilebilir yoğurt",
+                    brand: "Sentetik M2 fixture",
+                    servingSize: 1,
+                    servingUnit: "porsiyon",
+                    caloriesPerServing: 140,
+                    proteinG: 14,
+                    carbG: 12,
+                    fatG: 4,
+                    source: .userCreated
+                )
+            )
+        }
+
+        let recipes = try modelContext.fetch(FetchDescriptor<Recipe>())
+        if !recipes.contains(where: { $0.id == m2AcceptanceRecipeID }) {
+            modelContext.insert(
+                Recipe(
+                    id: m2AcceptanceRecipeID,
+                    createdAt: now,
+                    updatedAt: now,
+                    name: "M2 fixture yulafı",
+                    category: try MealCategory(kind: .breakfast),
+                    servings: 1,
+                    isDirectMacros: true,
+                    caloriesTotal: 280,
+                    proteinTotalG: 24,
+                    carbTotalG: 34,
+                    fatTotalG: 7,
+                    note: "Sentetik acceptance fixture"
+                )
+            )
+        }
         try modelContext.save()
     }
 

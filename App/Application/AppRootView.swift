@@ -16,6 +16,7 @@ struct AppRootView: View {
     let foodLibraryViewModel: FoodLibraryViewModel
     let recipeLibraryViewModel: RecipeLibraryViewModel
     let nutritionQuickAddViewModel: NutritionQuickAddViewModel
+    let nutritionManualEntryViewModel: NutritionManualEntryViewModel
     let makeSessionViewModel: @MainActor () -> SessionViewModel
     let trainingHapticController: TrainingHapticController?
     let shouldLoadFoundation: Bool
@@ -133,6 +134,7 @@ struct AppRootView: View {
                 foodLibraryViewModel: foodLibraryViewModel,
                 recipeLibraryViewModel: recipeLibraryViewModel,
                 quickAddViewModel: nutritionQuickAddViewModel,
+                manualEntryViewModel: nutritionManualEntryViewModel,
                 externalQuickAddIntent: nutritionQuickAddIntent,
                 onNutritionSnapshot: publishNutritionSnapshot
             )
