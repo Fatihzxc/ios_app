@@ -72,6 +72,14 @@ public protocol TrainingRepository: AnyObject {
     func deleteWorkoutSession(id: UUID) async throws
 }
 
+/// Optional synchronous capability used only while the app is already isolated to
+/// the main actor during launch. General feature callers continue to use
+/// `TrainingRepository.fetchTodaySnapshot()`.
+@MainActor
+public protocol SynchronousTodaySnapshotRepository: AnyObject {
+    func fetchTodaySnapshotSynchronously() throws -> TodayRepositorySnapshot?
+}
+
 public enum TrainingRepositoryCapabilityError: Error, Equatable, Sendable {
     case todaySnapshotUnavailable
     case programStateMutationUnavailable

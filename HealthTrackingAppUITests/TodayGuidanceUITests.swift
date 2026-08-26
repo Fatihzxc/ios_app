@@ -194,7 +194,18 @@ final class TodayGuidanceUITests: XCTestCase {
         let stabilizationLaunchCount = 5
         var samples: [Double] = []
         var phaseSamples: [[String: Double]] = []
-        let phaseNames = ["environment", "container", "dependencies", "seed", "today"]
+        let phaseNames = [
+            "environment",
+            "container",
+            "dependencyEntry",
+            "dependencyContext",
+            "dependencyRepository",
+            "dependencyRouting",
+            "dependencyViewModel",
+            "dependencies",
+            "seed",
+            "today",
+        ]
 
         let preparationApp = launch(
             scenario: "seeded",

@@ -76,9 +76,9 @@ jobs:
         timeout-minutes: 15
         run: scripts/test-ios.sh --verify-bootstrap-idempotence
 
-      - name: Targeted M3.1 DesignSystem tests
+      - name: Targeted M3.2 Metrics tests
         timeout-minutes: 20
-        run: scripts/test-ios.sh --only-testing DesignSystemTests
+        run: scripts/test-ios.sh --only-testing MetricsKitTests
 
       - name: Test iOS app
         timeout-minutes: 90

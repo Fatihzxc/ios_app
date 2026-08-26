@@ -50,6 +50,13 @@ public final class TodayViewModel {
         await performLoad(at: date, yieldAfterPublishingLoading: true)
     }
 
+    public func applyInitialSnapshot(
+        _ snapshot: TodayRepositorySnapshot?,
+        evaluatedAt date: Date = .now
+    ) {
+        publish(snapshot, evaluatedAt: date)
+    }
+
     private func performLoad(
         at date: Date,
         yieldAfterPublishingLoading: Bool
@@ -59,21 +66,29 @@ public final class TodayViewModel {
             await Task.yield()
         }
         do {
-            guard let snapshot = try await repository.fetchTodaySnapshot() else {
-                state = .empty
-                return
-            }
-            guard let semanticPresentation = makePresentation(
-                from: snapshot,
-                evaluatedAt: date
-            ) else {
-                state = .error
-                return
-            }
-            state = .content(attachLaunchEvidence(to: semanticPresentation))
+            let snapshot = try await repository.fetchTodaySnapshot()
+            publish(snapshot, evaluatedAt: date)
         } catch {
             state = .error
         }
+    }
+
+    private func publish(
+        _ snapshot: TodayRepositorySnapshot?,
+        evaluatedAt date: Date
+    ) {
+        guard let snapshot else {
+            state = .empty
+            return
+        }
+        guard let semanticPresentation = makePresentation(
+            from: snapshot,
+            evaluatedAt: date
+        ) else {
+            state = .error
+            return
+        }
+        state = .content(attachLaunchEvidence(to: semanticPresentation))
     }
 
     private func makePresentation(

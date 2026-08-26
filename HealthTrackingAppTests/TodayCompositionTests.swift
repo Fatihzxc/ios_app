@@ -59,7 +59,18 @@ final class TodayCompositionTests: XCTestCase {
     func testLaunchPerformanceCheckpointNamesAreStableAndOrdered() {
         XCTAssertEqual(
             AppLaunchPerformance.Checkpoint.allCases.map(\.rawValue),
-            ["environment", "container", "dependencies", "seed", "today"]
+            [
+                "environment",
+                "container",
+                "dependencyEntry",
+                "dependencyContext",
+                "dependencyRepository",
+                "dependencyRouting",
+                "dependencyViewModel",
+                "dependencies",
+                "seed",
+                "today",
+            ]
         )
     }
 
@@ -104,6 +115,7 @@ final class TodayCompositionTests: XCTestCase {
             nutritionQuickAddViewModel: dependencies.nutritionQuickAddViewModel,
             nutritionManualEntryViewModel: dependencies.nutritionManualEntryViewModel,
             makeSessionViewModel: dependencies.makeSessionViewModel,
+            makeTrackerFeatureRouter: dependencies.makeTrackerFeatureRouter,
             trainingHapticController: dependencies.trainingHapticController,
             shouldLoadFoundation: dependencies.shouldLoadFoundation,
             persistencePresentation: dependencies.persistencePresentation

@@ -14,19 +14,22 @@ public struct TodayView: View {
     private let exposesLaunchPerformanceEvidence: Bool
     private let onPerformAction: @MainActor (TodayMainAction) -> Void
     private let onAddMeal: @MainActor () -> Void
+    private let onOpenTrackers: @MainActor () -> Void
 
     public init(
         viewModel: TodayViewModel,
         nutritionState: TodayNutritionViewState = .loading,
         exposesLaunchPerformanceEvidence: Bool = false,
         onPerformAction: @escaping @MainActor (TodayMainAction) -> Void = { _ in },
-        onAddMeal: @escaping @MainActor () -> Void = {}
+        onAddMeal: @escaping @MainActor () -> Void = {},
+        onOpenTrackers: @escaping @MainActor () -> Void = {}
     ) {
         self.viewModel = viewModel
         self.nutritionState = nutritionState
         self.exposesLaunchPerformanceEvidence = exposesLaunchPerformanceEvidence
         self.onPerformAction = onPerformAction
         self.onAddMeal = onAddMeal
+        self.onOpenTrackers = onOpenTrackers
     }
 
     public var body: some View {
@@ -142,6 +145,20 @@ public struct TodayView: View {
             .tint(AppColors.color(.accentAction, scheme: colorScheme))
             .accessibilityIdentifier("today.nutrition.action")
             .accessibilityHint(text("today.nutrition.action.hint"))
+
+            Button(action: onOpenTrackers) {
+                Label(
+                    text("today.metrics.action"),
+                    systemImage: "ruler"
+                )
+                .font(AppTypography.label)
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.bordered)
+            .tint(AppColors.color(.accentAction, scheme: colorScheme))
+            .accessibilityIdentifier("today.metrics.action")
+            .accessibilityHint(text("today.metrics.action.hint"))
 
             nutritionCard(
                 state: nutritionState,

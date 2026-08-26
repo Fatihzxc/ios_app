@@ -18,6 +18,7 @@ struct AppRootView: View {
     let nutritionQuickAddViewModel: NutritionQuickAddViewModel
     let nutritionManualEntryViewModel: NutritionManualEntryViewModel
     let makeSessionViewModel: @MainActor () -> SessionViewModel
+    let makeTrackerFeatureRouter: @MainActor () -> any TrackerFeatureRouting
     let trainingHapticController: TrainingHapticController?
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
@@ -26,6 +27,8 @@ struct AppRootView: View {
     @State private var hasStartedFoundationLoad = false
     @State private var sessionRoute: SessionRoute?
     @State private var nutritionQuickAddIntent: NutritionQuickAddIntent?
+    @State private var trackerFeatureRouter: (any TrackerFeatureRouting)?
+    @State private var presentsTrackerEntry = false
 
     var body: some View {
         Group {
@@ -83,6 +86,18 @@ struct AppRootView: View {
                 }
             )
         }
+        .sheet(isPresented: $presentsTrackerEntry) {
+            if let trackerFeatureRouter {
+                trackerFeatureRouter.makeBodyMetricEntryView(
+                    onClose: { presentsTrackerEntry = false }
+                )
+            }
+        }
+        .onChange(of: selectedTab) { _, selectedTab in
+            if selectedTab == .progress {
+                resolveTrackerFeatureBundle()
+            }
+        }
     }
 
     @available(iOS 18.0, *)
@@ -119,7 +134,8 @@ struct AppRootView: View {
                 nutritionState: todayNutritionViewModel.state,
                 exposesLaunchPerformanceEvidence: exposesLaunchPerformanceEvidence,
                 onPerformAction: performTodayAction,
-                onAddMeal: performTodayNutritionAction
+                onAddMeal: performTodayNutritionAction,
+                onOpenTrackers: performTodayTrackerAction
             )
         case .training:
             FoundationProgramView(
@@ -139,7 +155,11 @@ struct AppRootView: View {
                 onNutritionSnapshot: publishNutritionSnapshot
             )
         case .progress:
-            ReportsFoundationView()
+            if let trackerFeatureRouter {
+                trackerFeatureRouter.makeProgressView()
+            } else {
+                ReportsFoundationView()
+            }
         case .settings:
             SettingsFoundationView(
                 persistencePresentation: persistencePresentation,
@@ -183,6 +203,16 @@ struct AppRootView: View {
         ) else { return }
         selectedTab = .nutrition
         nutritionQuickAddIntent = intent
+    }
+
+    private func performTodayTrackerAction() {
+        resolveTrackerFeatureBundle()
+        presentsTrackerEntry = true
+    }
+
+    private func resolveTrackerFeatureBundle() {
+        guard trackerFeatureRouter == nil else { return }
+        trackerFeatureRouter = makeTrackerFeatureRouter()
     }
 
     private func publishNutritionSnapshot(

@@ -23,10 +23,12 @@ public struct QuickEntryFormScaffold<Content: View>: View {
     private let title: String
     private let primaryActionTitle: String
     private let primaryActionAccessibilityLabel: String
+    private let primaryActionAccessibilityIdentifier: String?
     private let isPrimaryActionLoading: Bool
     private let isPrimaryActionEnabled: Bool
     private let secondaryActionTitle: String?
     private let secondaryActionAccessibilityLabel: String?
+    private let secondaryActionAccessibilityIdentifier: String?
     private let primaryAction: () -> Void
     private let secondaryAction: (() -> Void)?
     private let content: (FocusState<Bool>.Binding) -> Content
@@ -35,10 +37,12 @@ public struct QuickEntryFormScaffold<Content: View>: View {
         title: String,
         primaryActionTitle: String,
         primaryActionAccessibilityLabel: String,
+        primaryActionAccessibilityIdentifier: String? = nil,
         isPrimaryActionLoading: Bool = false,
         isPrimaryActionEnabled: Bool = true,
         secondaryActionTitle: String? = nil,
         secondaryActionAccessibilityLabel: String? = nil,
+        secondaryActionAccessibilityIdentifier: String? = nil,
         primaryAction: @escaping () -> Void,
         secondaryAction: (() -> Void)? = nil,
         @ViewBuilder content: @escaping (FocusState<Bool>.Binding) -> Content
@@ -46,10 +50,12 @@ public struct QuickEntryFormScaffold<Content: View>: View {
         self.title = title
         self.primaryActionTitle = primaryActionTitle
         self.primaryActionAccessibilityLabel = primaryActionAccessibilityLabel
+        self.primaryActionAccessibilityIdentifier = primaryActionAccessibilityIdentifier
         self.isPrimaryActionLoading = isPrimaryActionLoading
         self.isPrimaryActionEnabled = isPrimaryActionEnabled
         self.secondaryActionTitle = secondaryActionTitle
         self.secondaryActionAccessibilityLabel = secondaryActionAccessibilityLabel
+        self.secondaryActionAccessibilityIdentifier = secondaryActionAccessibilityIdentifier
         self.primaryAction = primaryAction
         self.secondaryAction = secondaryAction
         self.content = content
@@ -110,8 +116,9 @@ public struct QuickEntryFormScaffold<Content: View>: View {
         }
     }
 
+    @ViewBuilder
     private var primaryButton: some View {
-        PrimaryActionButton(
+        let button = PrimaryActionButton(
             title: primaryActionTitle,
             accessibilityLabel: primaryActionAccessibilityLabel,
             isLoading: isPrimaryActionLoading,
@@ -119,6 +126,11 @@ public struct QuickEntryFormScaffold<Content: View>: View {
             minimumHeight: QuickEntryFormContract.minimumActionHeight,
             action: primaryAction
         )
+        if let primaryActionAccessibilityIdentifier {
+            button.accessibilityIdentifier(primaryActionAccessibilityIdentifier)
+        } else {
+            button
+        }
     }
 
     @ViewBuilder
@@ -126,7 +138,7 @@ public struct QuickEntryFormScaffold<Content: View>: View {
         if let secondaryActionTitle,
            let secondaryActionAccessibilityLabel,
            let secondaryAction {
-            Button(action: secondaryAction) {
+            let button = Button(action: secondaryAction) {
                 Text(secondaryActionTitle)
                     .font(AppTypography.label)
                     .multilineTextAlignment(.center)
@@ -137,6 +149,11 @@ public struct QuickEntryFormScaffold<Content: View>: View {
             }
             .buttonStyle(.bordered)
             .accessibilityLabel(secondaryActionAccessibilityLabel)
+            if let secondaryActionAccessibilityIdentifier {
+                button.accessibilityIdentifier(secondaryActionAccessibilityIdentifier)
+            } else {
+                button
+            }
         }
     }
 

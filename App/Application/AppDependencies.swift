@@ -24,6 +24,9 @@ final class AppDependencies: AppDependencyLoading {
     private let installUITestFixture: @MainActor () throws -> Void
     private let injectedHapticClient: (any TrainingHapticClient)?
     private let hapticControllerReference: TrainingHapticControllerReference
+    private var didLoad = false
+    private let trackerFeatureBundleFactory:
+        @MainActor (ModelContext) -> any TrackerFeatureRouting
     let trainingRepository: any TrainingRepository
     let todayViewModel: TodayViewModel
     private lazy var deferredTrainingDependencies = DeferredTrainingDependencies(
@@ -86,6 +89,10 @@ final class AppDependencies: AppDependencyLoading {
     lazy var todayNutritionViewModel = TodayNutritionViewModel(
         repository: nutritionRepository
     )
+    private lazy var trackerFeatureRouter = trackerFeatureBundleFactory(mainContext)
+    var makeTrackerFeatureRouter: @MainActor () -> any TrackerFeatureRouting {
+        { self.trackerFeatureRouter }
+    }
     private(set) var trainingHapticController: TrainingHapticController?
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
@@ -97,16 +104,26 @@ final class AppDependencies: AppDependencyLoading {
 
     convenience init(
         environment: AppEnvironment,
-        hapticClient: (any TrainingHapticClient)? = nil
+        hapticClient: (any TrainingHapticClient)? = nil,
+        makeTrackerFeatureBundle: (
+            @MainActor (ModelContext) -> any TrackerFeatureRouting
+        )? = nil
     ) throws {
         let persistence = try Self.persistencePreparation(for: environment)
         let modelContainer = try ModelContainerFactory.make(for: persistence.mode)
         AppLaunchPerformance.record(.container)
+        let trackerFactory = makeTrackerFeatureBundle ?? { modelContext in
+            DefaultTrackerFeatureFactory.make(
+                environment: environment,
+                modelContext: modelContext
+            )
+        }
         self.init(
             environment: environment,
             persistence: persistence,
             modelContainer: modelContainer,
-            hapticClient: hapticClient
+            hapticClient: hapticClient,
+            makeTrackerFeatureBundle: trackerFactory
         )
     }
 
@@ -114,9 +131,13 @@ final class AppDependencies: AppDependencyLoading {
         environment: AppEnvironment,
         persistence: PersistencePreparation,
         modelContainer: ModelContainer,
-        hapticClient: (any TrainingHapticClient)?
+        hapticClient: (any TrainingHapticClient)?,
+        makeTrackerFeatureBundle:
+            @escaping @MainActor (ModelContext) -> any TrackerFeatureRouting
     ) {
+        AppLaunchPerformance.record(.dependencyEntry)
         let mainContext = ModelContext(modelContainer)
+        AppLaunchPerformance.record(.dependencyContext)
         self.modelContainer = modelContainer
         self.mainContext = mainContext
         persistencePresentation = persistence.presentation
@@ -124,8 +145,10 @@ final class AppDependencies: AppDependencyLoading {
         trainingHapticController = nil
         let hapticControllerReference = TrainingHapticControllerReference()
         self.hapticControllerReference = hapticControllerReference
+        trackerFeatureBundleFactory = makeTrackerFeatureBundle
         seedLoader = SwiftDataSeedLoader(modelContext: mainContext)
         let repository = SwiftDataTrainingRepository(modelContext: mainContext)
+        AppLaunchPerformance.record(.dependencyRepository)
 
         #if DEBUG
         if environment == .uiTesting,
@@ -167,6 +190,9 @@ final class AppDependencies: AppDependencyLoading {
                  .nutritionDeleteErrorOnce, .nutritionQuickAdd, .m2Acceptance:
                 trainingRepository = repository
                 shouldLoadFoundation = true
+            case .m3BodyMetrics:
+                trainingRepository = repository
+                shouldLoadFoundation = true
             }
         } else {
             trainingRepository = repository
@@ -176,6 +202,7 @@ final class AppDependencies: AppDependencyLoading {
         trainingRepository = repository
         shouldLoadFoundation = true
         #endif
+        AppLaunchPerformance.record(.dependencyRouting)
 
         todayViewModel = TodayViewModel(
             repository: trainingRepository,
@@ -184,6 +211,7 @@ final class AppDependencies: AppDependencyLoading {
                 AppLaunchPerformance.finish(elapsed)
             }
         )
+        AppLaunchPerformance.record(.dependencyViewModel)
 
         #if DEBUG
         let scenario = environment == .uiTesting
@@ -236,17 +264,35 @@ final class AppDependencies: AppDependencyLoading {
     }
 
     func load() throws {
+        guard !didLoad else { return }
         try seedLoader.seedIfNeeded(installedAt: .now)
         try installUITestFixture()
+        didLoad = true
         AppLaunchPerformance.record(.seed)
     }
 
     func loadInitialContent() async {
-        if shouldLoadFoundation {
+        if shouldLoadFoundation, todayViewModel.state == .loading {
             await todayViewModel.load()
         }
         let hapticController = ensureTrainingHapticController()
         hapticController.loadPreference()
+    }
+
+    func prepareInitialContentForLaunch() throws {
+        try load()
+        guard shouldLoadFoundation,
+              todayViewModel.state == .loading,
+              let synchronousRepository = trainingRepository
+                as? any SynchronousTodaySnapshotRepository else {
+            return
+        }
+        do {
+            let snapshot = try synchronousRepository.fetchTodaySnapshotSynchronously()
+            todayViewModel.applyInitialSnapshot(snapshot)
+        } catch {
+            // Preserve the existing async load path so a transient read failure can retry.
+        }
     }
 
     private func ensureTrainingHapticController() -> TrainingHapticController {
@@ -307,48 +353,50 @@ final class AppDependencies: AppDependencyLoading {
 
 @MainActor
 final class AppDependencyPrewarmer {
-    private struct PreparedContainer {
-        let persistence: AppDependencies.PersistencePreparation
-        let modelContainer: ModelContainer
-    }
-
     private let environment: AppEnvironment
-    private var initialAttempt: Result<PreparedContainer, Error>?
+    private let buildDependencies: @MainActor (AppEnvironment) throws -> AppDependencies
+    private var initialAttempt: Result<AppDependencies, Error>?
 
-    init(environment: AppEnvironment) {
+    init(
+        environment: AppEnvironment,
+        buildDependencies: (@MainActor (AppEnvironment) throws -> AppDependencies)? = nil
+    ) {
+        let dependencyBuilder = buildDependencies ?? Self.prepareDependencies
         self.environment = environment
+        self.buildDependencies = dependencyBuilder
         initialAttempt = Result {
-            try Self.prepareContainer(for: environment)
+            try dependencyBuilder(environment)
         }
     }
 
     func makeDependencies() async throws -> AppDependencies {
-        let prepared: PreparedContainer
         if let initialAttempt {
             self.initialAttempt = nil
-            prepared = try initialAttempt.get()
-        } else {
-            prepared = try Self.prepareContainer(for: environment)
+            return try initialAttempt.get()
         }
-
-        return AppDependencies(
-            environment: environment,
-            persistence: prepared.persistence,
-            modelContainer: prepared.modelContainer,
-            hapticClient: nil
-        )
+        return try buildDependencies(environment)
     }
 
-    private static func prepareContainer(
+    private static func prepareDependencies(
         for environment: AppEnvironment
-    ) throws -> PreparedContainer {
+    ) throws -> AppDependencies {
         let persistence = try AppDependencies.persistencePreparation(for: environment)
         let modelContainer = try ModelContainerFactory.make(for: persistence.mode)
         AppLaunchPerformance.record(.container)
-        return PreparedContainer(
+        let dependencies = AppDependencies(
+            environment: environment,
             persistence: persistence,
-            modelContainer: modelContainer
+            modelContainer: modelContainer,
+            hapticClient: nil,
+            makeTrackerFeatureBundle: { modelContext in
+                DefaultTrackerFeatureFactory.make(
+                    environment: environment,
+                    modelContext: modelContext
+                )
+            }
         )
+        try dependencies.prepareInitialContentForLaunch()
+        return dependencies
     }
 }
 
@@ -603,7 +651,7 @@ private enum UITestSessionFixture {
         case .m2Acceptance:
             try installM2Acceptance(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow,
-             .todayEmptyOnce, .todayErrorOnce, .nutritionEmpty:
+             .todayEmptyOnce, .todayErrorOnce, .nutritionEmpty, .m3BodyMetrics:
             return
         }
     }

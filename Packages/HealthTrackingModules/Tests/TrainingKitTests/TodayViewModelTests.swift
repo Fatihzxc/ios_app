@@ -10,6 +10,18 @@ final class TodayViewModelTests: XCTestCase {
     private let phase1 = UUID(uuidString: "00000000-0000-4000-8000-000000000301")!
     private let phase2 = UUID(uuidString: "00000000-0000-4000-8000-000000000302")!
 
+    func testApplyingPreloadedSnapshotPublishesContentWithoutRepositoryFetch() {
+        let repository = TodayRepositorySpy()
+        let viewModel = makeViewModel(repository: repository)
+
+        viewModel.applyInitialSnapshot(makeSnapshot(), evaluatedAt: now)
+
+        guard case .content = viewModel.state else {
+            return XCTFail("A real preloaded snapshot must publish Today content.")
+        }
+        XCTAssertEqual(repository.fetchTodaySnapshotCallCount, 0)
+    }
+
     func testInitialLoadingWaitsForExactlyOneCompactRepositorySnapshot() async {
         let gate = TodayAsyncGate()
         let repository = TodayRepositorySpy()

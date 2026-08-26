@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "PersistenceKit", targets: ["PersistenceKit"]),
         .library(name: "DesignSystem", targets: ["DesignSystem"]),
         .library(name: "NutritionKit", targets: ["NutritionKit"]),
+        .library(name: "MetricsKit", targets: ["MetricsKit"]),
         .library(name: "ReportsKit", targets: ["ReportsKit"]),
         .library(name: "SettingsKit", targets: ["SettingsKit"])
     ],
@@ -36,7 +37,7 @@ let package = Package(
         ),
         .target(
             name: "PersistenceKit",
-            dependencies: ["CoreModels", "GuidanceKit", "NutritionKit", "TrainingKit"],
+            dependencies: ["CoreModels", "GuidanceKit", "MetricsKit", "NutritionKit", "TrainingKit"],
             swiftSettings: strictConcurrency
         ),
         .target(
@@ -46,6 +47,12 @@ let package = Package(
         ),
         .target(
             name: "NutritionKit",
+            dependencies: ["CoreModels", "DesignSystem"],
+            resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
+        .target(
+            name: "MetricsKit",
             dependencies: ["CoreModels", "DesignSystem"],
             resources: [.process("Resources")],
             swiftSettings: strictConcurrency
@@ -74,7 +81,7 @@ let package = Package(
         ),
         .testTarget(
             name: "PersistenceKitTests",
-            dependencies: ["CoreModels", "NutritionKit", "TrainingKit", "PersistenceKit"],
+            dependencies: ["CoreModels", "MetricsKit", "NutritionKit", "TrainingKit", "PersistenceKit"],
             swiftSettings: strictConcurrency
         ),
         .testTarget(
@@ -90,6 +97,11 @@ let package = Package(
         .testTarget(
             name: "NutritionKitTests",
             dependencies: ["CoreModels", "NutritionKit"],
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
+            name: "MetricsKitTests",
+            dependencies: ["CoreModels", "MetricsKit"],
             swiftSettings: strictConcurrency
         )
     ]
