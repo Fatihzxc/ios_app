@@ -394,6 +394,23 @@ def make_fixture(base: Path) -> None:
     training = base / "Packages/HealthTrackingModules/Sources/TrainingKit/Boundary.swift"
     training.parent.mkdir(parents=True, exist_ok=True)
     training.write_text("struct Boundary {}\n", encoding="utf-8")
+    evidence = base / "docs/evidence/M2/acceptance.md"
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    evidence.write_text(
+        "\n".join(
+            [
+                "Accepted exact SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "Final GitHub Actions run: https://github.com/example/project/actions/runs/1",
+                "RED/GREEN",
+                "Cold launch",
+                "Screenshot review",
+                "Privacy/log scan",
+                "Gitea",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 def run(root: Path, expected=None) -> None:
     completed = subprocess.run(
@@ -442,7 +459,11 @@ with tempfile.TemporaryDirectory() as temporary:
     workflow.write_text(original, encoding="utf-8")
 
     evidence = root / "docs/evidence/M2/acceptance.md"
-    evidence.parent.mkdir(parents=True, exist_ok=True)
+    valid_evidence = evidence.read_text(encoding="utf-8")
+    evidence.unlink()
+    run(root, "M2 evidence file is required")
+    evidence.write_text(valid_evidence, encoding="utf-8")
+
     evidence.write_text("Accepted exact SHA: pending\n", encoding="utf-8")
     run(root, "M2 evidence is missing required sections")
 
