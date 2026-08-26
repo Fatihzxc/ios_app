@@ -4,6 +4,7 @@
     "designSystem.button.loading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yükleniyor" } } } },
     "designSystem.featureState.loading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yükleniyor" } } } },
     "designSystem.featureState.retry" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yeniden dene" } } } },
+    "designSystem.quick-entry.keyboard.dismiss" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Klavyeyi kapat" } } } },
     "designSystem.gallery.actionAccessibility" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Kaydı başlat" } } } },
     "designSystem.gallery.actionHint" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Bu örnek eylem şu anda kullanılamıyor." } } } },
     "designSystem.gallery.actionTitle" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Kayda başla" } } } },

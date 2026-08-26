@@ -69,14 +69,16 @@ jobs:
           scripts/verify-haptics.sh
           scripts/verify-nutrition.sh --self-test
           scripts/verify-nutrition.sh
+          scripts/verify-trackers.sh --self-test
+          scripts/verify-trackers.sh
 
       - name: Fresh-clone bootstrap idempotence
         timeout-minutes: 15
         run: scripts/test-ios.sh --verify-bootstrap-idempotence
 
-      - name: Targeted HealthTrackingApp tests
+      - name: Targeted M3.1 DesignSystem tests
         timeout-minutes: 20
-        run: scripts/test-ios.sh --only-testing HealthTrackingAppTests
+        run: scripts/test-ios.sh --only-testing DesignSystemTests
 
       - name: Test iOS app
         timeout-minutes: 90

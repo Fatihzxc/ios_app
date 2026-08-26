@@ -64,6 +64,8 @@ fi
 "$script_dir/verify-haptics.sh"
 "$script_dir/verify-nutrition.sh" --self-test
 "$script_dir/verify-nutrition.sh"
+"$script_dir/verify-trackers.sh" --self-test
+"$script_dir/verify-trackers.sh"
 
 if [[ "$bootstrap_idempotence_only" == true ]]; then
     "$script_dir/verify-bootstrap-idempotence.sh"
