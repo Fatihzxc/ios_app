@@ -67,6 +67,8 @@ jobs:
           scripts/verify-today.sh
           scripts/verify-haptics.sh --self-test
           scripts/verify-haptics.sh
+          scripts/verify-nutrition.sh --self-test
+          scripts/verify-nutrition.sh
 
       - name: Fresh-clone bootstrap idempotence
         timeout-minutes: 15
@@ -77,8 +79,10 @@ jobs:
         run: scripts/test-ios.sh --only-testing HealthTrackingAppTests
 
       - name: Test iOS app
-        timeout-minutes: 50
-        run: scripts/test-ios.sh
+        timeout-minutes: 90
+        # The dedicated test-cold-launch job owns this noisy performance gate.
+        # Keep the complete functional suite here without executing it twice.
+        run: scripts/test-ios.sh --skip-testing HealthTrackingAppUITests/TodayGuidanceUITests/testColdLaunchPublishesFirstMeaningfulDirectiveWithinOneSecondMedian
 
       - name: Export screenshot evidence
         timeout-minutes: 10
@@ -150,6 +154,29 @@ jobs:
               "m1-acceptance-personal-records",
               "m1-acceptance-haptics-disabled",
           }
+          nutrition_day_expected = {
+              "nutrition-day-content-light",
+              "nutrition-day-content-dark",
+              "nutrition-day-content-ax5",
+              "nutrition-day-empty-light",
+              "nutrition-day-error-dark",
+              "nutrition-day-reduce-motion-light",
+              "nutrition-day-high-contrast-dark",
+          }
+          nutrition_quick_add_expected = {
+              "nutrition-quick-add-saved-light",
+              "nutrition-quick-add-select-dark",
+              "nutrition-quick-add-confirm-ax5",
+          }
+          m2_acceptance_expected = {
+              "m2-acceptance-recipe-history",
+              "m2-acceptance-mixed-sources",
+          }
+          nutrition_accessibility_expected = {
+              "m2-nutrition-ax5-adhoc",
+              "m2-nutrition-dark-high-contrast-food",
+              "m2-nutrition-reduce-motion",
+          }
           expected = (
               shell_expected
               | gallery_expected
@@ -157,6 +184,10 @@ jobs:
               | today_expected
               | training_accessibility_expected
               | m1_acceptance_expected
+              | nutrition_day_expected
+              | nutrition_quick_add_expected
+              | m2_acceptance_expected
+              | nutrition_accessibility_expected
           )
 
           owners = {
@@ -183,6 +214,22 @@ jobs:
               "M1AcceptanceUITests": {
                   "module": "HealthTrackingAppUITests",
                   "expected": m1_acceptance_expected,
+              },
+              "NutritionDayUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": nutrition_day_expected,
+              },
+              "NutritionQuickAddUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": nutrition_quick_add_expected,
+              },
+              "M2AcceptanceUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": m2_acceptance_expected,
+              },
+              "NutritionAccessibilityUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": nutrition_accessibility_expected,
               },
           }
 

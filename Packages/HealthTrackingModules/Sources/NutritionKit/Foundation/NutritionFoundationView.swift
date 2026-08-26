@@ -1,34 +1,86 @@
-import DesignSystem
+import CoreModels
 import SwiftUI
 
+@MainActor
 public struct NutritionFoundationView: View {
-    @Environment(\.colorScheme) private var colorScheme
+    private let dayViewModel: NutritionDayViewModel
+    private let foodLibraryViewModel: FoodLibraryViewModel
+    private let recipeLibraryViewModel: RecipeLibraryViewModel
+    private let quickAddViewModel: NutritionQuickAddViewModel
+    private let manualEntryViewModel: NutritionManualEntryViewModel
+    private let externalQuickAddIntent: NutritionQuickAddIntent?
+    private let onNutritionSnapshot: @MainActor (
+        NutritionDayEntriesSnapshot,
+        NutritionMacroTargets?
+    ) -> Void
+    @State private var activeQuickAddIntent: NutritionQuickAddIntent?
 
-    public init() {}
+    public init(
+        dayViewModel: NutritionDayViewModel,
+        foodLibraryViewModel: FoodLibraryViewModel,
+        recipeLibraryViewModel: RecipeLibraryViewModel,
+        quickAddViewModel: NutritionQuickAddViewModel,
+        manualEntryViewModel: NutritionManualEntryViewModel,
+        externalQuickAddIntent: NutritionQuickAddIntent? = nil,
+        onNutritionSnapshot: @escaping @MainActor (
+            NutritionDayEntriesSnapshot,
+            NutritionMacroTargets?
+        ) -> Void = { _, _ in }
+    ) {
+        self.dayViewModel = dayViewModel
+        self.foodLibraryViewModel = foodLibraryViewModel
+        self.recipeLibraryViewModel = recipeLibraryViewModel
+        self.quickAddViewModel = quickAddViewModel
+        self.manualEntryViewModel = manualEntryViewModel
+        self.externalQuickAddIntent = externalQuickAddIntent
+        self.onNutritionSnapshot = onNutritionSnapshot
+    }
 
     public var body: some View {
         NavigationStack {
-            ScrollView {
-                AppCard {
-                    VStack(alignment: .leading, spacing: AppSpacing.standard) {
-                        Text(String(localized: "nutrition.foundation.heading", bundle: .module))
-                            .font(AppTypography.titleMedium)
-                            .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
-                            .accessibilityAddTraits(.isHeader)
-                        Text(String(localized: "nutrition.foundation.message", bundle: .module))
-                            .font(AppTypography.body)
-                            .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .accessibilityIdentifier("root.nutrition.content")
-                .padding(.horizontal, AppSpacing.screenHorizontal)
-                .padding(.vertical, AppSpacing.large)
-            }
-            .background(AppColors.color(.backgroundBase, scheme: colorScheme))
-            .navigationTitle(String(localized: "nutrition.foundation.title", bundle: .module))
-            .navigationBarTitleDisplayMode(.inline)
+            NutritionDayView(
+                viewModel: dayViewModel,
+                foodLibraryViewModel: foodLibraryViewModel,
+                recipeLibraryViewModel: recipeLibraryViewModel,
+                onAddMeal: startQuickAdd
+            )
         }
         .accessibilityIdentifier("root.nutrition")
+        .task(id: externalQuickAddIntent?.id) {
+            if let externalQuickAddIntent {
+                activeQuickAddIntent = externalQuickAddIntent
+            }
+        }
+        .sheet(item: $activeQuickAddIntent) { intent in
+            NutritionQuickAddView(
+                viewModel: quickAddViewModel,
+                manualEntryViewModel: manualEntryViewModel,
+                intent: intent,
+                onPublish: publish,
+                onComplete: closeQuickAdd,
+                onCancel: closeQuickAdd
+            )
+        }
+    }
+
+    private func startQuickAdd(_ category: MealCategory) {
+        activeQuickAddIntent = NutritionQuickAddIntent(
+            day: dayViewModel.selectedDay,
+            category: category
+        )
+    }
+
+    private func publish(
+        _ snapshot: NutritionDayEntriesSnapshot,
+        _ targets: NutritionMacroTargets?
+    ) {
+        dayViewModel.applyQuickAdd(snapshot: snapshot, targets: targets)
+        onNutritionSnapshot(snapshot, targets)
+    }
+
+    private func closeQuickAdd() {
+        quickAddViewModel.dismiss()
+        manualEntryViewModel.dismiss()
+        activeQuickAddIntent = nil
     }
 }

@@ -11,6 +11,12 @@ struct AppRootView: View {
     let foundationViewModel: FoundationProgramViewModel
     let phaseTransitionViewModel: PhaseTransitionViewModel
     let trainingHistoryViewModel: TrainingHistoryViewModel
+    let todayNutritionViewModel: TodayNutritionViewModel
+    let nutritionDayViewModel: NutritionDayViewModel
+    let foodLibraryViewModel: FoodLibraryViewModel
+    let recipeLibraryViewModel: RecipeLibraryViewModel
+    let nutritionQuickAddViewModel: NutritionQuickAddViewModel
+    let nutritionManualEntryViewModel: NutritionManualEntryViewModel
     let makeSessionViewModel: @MainActor () -> SessionViewModel
     let trainingHapticController: TrainingHapticController?
     let shouldLoadFoundation: Bool
@@ -19,6 +25,7 @@ struct AppRootView: View {
     @State private var selectedTab = AppTab.today
     @State private var hasStartedFoundationLoad = false
     @State private var sessionRoute: SessionRoute?
+    @State private var nutritionQuickAddIntent: NutritionQuickAddIntent?
 
     var body: some View {
         Group {
@@ -55,8 +62,10 @@ struct AppRootView: View {
             if todayViewModel.state == .loading {
                 await todayViewModel.load()
             }
+            async let nutritionLoad: Void = loadTodayNutritionIfMeaningful()
             await foundationViewModel.load()
             await phaseTransitionViewModel.load()
+            await nutritionLoad
         }
         .fullScreenCover(item: $sessionRoute) { route in
             TrainingSessionView(
@@ -66,6 +75,7 @@ struct AppRootView: View {
                     sessionRoute = nil
                     Task {
                         await todayViewModel.load()
+                        await loadTodayNutritionIfMeaningful()
                         await foundationViewModel.load()
                         await phaseTransitionViewModel.load()
                         await trainingHistoryViewModel.load()
@@ -106,8 +116,10 @@ struct AppRootView: View {
         case .today:
             TodayView(
                 viewModel: todayViewModel,
+                nutritionState: todayNutritionViewModel.state,
                 exposesLaunchPerformanceEvidence: exposesLaunchPerformanceEvidence,
-                onPerformAction: performTodayAction
+                onPerformAction: performTodayAction,
+                onAddMeal: performTodayNutritionAction
             )
         case .training:
             FoundationProgramView(
@@ -117,7 +129,15 @@ struct AppRootView: View {
                 onOpenSession: openSession
             )
         case .nutrition:
-            NutritionFoundationView()
+            NutritionFoundationView(
+                dayViewModel: nutritionDayViewModel,
+                foodLibraryViewModel: foodLibraryViewModel,
+                recipeLibraryViewModel: recipeLibraryViewModel,
+                quickAddViewModel: nutritionQuickAddViewModel,
+                manualEntryViewModel: nutritionManualEntryViewModel,
+                externalQuickAddIntent: nutritionQuickAddIntent,
+                onNutritionSnapshot: publishNutritionSnapshot
+            )
         case .progress:
             ReportsFoundationView()
         case .settings:
@@ -148,6 +168,28 @@ struct AppRootView: View {
 
     private func performTodayAction(_ action: TodayMainAction) {
         openSession(workoutDayID: action.workoutDayID)
+    }
+
+    private func loadTodayNutritionIfMeaningful() async {
+        guard case .content = todayViewModel.state else { return }
+        await todayNutritionViewModel.load()
+    }
+
+    private func performTodayNutritionAction() {
+        let date = Date.now
+        guard let intent = try? NutritionQuickAddIntent.suggested(
+            at: date,
+            calendar: .autoupdatingCurrent
+        ) else { return }
+        selectedTab = .nutrition
+        nutritionQuickAddIntent = intent
+    }
+
+    private func publishNutritionSnapshot(
+        _ snapshot: NutritionDayEntriesSnapshot,
+        _ targets: NutritionMacroTargets?
+    ) {
+        todayNutritionViewModel.apply(snapshot: snapshot, targets: targets)
     }
 
     private var exposesLaunchPerformanceEvidence: Bool {

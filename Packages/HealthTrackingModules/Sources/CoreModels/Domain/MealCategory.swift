@@ -1,7 +1,7 @@
 import Foundation
 
 public struct MealCategory: Codable, Hashable, Sendable {
-    public enum Kind: String, Codable, CaseIterable, Sendable {
+    public enum Kind: String, Codable, CaseIterable, Hashable, Sendable {
         case breakfast
         case lunch
         case dinner
@@ -22,17 +22,22 @@ public struct MealCategory: Codable, Hashable, Sendable {
     public init(kind: Kind, customName: String? = nil) throws {
         switch kind {
         case .custom:
-            guard let customName, !customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            guard let customName else {
                 throw MealCategoryValidationError.customNameRequired
             }
+            let normalized = customName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty else {
+                throw MealCategoryValidationError.customNameRequired
+            }
+            self.customName = normalized
         case .breakfast, .lunch, .dinner, .snack:
             guard customName == nil else {
                 throw MealCategoryValidationError.customNameNotAllowed
             }
+            self.customName = nil
         }
 
         self.kind = kind
-        self.customName = customName
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -55,7 +60,7 @@ public struct MealCategory: Codable, Hashable, Sendable {
     }
 }
 
-private enum MealCategoryValidationError: Error {
+public enum MealCategoryValidationError: Error, Equatable, Sendable {
     case customNameRequired
     case customNameNotAllowed
 }

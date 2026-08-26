@@ -24,6 +24,16 @@ final class ModelContainerFactoryTests: XCTestCase {
         XCTAssertEqual(HealthTrackingMigrationPlan.stages.count, 1)
     }
 
+    func testM2NutritionReusesTheFrozenV2ModelInventory() {
+        let modelNames = Set(HealthTrackingSchemaV2.models.map { String(describing: $0) })
+
+        XCTAssertEqual(HealthTrackingSchemaV2.models.count, 24)
+        XCTAssertTrue(modelNames.isSuperset(of: [
+            "Food", "Recipe", "DailyNutritionLog", "MealEntry", "AppSetting",
+        ]))
+        XCTAssertFalse(modelNames.contains("RecipeItem"))
+    }
+
     func testDescriptorsExpressEachPersistenceMode() throws {
         let localURL = URL(fileURLWithPath: "/tmp/health-tracking-local.store")
 
