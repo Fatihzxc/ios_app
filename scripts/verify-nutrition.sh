@@ -314,24 +314,26 @@ for owner, (variable, names) in owner_blocks.items():
             raise SystemExit(f"Screenshot owner {owner} is missing {name}.")
 
 evidence = root / "docs/evidence/M2/acceptance.md"
-if evidence.exists():
-    evidence_text = evidence.read_text(encoding="utf-8")
-    required_evidence_tokens = {
-        "Accepted exact SHA",
-        "Final GitHub Actions run",
-        "RED/GREEN",
-        "Cold launch",
-        "Screenshot review",
-        "Privacy/log scan",
-        "Gitea",
-    }
-    absent = sorted(token for token in required_evidence_tokens if token not in evidence_text)
-    if absent:
-        raise SystemExit(f"M2 evidence is missing required sections: {absent}")
-    if not re.search(r"Accepted exact SHA[^0-9a-f]+[0-9a-f]{40}\b", evidence_text):
-        raise SystemExit("M2 evidence must contain one 40-character accepted exact SHA.")
-    if not re.search(r"https://github\.com/[^\s)]+/actions/runs/\d+", evidence_text):
-        raise SystemExit("M2 evidence must link the final GitHub Actions run.")
+if not evidence.is_file():
+    raise SystemExit("M2 evidence file is required: docs/evidence/M2/acceptance.md")
+
+evidence_text = evidence.read_text(encoding="utf-8")
+required_evidence_tokens = {
+    "Accepted exact SHA",
+    "Final GitHub Actions run",
+    "RED/GREEN",
+    "Cold launch",
+    "Screenshot review",
+    "Privacy/log scan",
+    "Gitea",
+}
+absent = sorted(token for token in required_evidence_tokens if token not in evidence_text)
+if absent:
+    raise SystemExit(f"M2 evidence is missing required sections: {absent}")
+if not re.search(r"Accepted exact SHA[^0-9a-f]+[0-9a-f]{40}\b", evidence_text):
+    raise SystemExit("M2 evidence must contain one 40-character accepted exact SHA.")
+if not re.search(r"https://github\.com/[^\s)]+/actions/runs/\d+", evidence_text):
+    raise SystemExit("M2 evidence must link the final GitHub Actions run.")
 
 print("M2 nutrition verification passed.")
 PY
