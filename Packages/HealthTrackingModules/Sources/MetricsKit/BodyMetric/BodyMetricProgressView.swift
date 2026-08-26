@@ -59,11 +59,22 @@ public struct BodyMetricProgressView: View {
 
     private var historyContent: some View {
         VStack(alignment: .leading, spacing: AppSpacing.standard) {
-            Text(localized("metrics.history.heading"))
-                .font(AppTypography.titleMedium)
-                .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("metrics.history.loaded")
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.standard) {
+                Text(localized("metrics.history.heading"))
+                    .font(AppTypography.titleMedium)
+                    .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("root.progress.content")
+                Spacer(minLength: AppSpacing.small)
+                Text(String(viewModel.snapshots.count))
+                    .font(AppTypography.label)
+                    .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
+                    .monospacedDigit()
+                    .fixedSize(horizontal: true, vertical: true)
+                    .accessibilityLabel(localized("metrics.history.heading"))
+                    .accessibilityValue(String(viewModel.snapshots.count))
+                    .accessibilityIdentifier("metrics.history.loaded")
+            }
             if viewModel.snapshots.isEmpty {
                 AppCard {
                     Text(localized("metrics.history.empty"))
@@ -120,9 +131,6 @@ public struct BodyMetricProgressView: View {
             .accessibilityIdentifier(rowIdentifier(snapshot))
 
             deleteButton(snapshot)
-                .buttonStyle(.borderless)
-                .frame(minWidth: 52, minHeight: 52)
-                .accessibilityHint(localized("metrics.history.delete.hint"))
         }
     }
 
@@ -132,7 +140,11 @@ public struct BodyMetricProgressView: View {
         } label: {
             Label(localized("metrics.history.delete"), systemImage: "trash")
                 .font(AppTypography.label)
+                .frame(minWidth: 52, minHeight: 52, alignment: .leading)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.borderless)
+        .accessibilityHint(localized("metrics.history.delete.hint"))
         .accessibilityIdentifier(deleteIdentifier(snapshot))
     }
 

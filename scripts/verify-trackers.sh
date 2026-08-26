@@ -158,6 +158,7 @@ m32_tests = {
         "metrics.entry.save-error",
         "metrics.entry.retry",
         "metrics.row.weight.",
+        "delete.frame.height",
         "m3-metrics-entry-dark",
         "m3-metrics-entry-ax5",
     },
@@ -251,6 +252,7 @@ m32_production = {
     },
     "Packages/HealthTrackingModules/Sources/MetricsKit/BodyMetric/BodyMetricProgressView.swift": {
         "root.progress",
+        "root.progress.content",
         "metrics.history.loaded",
         "metrics.row.",
         "metrics.delete.",
@@ -359,15 +361,48 @@ if "viewModel.prepareForCreation()" not in body_metric_entry_source:
     raise SystemExit(
         "BodyMetricEntryView must reset a completed creation lifecycle before reuse"
     )
+date_field_contract = """Text(localized("metrics.entry.date"))
+                            .font(AppTypography.label)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("metrics.entry.date.label")"""
+if date_field_contract not in body_metric_entry_source:
+    raise SystemExit(
+        "BodyMetricEntryView must place the visible date label above the picker so "
+        "accessibility Dynamic Type cannot collapse it into a one-letter column"
+    )
+if '.labelsHidden()' not in body_metric_entry_source:
+    raise SystemExit(
+        "BodyMetricEntryView must hide the picker label after publishing its separate "
+        "visible accessibility label"
+    )
 
 body_metric_progress_source = (
     root
     / "Packages/HealthTrackingModules/Sources/MetricsKit/BodyMetric/BodyMetricProgressView.swift"
 ).read_text(encoding="utf-8")
-if '.accessibilityIdentifier("root.progress.content")' in body_metric_progress_source:
+progress_content_identifier = '.accessibilityIdentifier("root.progress.content")'
+if body_metric_progress_source.count(progress_content_identifier) != 1:
     raise SystemExit(
-        "BodyMetricProgressView must not place an identifier on the state container; "
-        "SwiftUI propagates it over row and delete identifiers"
+        "BodyMetricProgressView must expose exactly one root.progress.content identifier"
+    )
+loaded_heading_contract = """.accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier(\"root.progress.content\")"""
+if loaded_heading_contract not in body_metric_progress_source:
+    raise SystemExit(
+        "BodyMetricProgressView must identify the loaded heading, not its state container; "
+        "container identifiers propagate over row and delete identifiers"
+    )
+loaded_count_sizing_contract = """.monospacedDigit()
+                    .fixedSize(horizontal: true, vertical: true)
+                    .accessibilityLabel(localized(\"metrics.history.heading\"))"""
+if loaded_count_sizing_contract not in body_metric_progress_source:
+    raise SystemExit(
+        "BodyMetricProgressView must keep the loaded count at its ideal size so "
+        "accessibility Dynamic Type cannot clip it"
+    )
+if '.frame(minWidth: 52, minHeight: 52, alignment: .leading)' not in body_metric_progress_source:
+    raise SystemExit(
+        "BodyMetricProgressView must expand the delete label to a 52-point touch target"
     )
 
 dependencies_source = (root / "App/Application/AppDependencies.swift").read_text(
@@ -583,6 +618,7 @@ fixture_files = {
             "metrics.entry.save-error",
             "metrics.entry.retry",
             "metrics.row.weight.",
+            "delete.frame.height",
             "m3-metrics-entry-dark",
             "m3-metrics-entry-ax5",
         ]
@@ -631,7 +667,7 @@ fixture_files = {
             "validatedSnapshot",
         ]
     ),
-    "Packages/HealthTrackingModules/Sources/MetricsKit/BodyMetric/BodyMetricEntryView.swift": " ".join(
+    "Packages/HealthTrackingModules/Sources/MetricsKit/BodyMetric/BodyMetricEntryView.swift": "\n".join(
         [
             "QuickEntryFormScaffold",
             "metrics.entry.weight",
@@ -641,14 +677,25 @@ fixture_files = {
             "viewModel.prepareForCreation()",
             "metrics.entry.saved",
             "NumberFormatter",
+            'Text(localized("metrics.entry.date"))',
+            "                            .font(AppTypography.label)",
+            "                            .fixedSize(horizontal: false, vertical: true)",
+            '                            .accessibilityIdentifier("metrics.entry.date.label")',
+            ".labelsHidden()",
         ]
     ),
-    "Packages/HealthTrackingModules/Sources/MetricsKit/BodyMetric/BodyMetricProgressView.swift": " ".join(
+    "Packages/HealthTrackingModules/Sources/MetricsKit/BodyMetric/BodyMetricProgressView.swift": "\n".join(
         [
-            "root.progress",
-            "metrics.history.loaded",
+            '.accessibilityIdentifier("root.progress")',
+            ".accessibilityAddTraits(.isHeader)",
+            '                    .accessibilityIdentifier("root.progress.content")',
+            ".monospacedDigit()",
+            "                    .fixedSize(horizontal: true, vertical: true)",
+            '                    .accessibilityLabel(localized("metrics.history.heading"))',
+            '.accessibilityIdentifier("metrics.history.loaded")',
             "metrics.row.",
             "metrics.delete.",
+            ".frame(minWidth: 52, minHeight: 52, alignment: .leading)",
         ]
     ),
     "App/Application/TrackerFeatureRouting.swift": " ".join(
@@ -848,6 +895,16 @@ with tempfile.TemporaryDirectory() as temporary:
     run(root, "must route failed save and undo retries through the ViewModel")
     body_metric_entry.write_text(original_body_metric_entry, encoding="utf-8")
 
+    body_metric_entry.write_text(
+        original_body_metric_entry.replace(
+            '.accessibilityIdentifier("metrics.entry.date.label")',
+            '.accessibilityIdentifier("metrics.entry.date.collapsed")',
+        ),
+        encoding="utf-8",
+    )
+    run(root, "must place the visible date label above the picker")
+    body_metric_entry.write_text(original_body_metric_entry, encoding="utf-8")
+
     body_metric_progress = root / "Packages/HealthTrackingModules/Sources/MetricsKit/BodyMetric/BodyMetricProgressView.swift"
     original_body_metric_progress = body_metric_progress.read_text(encoding="utf-8")
     body_metric_progress.write_text(
@@ -855,7 +912,39 @@ with tempfile.TemporaryDirectory() as temporary:
         + '\n.accessibilityIdentifier("root.progress.content")\n',
         encoding="utf-8",
     )
-    run(root, "must not place an identifier on the state container")
+    run(root, "must expose exactly one root.progress.content identifier")
+    body_metric_progress.write_text(original_body_metric_progress, encoding="utf-8")
+
+    body_metric_progress.write_text(
+        original_body_metric_progress.replace(
+            ".accessibilityAddTraits(.isHeader)\n"
+            '                    .accessibilityIdentifier("root.progress.content")',
+            ".accessibilityAddTraits(.isHeader)\n",
+        )
+        + '\n.accessibilityIdentifier("root.progress.content")\n',
+        encoding="utf-8",
+    )
+    run(root, "must identify the loaded heading, not its state container")
+    body_metric_progress.write_text(original_body_metric_progress, encoding="utf-8")
+
+    body_metric_progress.write_text(
+        original_body_metric_progress.replace(
+            ".fixedSize(horizontal: true, vertical: true)",
+            ".fixedSize(horizontal: false, vertical: false)",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "must keep the loaded count at its ideal size")
+    body_metric_progress.write_text(original_body_metric_progress, encoding="utf-8")
+
+    body_metric_progress.write_text(
+        original_body_metric_progress.replace(
+            '.frame(minWidth: 52, minHeight: 52, alignment: .leading)',
+            '.frame(minWidth: 44, minHeight: 44, alignment: .leading)',
+        ),
+        encoding="utf-8",
+    )
+    run(root, "must expand the delete label to a 52-point touch target")
     body_metric_progress.write_text(original_body_metric_progress, encoding="utf-8")
 
     metrics_catalog = root / "Packages/HealthTrackingModules/Sources/MetricsKit/Resources/Localizable.xcstrings"

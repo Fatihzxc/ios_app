@@ -49,12 +49,20 @@ public struct BodyMetricEntryView: View {
                 secondaryAction: secondaryAction
             ) { focus in
                 VStack(alignment: .leading, spacing: AppSpacing.comfortable) {
-                    DatePicker(
-                        localized("metrics.entry.date"),
-                        selection: $date,
-                        displayedComponents: .date
-                    )
-                    .accessibilityIdentifier("metrics.entry.date")
+                    VStack(alignment: .leading, spacing: AppSpacing.small) {
+                        Text(localized("metrics.entry.date"))
+                            .font(AppTypography.label)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("metrics.entry.date.label")
+                        DatePicker(
+                            "",
+                            selection: $date,
+                            displayedComponents: .date
+                        )
+                        .labelsHidden()
+                        .accessibilityLabel(localized("metrics.entry.date"))
+                        .accessibilityIdentifier("metrics.entry.date")
+                    }
 
                     metricField(
                         title: localized("metrics.entry.weight"),

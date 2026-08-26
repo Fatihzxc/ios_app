@@ -51,8 +51,14 @@ final class BodyMetricFlowUITests: XCTestCase {
             "The edited metric must survive a new app process."
         )
         makeHittable(persisted, in: relaunched)
-        persisted.swipeLeft()
-        require(firstIdentified(prefix: "metrics.delete.weight.", in: relaunched)).tap()
+        let delete = require(firstIdentified(prefix: "metrics.delete.weight.", in: relaunched))
+        makeHittable(delete, in: relaunched)
+        XCTAssertGreaterThanOrEqual(
+            delete.frame.height + 0.01,
+            52,
+            "The destructive metric action must retain its 52-point touch target."
+        )
+        delete.tap()
         XCTAssertFalse(
             firstIdentified(prefix: "metrics.row.weight.", in: relaunched)
                 .waitForExistence(timeout: 2)
@@ -75,6 +81,12 @@ final class BodyMetricFlowUITests: XCTestCase {
             ]
         )
         openEntryFromToday(in: ax5)
+        let dateLabel = require(identified("metrics.entry.date.label", in: ax5))
+        XCTAssertGreaterThanOrEqual(
+            dateLabel.frame.width + 0.01,
+            160,
+            "The AX5 date label must use a readable row instead of wrapping one letter per line."
+        )
         let save = require(identified("metrics.entry.save", in: ax5))
         makeHittable(save, in: ax5)
         XCTAssertTrue(save.isHittable)
