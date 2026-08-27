@@ -18,6 +18,7 @@ let package = Package(
         .library(name: "NutritionKit", targets: ["NutritionKit"]),
         .library(name: "HealthSafetyKit", targets: ["HealthSafetyKit"]),
         .library(name: "HealthChecksKit", targets: ["HealthChecksKit"]),
+        .library(name: "ProgressPhotosKit", targets: ["ProgressPhotosKit"]),
         .library(name: "MetricsKit", targets: ["MetricsKit"]),
         .library(name: "SleepMoodKit", targets: ["SleepMoodKit"]),
         .library(name: "ReportsKit", targets: ["ReportsKit"]),
@@ -40,7 +41,7 @@ let package = Package(
         ),
         .target(
             name: "PersistenceKit",
-            dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit"],
+            dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "SleepMoodKit", "TrainingKit"],
             swiftSettings: strictConcurrency
         ),
         .target(
@@ -62,6 +63,12 @@ let package = Package(
         .target(
             name: "HealthChecksKit",
             dependencies: ["CoreModels", "DesignSystem", "HealthSafetyKit"],
+            resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
+        .target(
+            name: "ProgressPhotosKit",
+            dependencies: ["CoreModels", "DesignSystem"],
             resources: [.process("Resources")],
             swiftSettings: strictConcurrency
         ),
@@ -101,7 +108,7 @@ let package = Package(
         ),
         .testTarget(
             name: "PersistenceKitTests",
-            dependencies: ["CoreModels", "HealthChecksKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"],
+            dependencies: ["CoreModels", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"],
             swiftSettings: strictConcurrency
         ),
         .testTarget(
@@ -127,6 +134,11 @@ let package = Package(
         .testTarget(
             name: "HealthChecksKitTests",
             dependencies: ["CoreModels", "HealthChecksKit"],
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
+            name: "ProgressPhotosKitTests",
+            dependencies: ["CoreModels", "ProgressPhotosKit"],
             swiftSettings: strictConcurrency
         ),
         .testTarget(

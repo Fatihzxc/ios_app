@@ -1,0 +1,27 @@
+{
+  "sourceLanguage" : "tr",
+  "strings" : {
+    "photos.cancel" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Vazgeç" } } } },
+    "photos.close" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Kapat" } } } },
+    "photos.date" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Tarih" } } } },
+    "photos.delete" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Fotoğrafı sil" } } } },
+    "photos.delete.confirmation" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Bu ilerleme fotoğrafı silinsin mi?" } } } },
+    "photos.delete.error" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Fotoğraf silinemedi. Yerel kayıt korundu; yeniden deneyebilirsin." } } } },
+    "photos.empty" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Henüz ilerleme fotoğrafı yok. Sistem seçiciden bir fotoğraf ekleyebilirsin." } } } },
+    "photos.import.error" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Fotoğraf eklenemedi. Tarih, poz ve not korundu." } } } },
+    "photos.import.fixture" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Test fotoğrafını ekle" } } } },
+    "photos.imported" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Fotoğraf bu cihaza eklendi." } } } },
+    "photos.importing" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Fotoğraf hazırlanıyor" } } } },
+    "photos.list" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yerel fotoğraflar" } } } },
+    "photos.load.error" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "İlerleme fotoğrafları yüklenemedi." } } } },
+    "photos.local-only.status" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Fotoğraflar bu cihazda çalışır; iCloud kapalıyken de yerel kayıt kullanılabilir." } } } },
+    "photos.note" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Not (opsiyonel)" } } } },
+    "photos.picker" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Sistem seçiciden fotoğraf ekle" } } } },
+    "photos.pose" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Poz" } } } },
+    "photos.pose.back" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Arka" } } } },
+    "photos.pose.front" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Ön" } } } },
+    "photos.pose.side" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yan" } } } },
+    "photos.title" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "İlerleme fotoğrafları" } } } }
+  },
+  "version" : "1.0"
+}

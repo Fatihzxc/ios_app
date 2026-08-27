@@ -24,7 +24,12 @@ protocol TrackerFeatureRouting: AnyObject {
         onClose: @escaping @MainActor () -> Void
     ) -> AnyView
 
+    func makeProgressPhotoLifecycleView(
+        onClose: @escaping @MainActor () -> Void
+    ) -> AnyView
+
     func makeProgressView(
-        onOpenBloodwork: @escaping @MainActor () -> Void
+        onOpenBloodwork: @escaping @MainActor () -> Void,
+        onOpenProgressPhotos: @escaping @MainActor () -> Void
     ) -> AnyView
 }

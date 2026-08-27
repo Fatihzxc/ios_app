@@ -41,6 +41,7 @@ enum AppUITestScenario: String {
     case m3Posture = "m3-posture"
     case m3HealthChecks = "m3-health-checks"
     case m3Bloodwork = "m3-bloodwork"
+    case m3ProgressPhotos = "m3-progress-photos"
 }
 
 struct AppUITestLaunchConfiguration {
