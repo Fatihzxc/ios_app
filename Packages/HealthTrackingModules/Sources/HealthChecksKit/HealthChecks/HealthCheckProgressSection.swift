@@ -9,31 +9,44 @@ public struct HealthCheckProgressSection: View {
     @Bindable private var viewModel: HealthChecksViewModel
     private let calendar: Calendar
     private let now: @MainActor () -> Date
+    private let onOpenBloodwork: @MainActor () -> Void
 
     public init(
         viewModel: HealthChecksViewModel,
         calendar: Calendar,
-        now: @escaping @MainActor () -> Date = { .now }
+        now: @escaping @MainActor () -> Date = { .now },
+        onOpenBloodwork: @escaping @MainActor () -> Void = {}
     ) {
         self.viewModel = viewModel
         self.calendar = calendar
         self.now = now
+        self.onOpenBloodwork = onOpenBloodwork
     }
 
     public var body: some View {
-        Group {
-            switch viewModel.loadPhase {
-            case .idle, .loading:
-                FeatureStateView(state: .loading)
-                    .accessibilityIdentifier("health-check.history.loading")
-            case .failed:
-                FeatureStateView(
-                    state: .error(message: localized("health-check.load.error")),
-                    retry: { Task { await viewModel.load() } }
-                )
-                .accessibilityIdentifier("health-check.history.error")
-            case .loaded:
-                loadedContent
+        VStack(alignment: .leading, spacing: AppSpacing.standard) {
+            Button(action: onOpenBloodwork) {
+                Label(localized("bloodwork.title"), systemImage: "cross.case")
+                    .font(AppTypography.label)
+                    .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("bloodwork.open")
+
+            Group {
+                switch viewModel.loadPhase {
+                case .idle, .loading:
+                    FeatureStateView(state: .loading)
+                        .accessibilityIdentifier("health-check.history.loading")
+                case .failed:
+                    FeatureStateView(
+                        state: .error(message: localized("health-check.load.error")),
+                        retry: { Task { await viewModel.load() } }
+                    )
+                    .accessibilityIdentifier("health-check.history.error")
+                case .loaded:
+                    loadedContent
+                }
             }
         }
         .task {

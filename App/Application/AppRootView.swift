@@ -108,6 +108,11 @@ struct AppRootView: View {
                         },
                         onClose: { trackerEntryRoute = nil }
                     )
+                case .bloodwork:
+                    trackerFeatureRouter.makeBloodworkListView(
+                        onCommittedMutation: {},
+                        onClose: { trackerEntryRoute = nil }
+                    )
                 }
             }
         }
@@ -177,7 +182,11 @@ struct AppRootView: View {
             )
         case .progress:
             if let trackerFeatureRouter {
-                trackerFeatureRouter.makeProgressView()
+                trackerFeatureRouter.makeProgressView(
+                    onOpenBloodwork: {
+                        trackerEntryRoute = .bloodwork
+                    }
+                )
             } else {
                 ReportsFoundationView()
             }
@@ -278,6 +287,7 @@ private enum TrackerEntryRoute: String, Identifiable {
     case lifestyle
     case posture
     case healthChecks
+    case bloodwork
 
     var id: String { rawValue }
 }

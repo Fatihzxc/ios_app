@@ -76,7 +76,7 @@ jobs:
         timeout-minutes: 15
         run: scripts/test-ios.sh --verify-bootstrap-idempotence
 
-      - name: Targeted M3.5 health-check tests
+      - name: Targeted M3.6 bloodwork reference tests
         timeout-minutes: 20
         run: scripts/test-ios.sh --only-testing HealthChecksKitTests
 
@@ -207,6 +207,12 @@ jobs:
               "m3-health-check-progress-light",
               "m3-health-check-detail-ax5",
           }
+          bloodwork_expected = {
+              "m3-bloodwork-empty-light",
+              "m3-bloodwork-detail-light",
+              "m3-bloodwork-editor-dark-high-contrast",
+              "m3-bloodwork-editor-ax5",
+          }
           expected = (
               shell_expected
               | gallery_expected
@@ -223,6 +229,7 @@ jobs:
               | posture_expected
               | ohp_safety_expected
               | health_check_expected
+              | bloodwork_expected
           )
 
           owners = {
@@ -285,6 +292,10 @@ jobs:
               "HealthCheckFlowUITests": {
                   "module": "HealthTrackingAppUITests",
                   "expected": health_check_expected,
+              },
+              "BloodworkFlowUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": bloodwork_expected,
               },
           }
 
