@@ -1,4 +1,5 @@
 import CoreModels
+import HealthChecksKit
 @testable import PersistenceKit
 import SwiftData
 import TrainingKit
@@ -33,7 +34,6 @@ final class TrainingRepositoryContractTests: XCTestCase {
         let exercises = try await repository.fetchExerciseTemplates(workoutDayID: UUID())
         let warmups = try await repository.fetchWarmupItems(workoutDayID: UUID())
         let cooldowns = try await repository.fetchCooldownItems(workoutDayID: UUID())
-        let reminders = try await repository.fetchHealthCheckReminders()
         let programState = try await repository.fetchProgramState(programID: UUID())
         let completedHistory = try await repository.fetchCompletedExerciseHistory(
             exerciseTemplateID: UUID()
@@ -46,7 +46,6 @@ final class TrainingRepositoryContractTests: XCTestCase {
         XCTAssertEqual(exercises, [])
         XCTAssertEqual(warmups, [])
         XCTAssertEqual(cooldowns, [])
-        XCTAssertEqual(reminders, [])
         XCTAssertNil(programState)
         XCTAssertEqual(completedHistory, [])
     }
@@ -60,6 +59,11 @@ final class TrainingRepositoryContractTests: XCTestCase {
         let repository: any TrainingRepository = SwiftDataTrainingRepository(
             modelContext: ModelContext(container)
         )
+        let healthChecksRepository: any HealthChecksRepository =
+            SwiftDataHealthChecksRepository(
+                modelContext: ModelContext(container),
+                calendar: Calendar(identifier: .gregorian)
+            )
 
         let fetchedProgram = try await repository.fetchActiveProgram()
         let program = try XCTUnwrap(fetchedProgram)
@@ -105,7 +109,7 @@ final class TrainingRepositoryContractTests: XCTestCase {
             XCTAssertEqual(cooldowns.map(\.orderIndex), [1, 2, 3])
         }
 
-        let reminders = try await repository.fetchHealthCheckReminders()
+        let reminders = try await healthChecksRepository.fetchReminders()
         XCTAssertEqual(reminders.map(\.name), ["D vitamini", "Genel check-up", "Ferritin"])
         let fetchedState = try await repository.fetchProgramState(programID: program.id)
         let state = try XCTUnwrap(fetchedState)
@@ -236,7 +240,7 @@ final class TrainingRepositoryContractTests: XCTestCase {
         XCTAssertEqual(fetchedCooldowns.map(\.id), [firstID, secondID, laterID])
     }
 
-    func testHealthCheckRemindersUseDueDateThenUUIDForStableOrdering() async throws {
+    func testDedicatedHealthCheckRepositoryUsesDueDateThenUUIDForStableOrdering() async throws {
         let container = try ModelContainerFactory.make(for: .inMemory)
         let writeContext = ModelContext(container)
         let dueDate = Date(timeIntervalSinceReferenceDate: 1_000)
@@ -250,8 +254,11 @@ final class TrainingRepositoryContractTests: XCTestCase {
         ].forEach(writeContext.insert)
         try writeContext.save()
 
-        let repository = SwiftDataTrainingRepository(modelContext: ModelContext(container))
-        let reminders = try await repository.fetchHealthCheckReminders()
+        let repository = SwiftDataHealthChecksRepository(
+            modelContext: ModelContext(container),
+            calendar: Calendar(identifier: .gregorian)
+        )
+        let reminders = try await repository.fetchReminders()
 
         XCTAssertEqual(reminders.map(\.id), [firstID, secondID, laterID])
     }

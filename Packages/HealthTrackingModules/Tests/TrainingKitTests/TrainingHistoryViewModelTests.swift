@@ -330,7 +330,6 @@ private final class HistoryRepositorySpy: TrainingRepository {
     func fetchExerciseTemplates(workoutDayID _: UUID) async throws -> [ExerciseTemplate] { [] }
     func fetchWarmupItems(workoutDayID _: UUID) async throws -> [WarmupItem] { [] }
     func fetchCooldownItems(workoutDayID _: UUID) async throws -> [CooldownItem] { [] }
-    func fetchHealthCheckReminders() async throws -> [HealthCheckReminder] { [] }
     func fetchProgramState(programID _: UUID) async throws -> ProgramState? { nil }
     func saveSet(_: SetLogSaveRequest) async throws -> SetLogSnapshot {
         throw FakeHistoryError.unsupported
