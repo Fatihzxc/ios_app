@@ -108,7 +108,7 @@ public struct HealthCheckListView: View {
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
                     .accessibilityIdentifier("health-check.list.loaded")
-                Button(localized("health-check.notifications.permission")) {
+                Button {
                     guard notificationPermissionGate.beginRequest() else { return }
                     Task {
                         let allowsRetry = await onRequestNotificationAuthorization()
@@ -116,9 +116,12 @@ public struct HealthCheckListView: View {
                             allowsRetry: allowsRetry
                         )
                     }
+                } label: {
+                    Text(localized("health-check.notifications.permission"))
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.bordered)
-                .frame(minHeight: 44)
                 .disabled(notificationPermissionGate.isDisabled)
                 .accessibilityIdentifier("health-check.notifications.permission")
                 if viewModel.snapshots.isEmpty {
