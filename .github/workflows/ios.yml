@@ -76,9 +76,9 @@ jobs:
         timeout-minutes: 15
         run: scripts/test-ios.sh --verify-bootstrap-idempotence
 
-      - name: Targeted M3.3 SleepMood tests
+      - name: Targeted M3.4 medical safety tests
         timeout-minutes: 20
-        run: scripts/test-ios.sh --only-testing SleepMoodKitTests
+        run: scripts/test-ios.sh --only-testing HealthSafetyKitTests
 
       - name: Test iOS app
         timeout-minutes: 90
@@ -190,6 +190,18 @@ jobs:
               "m3-lifestyle-entry-dark",
               "m3-lifestyle-entry-ax5",
           }
+          posture_expected = {
+              "m3-posture-entry-light",
+              "m3-posture-progress-light",
+              "m3-posture-entry-dark",
+              "m3-posture-entry-ax5",
+              "m3-posture-high-contrast",
+          }
+          ohp_safety_expected = {
+              "session-ohp-prior-question-light",
+              "session-ohp-blocked-light",
+              "session-ohp-half-kneeling-alternative-light",
+          }
           expected = (
               shell_expected
               | gallery_expected
@@ -203,6 +215,8 @@ jobs:
               | nutrition_accessibility_expected
               | body_metric_expected
               | lifestyle_expected
+              | posture_expected
+              | ohp_safety_expected
           )
 
           owners = {
@@ -253,6 +267,14 @@ jobs:
               "LifestyleFlowUITests": {
                   "module": "HealthTrackingAppUITests",
                   "expected": lifestyle_expected,
+              },
+              "PostureFlowUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": posture_expected,
+              },
+              "OHPSafetyFlowUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": ohp_safety_expected,
               },
           }
 

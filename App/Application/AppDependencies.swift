@@ -190,7 +190,7 @@ final class AppDependencies: AppDependencyLoading {
                  .nutritionDeleteErrorOnce, .nutritionQuickAdd, .m2Acceptance:
                 trainingRepository = repository
                 shouldLoadFoundation = true
-            case .m3BodyMetrics, .m3SleepMood:
+            case .m3BodyMetrics, .m3SleepMood, .m3Posture:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -650,11 +650,37 @@ private enum UITestSessionFixture {
             try installNutritionQuickAdd(in: modelContext)
         case .m2Acceptance:
             try installM2Acceptance(in: modelContext)
+        case .m3Posture:
+            try installM3Posture(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow,
              .todayEmptyOnce, .todayErrorOnce, .nutritionEmpty, .m3BodyMetrics,
              .m3SleepMood:
             return
         }
+    }
+
+    private static func installM3Posture(in modelContext: ModelContext) throws {
+        let fixtureID = uuid("00000000-0000-4000-8000-00000000d401")
+        let existing = try modelContext.fetch(
+            FetchDescriptor<PostureMetric>(
+                predicate: #Predicate { $0.id == fixtureID }
+            )
+        )
+        guard existing.isEmpty else { return }
+        let date = installedAt.addingTimeInterval(-7 * 24 * 60 * 60)
+        modelContext.insert(
+            PostureMetric(
+                id: fixtureID,
+                createdAt: date,
+                updatedAt: date,
+                date: date,
+                wallTestPass: true,
+                symptomScore: 2,
+                region: "Boyun",
+                note: "Haftalık başlangıç kaydı"
+            )
+        )
+        try modelContext.save()
     }
 
     private static func installNutritionContent(
