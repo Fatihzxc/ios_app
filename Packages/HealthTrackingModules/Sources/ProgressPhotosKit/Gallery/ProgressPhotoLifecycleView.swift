@@ -227,16 +227,18 @@ public struct ProgressPhotoLifecycleView: View {
                     )
                     .accessibilityIdentifier("photos.import.saved")
                 if viewModel.canUndoLastImport {
-                    Button(localized("photos.import.undo")) {
+                    Button {
                         Task {
                             if await viewModel.undoLastImport() {
                                 await galleryViewModel.load()
                                 await synchronizeAssets()
                             }
                         }
+                    } label: {
+                        Text(localized("photos.import.undo"))
+                            .frame(maxWidth: .infinity, minHeight: 52)
                     }
                     .buttonStyle(.bordered)
-                    .frame(minHeight: 52)
                     .accessibilityIdentifier("photos.import.undo")
                 }
             }
