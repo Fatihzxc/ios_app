@@ -577,7 +577,9 @@ final class HealthCheckNotificationCompositionTests: XCTestCase {
             id: completion.completed.id,
             expectedUpdatedAt: completion.completed.updatedAt
         )
+        actions.onPresentation()
         await actions.onRequestNotificationAuthorization()
+        XCTAssertEqual(actions.authorizationState, .authorized)
 
         let backendSnapshot = await backend.snapshot()
         XCTAssertEqual(repository.fetchCount, 4)

@@ -5008,6 +5008,11 @@ m311_tests = {
         "var outcomes = [false, true]",
         "invocations.dropFirst().allSatisfy",
     },
+    "HealthTrackingAppTests/TrackerCompositionTests.swift": {
+        "testBootstrapAndRootConstructionDoNotInvokeTrackerFactoryAndFirstRouteCachesOnce",
+        "bundle.healthCheckNotificationComposition.repository as AnyObject",
+        "bundle.healthCheckNotificationComposition.healthChecksRepository",
+    },
     "HealthTrackingAppUITests/HealthCheckNotificationFlowUITests.swift": {
         "testPermissionRequestOccursOnlyAfterExplicitHealthCheckActionAndNeverOnRelaunch",
         '"health-check.notifications.permission"',
@@ -5194,6 +5199,49 @@ for authorized_unprojectable_contract in (
 m311_app_test_text = (
     root / "HealthTrackingAppTests/HealthCheckNotificationCompositionTests.swift"
 ).read_text(encoding="utf-8")
+m311_concrete_bundle_test = swift_braced_declaration(
+    m311_app_test_text,
+    "testConcreteBundleMutationRepositoryDrivesLaunchEditCompleteDeleteAndExplicitPermissionThroughSystemAdapter",
+) or ""
+concrete_permission_tokens = (
+    "actions.onPresentation()",
+    "await actions.onRequestNotificationAuthorization()",
+    "XCTAssertEqual(actions.authorizationState, .authorized)",
+    "let backendSnapshot = await backend.snapshot()",
+    "XCTAssertEqual(backendSnapshot.authorizationRequestCount, 1)",
+)
+concrete_permission_positions = [
+    m311_concrete_bundle_test.find(token) for token in concrete_permission_tokens
+]
+if (
+    any(position < 0 for position in concrete_permission_positions)
+    or concrete_permission_positions != sorted(concrete_permission_positions)
+):
+    raise SystemExit(
+        "M3.11 concrete bundle authorization integration must enter presentation, "
+        "perform the explicit request, and observe the authorized system boundary in order"
+    )
+
+m311_tracker_composition_test_text = (
+    root / "HealthTrackingAppTests/TrackerCompositionTests.swift"
+).read_text(encoding="utf-8")
+m311_cached_tracker_test = swift_braced_declaration(
+    m311_tracker_composition_test_text,
+    "testBootstrapAndRootConstructionDoNotInvokeTrackerFactoryAndFirstRouteCachesOnce",
+) or ""
+for shared_health_check_contract in (
+    "bundle.healthCheckNotificationComposition.repository as AnyObject",
+    "=== healthChecksRepository",
+    "bundle.healthChecksRepository as AnyObject",
+    "bundle.healthCheckNotificationComposition.healthChecksRepository",
+):
+    if shared_health_check_contract not in m311_cached_tracker_test:
+        raise SystemExit(
+            "M3.11 cached tracker composition must retain the injected health-check "
+            "repository beneath the exact notification-reconciling mutation surface: "
+            f"{shared_health_check_contract}"
+        )
+
 m311_three_generation_test = swift_braced_declaration(
     m311_app_test_text,
     "testThreeGenerationsSkipMiddleWorkAndCommitOnlyNewestAfterOldNonCancellableEffect",
@@ -8741,6 +8789,7 @@ for m311_test_path in (
     "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/HealthCheckNotificationPermissionGateTests.swift",
     "Packages/HealthTrackingModules/Tests/TrainingKitTests/TodayViewModelTests.swift",
     "HealthTrackingAppTests/HealthCheckNotificationCompositionTests.swift",
+    "HealthTrackingAppTests/TrackerCompositionTests.swift",
     "HealthTrackingAppUITests/HealthCheckNotificationFlowUITests.swift",
 ):
     fixture_files[m311_test_path] = (repo / m311_test_path).read_text(encoding="utf-8")
@@ -9582,6 +9631,60 @@ with tempfile.TemporaryDirectory() as temporary:
         )
         run(root, token)
         m311_app_test.write_text(original_m311_app_test, encoding="utf-8")
+
+    concrete_bundle_range = braced_declaration(
+        original_m311_app_test,
+        r"\bfunc\s+testConcreteBundleMutationRepositoryDrivesLaunchEditCompleteDeleteAndExplicitPermissionThroughSystemAdapter\b[^\{]*\{",
+    )
+    if concrete_bundle_range is None:
+        raise AssertionError("M3.11 self fixture is missing concrete bundle coverage")
+    concrete_bundle_start, concrete_bundle_end = concrete_bundle_range
+    concrete_bundle_body = original_m311_app_test[
+        concrete_bundle_start:concrete_bundle_end
+    ]
+    for scoped_contract in (
+        "actions.onPresentation()",
+        "XCTAssertEqual(actions.authorizationState, .authorized)",
+    ):
+        mutate_scoped_token(
+            root,
+            m311_app_test,
+            original_m311_app_test,
+            concrete_bundle_start,
+            concrete_bundle_body,
+            scoped_contract,
+            "M3.11 concrete bundle authorization integration must enter presentation",
+        )
+
+    m311_tracker_composition_test = (
+        root / "HealthTrackingAppTests/TrackerCompositionTests.swift"
+    )
+    original_m311_tracker_composition_test = m311_tracker_composition_test.read_text(
+        encoding="utf-8"
+    )
+    cached_tracker_range = braced_declaration(
+        original_m311_tracker_composition_test,
+        r"\bfunc\s+testBootstrapAndRootConstructionDoNotInvokeTrackerFactoryAndFirstRouteCachesOnce\b[^\{]*\{",
+    )
+    if cached_tracker_range is None:
+        raise AssertionError("M3.11 self fixture is missing cached tracker coverage")
+    cached_tracker_start, cached_tracker_end = cached_tracker_range
+    cached_tracker_body = original_m311_tracker_composition_test[
+        cached_tracker_start:cached_tracker_end
+    ]
+    for scoped_contract in (
+        "bundle.healthCheckNotificationComposition.repository as AnyObject",
+        "bundle.healthChecksRepository as AnyObject",
+    ):
+        mutate_scoped_token(
+            root,
+            m311_tracker_composition_test,
+            original_m311_tracker_composition_test,
+            cached_tracker_start,
+            cached_tracker_body,
+            scoped_contract,
+            "M3.11 cached tracker composition must retain the injected health-check repository",
+        )
 
     three_generation_range = braced_declaration(
         original_m311_app_test,

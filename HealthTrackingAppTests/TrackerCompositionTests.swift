@@ -63,7 +63,12 @@ final class TrackerCompositionTests: XCTestCase {
             (bundle.lifestyleRepository as AnyObject) === lifestyleRepository
         )
         XCTAssertTrue(
-            (bundle.healthChecksRepository as AnyObject) === healthChecksRepository
+            (bundle.healthCheckNotificationComposition.repository as AnyObject)
+                === healthChecksRepository
+        )
+        XCTAssertTrue(
+            (bundle.healthChecksRepository as AnyObject)
+                === bundle.healthCheckNotificationComposition.healthChecksRepository
         )
         XCTAssertTrue(
             (bundle.bloodworkRepository as AnyObject) === bloodworkRepository
