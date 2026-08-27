@@ -272,8 +272,23 @@ require_text_contract(
         "UICTContentSizeCategoryAccessibilityXL",
         "UICTContentSizeCategoryAccessibilityXXXL",
         "performAccessibilityAudit",
+        "scrollByShortDrag(",
+        "with bounded drags",
     ],
 )
+training_accessibility_path = root / "HealthTrackingAppUITests/TrainingAccessibilityUITests.swift"
+if training_accessibility_path.is_file():
+    training_accessibility_text = training_accessibility_path.read_text(encoding="utf-8")
+    forbidden_full_swipes = [
+        token
+        for token in ("app.swipeUp()", "app.swipeDown()")
+        if token in training_accessibility_text
+    ]
+    if forbidden_full_swipes:
+        errors.append(
+            "AX5 positioning must use bounded short drags instead of full swipes; "
+            f"found {forbidden_full_swipes}"
+        )
 require_text_contract(
     ".github/workflows/ios.yml",
     [
@@ -427,6 +442,8 @@ contracts = {
         "UICTContentSizeCategoryAccessibilityXL",
         "UICTContentSizeCategoryAccessibilityXXXL",
         "performAccessibilityAudit",
+        "scrollByShortDrag(",
+        "with bounded drags",
     ],
     ".github/workflows/ios.yml": [
         "training_accessibility_expected",
@@ -502,6 +519,14 @@ for relative, tokens in contracts.items():
     path.write_text("\n".join(tokens) + "\n", encoding="utf-8")
 PY
     verify_repo "$fixture"
+    cp "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.swift" "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.valid.swift"
+    printf '%s\n' 'app.swipeUp()' >> "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.swift"
+    if verify_repo "$fixture" >"$fixture/m1-ax5-full-swipe.out" 2>&1; then
+        echo "Requirements self-test expected an AX5 full-swipe regression failure." >&2
+        return 1
+    fi
+    grep -Fq 'AX5 positioning must use bounded short drags instead of full swipes' "$fixture/m1-ax5-full-swipe.out"
+    mv "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.valid.swift" "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.swift"
     cp "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.valid.swift"
     sed '/today\.accessibility\.summary/d' "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.valid.swift" > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift"
     if verify_repo "$fixture" >"$fixture/m1-today-summary.out" 2>&1; then

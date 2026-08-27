@@ -307,18 +307,17 @@ final class TrainingAccessibilityUITests: XCTestCase {
             if isSafelyPositioned && (!requiresHittable || element.isHittable) {
                 return
             }
-            if !requiresHittable {
-                scrollByShortDrag(
-                    towardTop: !frame.isEmpty && frame.midY > app.frame.midY,
-                    in: app
-                )
-            } else if !frame.isEmpty, frame.midY < app.frame.midY {
-                app.swipeDown()
-            } else {
-                app.swipeUp()
-            }
+            scrollByShortDrag(
+                towardTop: frame.isEmpty || frame.midY >= app.frame.midY,
+                in: app
+            )
             remainingScrolls -= 1
         }
+        XCTFail(
+            "Unable to position \(element.identifier) with bounded drags. "
+                + "Element: \(element.frame), viewport: \(app.frame), "
+                + "requiresHittable: \(requiresHittable)."
+        )
     }
 
     private func scrollByShortDrag(towardTop: Bool, in app: XCUIApplication) {
@@ -335,7 +334,7 @@ final class TrainingAccessibilityUITests: XCTestCase {
 
     private func scrollToTop(in app: XCUIApplication) {
         for _ in 0..<10 {
-            app.swipeDown()
+            scrollByShortDrag(towardTop: false, in: app)
         }
     }
 
