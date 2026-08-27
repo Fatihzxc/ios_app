@@ -344,6 +344,47 @@ for stage_file in [
         f"Packages/HealthTrackingModules/Sources/TrainingKit/Session/{stage_file}",
         required,
     )
+
+session_stage_layout = require_text_contract(
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.swift",
+    ["bottomActionClearance"],
+)
+bottom_clearance_match = re.search(
+    r'\bstatic\s+let\s+bottomActionClearance\s*:\s*CGFloat\s*=\s*([0-9]+(?:\.[0-9]+)?)\b',
+    session_stage_layout,
+)
+if not bottom_clearance_match or float(bottom_clearance_match.group(1)) < 52:
+    errors.append(
+        "Session-stage AX5 bottom clearance must be an explicit value of at least 52 points."
+    )
+
+for stage_file in [
+    "OHPPriorSymptomQuestionView.swift",
+    "DeloadRecommendationView.swift",
+    "WarmupStageView.swift",
+    "ExerciseStageView.swift",
+    "CooldownStageView.swift",
+    "SessionSummaryView.swift",
+]:
+    stage_path = (
+        root
+        / "Packages/HealthTrackingModules/Sources/TrainingKit/Session"
+        / stage_file
+    )
+    if not stage_path.is_file():
+        errors.append(f"Missing required M1 acceptance file: {stage_path.relative_to(root)}")
+        continue
+    stage_text = stage_path.read_text(encoding="utf-8")
+    required_padding = [
+        ".padding(.top, AppSpacing.large)",
+        ".padding(.bottom, SessionStageLayout.bottomActionClearance)",
+    ]
+    missing_padding = [token for token in required_padding if token not in stage_text]
+    if missing_padding:
+        errors.append(
+            f"Session-stage AX5 scroll content {stage_file} must retain large top padding "
+            f"and use the shared bottom clearance; missing {missing_padding}"
+        )
 require_text_contract(
     "App/Support/AppUITestLaunchConfiguration.swift",
     ["m1AcceptanceCatalog", "m1PRBaseline", "m1PRNew"],
@@ -471,17 +512,39 @@ contracts = {
     "Packages/HealthTrackingModules/Sources/TrainingKit/Session/TrainingSessionView.swift": [
         "@Environment(\\.accessibilityReduceMotion)", ".transition(", "0.12",
     ],
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.swift": [
+        "import SwiftUI",
+        "enum SessionStageLayout {",
+        "static let bottomActionClearance: CGFloat = 52",
+        "}",
+    ],
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/OHPPriorSymptomQuestionView.swift": [
+        ".padding(.top, AppSpacing.large)",
+        ".padding(.bottom, SessionStageLayout.bottomActionClearance)",
+    ],
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/DeloadRecommendationView.swift": [
+        ".padding(.top, AppSpacing.large)",
+        ".padding(.bottom, SessionStageLayout.bottomActionClearance)",
+    ],
     "Packages/HealthTrackingModules/Sources/TrainingKit/Session/WarmupStageView.swift": [
         "@AccessibilityFocusState", ".accessibilityFocused(",
+        ".padding(.top, AppSpacing.large)",
+        ".padding(.bottom, SessionStageLayout.bottomActionClearance)",
     ],
     "Packages/HealthTrackingModules/Sources/TrainingKit/Session/ExerciseStageView.swift": [
         "@AccessibilityFocusState", ".accessibilityFocused(", "session.exercise.next.hint",
+        ".padding(.top, AppSpacing.large)",
+        ".padding(.bottom, SessionStageLayout.bottomActionClearance)",
     ],
     "Packages/HealthTrackingModules/Sources/TrainingKit/Session/CooldownStageView.swift": [
         "@AccessibilityFocusState", ".accessibilityFocused(",
+        ".padding(.top, AppSpacing.large)",
+        ".padding(.bottom, SessionStageLayout.bottomActionClearance)",
     ],
     "Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionSummaryView.swift": [
         "@AccessibilityFocusState", ".accessibilityFocused(",
+        ".padding(.top, AppSpacing.large)",
+        ".padding(.bottom, SessionStageLayout.bottomActionClearance)",
     ],
     "App/Support/AppUITestLaunchConfiguration.swift": [
         "m1AcceptanceCatalog", "m1PRBaseline", "m1PRNew",
@@ -527,6 +590,22 @@ PY
     fi
     grep -Fq 'AX5 positioning must use bounded short drags instead of full swipes' "$fixture/m1-ax5-full-swipe.out"
     mv "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.valid.swift" "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.swift"
+    cp "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.valid.swift"
+    sed 's/bottomActionClearance: CGFloat = 52/bottomActionClearance: CGFloat = 44/' "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.valid.swift" > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.swift"
+    if verify_repo "$fixture" >"$fixture/m1-ax5-bottom-clearance.out" 2>&1; then
+        echo "Requirements self-test expected an undersized AX5 session bottom-clearance failure." >&2
+        return 1
+    fi
+    grep -Fq 'Session-stage AX5 bottom clearance must be an explicit value of at least 52 points.' "$fixture/m1-ax5-bottom-clearance.out"
+    mv "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.valid.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.swift"
+    cp "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/DeloadRecommendationView.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/DeloadRecommendationView.valid.swift"
+    sed 's/SessionStageLayout\.bottomActionClearance/AppSpacing.large/' "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/DeloadRecommendationView.valid.swift" > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/DeloadRecommendationView.swift"
+    if verify_repo "$fixture" >"$fixture/m1-ax5-stage-padding.out" 2>&1; then
+        echo "Requirements self-test expected a missing shared AX5 session bottom-clearance failure." >&2
+        return 1
+    fi
+    grep -Fq 'Session-stage AX5 scroll content DeloadRecommendationView.swift must retain large top padding and use the shared bottom clearance' "$fixture/m1-ax5-stage-padding.out"
+    mv "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/DeloadRecommendationView.valid.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/DeloadRecommendationView.swift"
     cp "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.valid.swift"
     sed '/today\.accessibility\.summary/d' "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.valid.swift" > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift"
     if verify_repo "$fixture" >"$fixture/m1-today-summary.out" 2>&1; then

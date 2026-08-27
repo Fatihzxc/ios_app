@@ -56,7 +56,8 @@ public struct OHPPriorSymptomQuestionView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, AppSpacing.screenHorizontal)
-            .padding(.vertical, AppSpacing.large)
+            .padding(.top, AppSpacing.large)
+            .padding(.bottom, SessionStageLayout.bottomActionClearance)
         }
         .accessibilityIdentifier("session.ohp.question")
         .task {

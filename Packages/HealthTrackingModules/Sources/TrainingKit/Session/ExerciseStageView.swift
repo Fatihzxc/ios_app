@@ -49,7 +49,8 @@ public struct ExerciseStageView: View {
                 }
             }
             .padding(.horizontal, AppSpacing.screenHorizontal)
-            .padding(.vertical, AppSpacing.large)
+            .padding(.top, AppSpacing.large)
+            .padding(.bottom, SessionStageLayout.bottomActionClearance)
         }
         .accessibilityIdentifier("session.stage.exercise")
         .task {
