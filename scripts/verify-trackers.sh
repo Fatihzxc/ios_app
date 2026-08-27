@@ -8,9 +8,121 @@ verify_repo() {
     local target_root="$1"
     python3 - "$target_root" <<'PY'
 import sys
+import re
 from pathlib import Path
 
 root = Path(sys.argv[1])
+
+XCTEST_SYNC_AUTOCLOSURE_NAMES = (
+    "XCTAssert",
+    "XCTAssertEqual",
+    "XCTAssertFalse",
+    "XCTAssertGreaterThan",
+    "XCTAssertGreaterThanOrEqual",
+    "XCTAssertIdentical",
+    "XCTAssertLessThan",
+    "XCTAssertLessThanOrEqual",
+    "XCTAssertNil",
+    "XCTAssertNoThrow",
+    "XCTAssertNotEqual",
+    "XCTAssertNotIdentical",
+    "XCTAssertNotNil",
+    "XCTAssertThrowsError",
+    "XCTAssertTrue",
+    "XCTUnwrap",
+)
+
+
+def swift_code_mask(source: str) -> str:
+    """Mask comments and string literals while preserving offsets/newlines."""
+    masked = list(source)
+    index = 0
+    block_depth = 0
+    while index < len(source):
+        if block_depth:
+            if source.startswith("/*", index):
+                masked[index : index + 2] = "  "
+                block_depth += 1
+                index += 2
+            elif source.startswith("*/", index):
+                masked[index : index + 2] = "  "
+                block_depth -= 1
+                index += 2
+            else:
+                if source[index] != "\n":
+                    masked[index] = " "
+                index += 1
+            continue
+        if source.startswith("//", index):
+            line_end = source.find("\n", index)
+            if line_end < 0:
+                line_end = len(source)
+            masked[index:line_end] = " " * (line_end - index)
+            index = line_end
+            continue
+        if source.startswith("/*", index):
+            masked[index : index + 2] = "  "
+            block_depth = 1
+            index += 2
+            continue
+        if source.startswith('"""', index):
+            masked[index : index + 3] = "   "
+            index += 3
+            while index < len(source) and not source.startswith('"""', index):
+                if source[index] != "\n":
+                    masked[index] = " "
+                index += 1
+            if index < len(source):
+                masked[index : index + 3] = "   "
+                index += 3
+            continue
+        if source[index] == '"':
+            masked[index] = " "
+            index += 1
+            while index < len(source):
+                if source[index] == "\\":
+                    masked[index] = " "
+                    index += 1
+                    if index < len(source):
+                        masked[index] = " "
+                        index += 1
+                elif source[index] == '"':
+                    masked[index] = " "
+                    index += 1
+                    break
+                else:
+                    if source[index] != "\n":
+                        masked[index] = " "
+                    index += 1
+            continue
+        index += 1
+    return "".join(masked)
+
+
+def async_xctest_autoclosure_lines(source: str) -> list[int]:
+    masked = swift_code_mask(source)
+    names = "|".join(
+        sorted(map(re.escape, XCTEST_SYNC_AUTOCLOSURE_NAMES), key=len, reverse=True)
+    )
+    calls = re.compile(rf"\b(?:{names})\s*\(")
+    violation_lines = []
+    for match in calls.finditer(masked):
+        opening = masked.find("(", match.start(), match.end())
+        depth = 0
+        closing = None
+        for cursor in range(opening, len(masked)):
+            if masked[cursor] == "(":
+                depth += 1
+            elif masked[cursor] == ")":
+                depth -= 1
+                if depth == 0:
+                    closing = cursor
+                    break
+        if closing is None:
+            continue
+        if re.search(r"\bawait\b", masked[opening + 1 : closing]):
+            violation_lines.append(source.count("\n", 0, match.start()) + 1)
+    return violation_lines
 
 required_tests = {
     "Packages/HealthTrackingModules/Tests/DesignSystemTests/QuickEntryMutationStateMachineTests.swift": {
@@ -1048,7 +1160,7 @@ m37_support = {
         "HealthTrackingModules/ProgressPhotosKitTests",
     },
     ".github/workflows/ios.yml": {
-        "Targeted M3.7-M3.8 photo lifecycle and gallery tests",
+        "Targeted M3.7-M3.9 photo lifecycle, gallery, and cloud asset tests",
         "scripts/test-ios.sh --only-testing ProgressPhotosKitTests",
         "ProgressPhotoLifecycleUITests",
     },
@@ -1090,9 +1202,18 @@ for source_path in progress_photo_source_root.rglob("*.swift"):
             raise SystemExit(
                 f"M3.7 platform import {framework} escaped its named adapter: {relative}"
             )
-    for forbidden in ("import SwiftData", "import PersistenceKit", "import CloudKit"):
+    for forbidden in ("import SwiftData", "import PersistenceKit"):
         if forbidden in source:
             raise SystemExit(f"M3.7 feature source has forbidden dependency: {forbidden}")
+    if "import CloudKit" in source:
+        allowed_cloud_adapter = (
+            "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/"
+            "CloudKitPrivatePhotoAssetDatabase.swift"
+        )
+        if relative != allowed_cloud_adapter:
+            raise SystemExit(
+                f"M3.9 CloudKit import escaped its named adapter: {relative}"
+            )
     if "PHPhotoLibrary" in source or "requestAuthorization" in source:
         raise SystemExit("M3.7 system picker must not request broad Photo Library access")
 
@@ -1299,7 +1420,7 @@ m38_support = {
         'case m3PhotoGallery = "m3-photo-gallery"',
     },
     ".github/workflows/ios.yml": {
-        "Targeted M3.7-M3.8 photo lifecycle and gallery tests",
+        "Targeted M3.7-M3.9 photo lifecycle, gallery, and cloud asset tests",
         "scripts/test-ios.sh --only-testing ProgressPhotosKitTests",
         "ProgressPhotoLifecycleUITests",
     },
@@ -1389,6 +1510,1345 @@ if ".m3PhotoGallery" not in fixture_group or "return" not in fixture_body:
         "M3.8 UI test fixture installation must skip CoreModels seeding for "
         ".m3PhotoGallery beside .m3ProgressPhotos"
     )
+m39_tests = {
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudPhotoAssetContractTests.swift": {
+        "testRecordContractUsesDeterministicOpaqueNameAndPrivacyAllowlist",
+        "testChecksumIsStableAndValidationRejectsSizeOrDigestMismatch",
+        "testOpaqueSyncStatePersistsQueuesKnownIDsAndChangeToken",
+        "testTemporaryStoreOwnsUploadAndDownloadCopiesUntilExplicitCleanup",
+        "testAdapterStagesDownloadIntoOwnedStorageBeforeSystemSourceDisappears",
+        "testDownloadStagingRejectsOversizedMetadataBeforeOpeningSource",
+        "testDownloadStagingBoundsActualBytesAndRejectsMetadataMismatch",
+        "testRealBoundedStagerLimitsReadRequestsAndNeverWritesMaximumPlusOneByte",
+        "testDownloadStagingDeletesOutputAndClosesReaderWhenWriterCloseFails",
+        "XCTAssertEqual(snapshot.closeCallCount, 2)",
+        "fileHandleFactory:",
+        "testTemporaryStoreRecreationSweepsStaleTransferFiles",
+        "CocoaError.Code.fileReadNoPermission.rawValue",
+        "nestedUnrelated",
+        "unrelatedAsset",
+        "symlinkTarget",
+        "testLegacyUnscopedSyncStateRecreatesWithNilAccountIdentity",
+        "testDeletionIntentStoreSerializesAccountTransitionAndPersistsEveryScope",
+        "testLegacyDeletionIntentSetMovesToQuarantineWithoutAuthorizingCurrentAccount",
+        "testDeletionIntentStoreRecreationPromotesOnlyMatchingVerifiedAccountHint",
+        "testExactIntentReceiptSurvivesPromotionAndDoesNotClearSameAssetABA",
+        "testStaleAccountResolutionCannotAuthorizeAfterNewerEpochBegins",
+        "testStaleAccountResolutionCannotAuthorizeAfterNewerEpochBegins",
+        "testDeletionIntentStoreMigratesV1AndRejectsUnknownSchemaFailClosed",
+        "receipt1.intentID",
+        "receipt2.intentID",
+        "pendingAfterFirstClear",
+        "staleResolution",
+        "newerResolution",
+        "catch is CancellationError",
+        "quarantineUnderB",
+        "A consumed resolution epoch must never authorize a second account.",
+        "receiptAfterResolutionReuse.accountIdentity",
+        "staleResolution",
+        "newerResolution",
+        "catch is CancellationError",
+        "quarantineUnderB",
+        "quarantineIdentityHint",
+        "lastVerifiedAccountIdentity",
+        "quarantinedIntents",
+        "unresolvedDeletionAssetIDs",
+        "forAccountIdentity:",
+        "FileCloudPhotoAssetSyncStateStore",
+        "FileCloudPhotoAssetTemporaryStore",
+    },
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudPhotoAssetCoordinatorTests.swift": {
+        "testEveryUnavailableAccountStateDefersWithoutTouchingLocalAssetsOrQueue",
+        "testBackfillWaitsForServerResponseUsesPrivateZoneAndCleansUploadFile",
+        "testMatchingExistingRecordIsIdempotentAndSkipsAssetSave",
+        "testRetryableSaveUsesInjectedExponentialBackoffThenCommits",
+        "testPaginatedChangesPersistOpaqueTokenRebuildDownloadAndApplyDeletion",
+        "testExpiredChangeTokenClearsPersistedTokenAndRestartsFromNil",
+        "testInvalidDownloadDoesNotAdvanceTokenOrMutateLocalStore",
+        "testDeletionQueueTreatsMissingServerRecordAsIdempotentSuccess",
+        "testStateOnlyDeletionQueueCannotAuthorizeServerDeletion",
+        "testNewerSynchronizationWinsWhenOlderUploadCompletesLate",
+        "testReferencedMissingAssetRestoresFromCloudWithoutInferringDeletion",
+        "testOnlyExplicitCommittedMetadataDeletionQueuesServerDeletion",
+        "testReferencedMetadataNeutralizesStaleDeletionIntentWithoutDeletingCloudAsset",
+        "testReferencedSnapshotNeutralizesOnlyObservedIntentAcrossSameAssetABA",
+        "observedStaleIntent",
+        "replacementIntent",
+        "XCTAssertEqual(remainingIntents.map",
+        "retrySnapshot.deleteRequests",
+        "intentsAfterRetry.isEmpty",
+        "stateAfterRetry.pendingDeletionAssetIDs.isEmpty",
+        "testAccountIdentityChangeResetsStateAndBackfillsNewAccount",
+        "testAccountResetLoadsCurrentScopeAndPreservesOldAccountQueue",
+        "testAccountTransitionProcessesOnlyCurrentScopeAndPreservesOldAndUnresolvedIntents",
+        "testVerifiedAccountOfflineDeletionSurvivesFailureAndRelaunchRetry",
+        "testDeferredAccountTransitionQuarantinesOldHintUntilMatchingAccountReturns",
+        "postCancellationReceipt.quarantineIdentityHint",
+        "postFailureReceipt.quarantineIdentityHint",
+        "oldAccountIDs",
+        "unresolvedIDs",
+        "testLegacyUnscopedFileStateResetsFailClosedAndBackfillsCurrentAccount",
+        "testCancelledSynchronizationCleansOwnedPageDiscardedAfterSuspendedFetch",
+        "suspendedChangeCalls",
+        "testIntentCommittedAfterReadIsNotClearedAgainstOlderReferenceSnapshot",
+        "pendingAfterFirst",
+        "testCorruptFullVariantWithPhysicalDirectoryReplaysNilTokenAndRepairsWithoutUpload",
+        "testMissingThumbnailWithPhysicalDirectoryReplaysNilTokenAndRepairsWithoutUpload",
+        "let localStore = LocalPhotoAssetStore(",
+        "CloudRepairPhotoAssetFileSystem",
+        "try Data([0xff]).write(to: fullURL, options: .atomic)",
+        "try FileManager.default.removeItem(at: thumbnailURL)",
+        "let physicalBeforeRepair = try await localStore.storedAssetIDs()",
+        "let usableBeforeRepair = try await localStore.usableCloudAssetIDs()",
+        "NilTokenOnlyRepairCloudPhotoAssetDatabase",
+        "guard previousToken == nil else",
+        "databaseSnapshot.changeTokens, [nil, repairedChangeToken]",
+        "databaseSnapshot.nilTokenRepairResponseCount, 1",
+        "pendingUploadAssetIDs: [assetID]",
+        "databaseSnapshot.saveRequests.isEmpty",
+        "databaseSnapshot.deleteRequests.isEmpty",
+        "repairedFull, .available(Data([0x10]))",
+        "repairedThumbnail, .available(Data([0x20]))",
+        "physicalAfterRepair, [assetID]",
+        "usableAfterRepair, [assetID]",
+        "firstState, finalState",
+        "CloudPhotoAssetLocalStoring",
+        "func usableCloudAssetIDs()",
+        "referenceSnapshotProvider:",
+        "deletionIntentStore:",
+        "inboundAssetJournal:",
+        "try await coordinator.synchronize()",
+        "PrivateCloudPhotoAssetDatabase",
+        "CloudPhotoAssetDatabaseError",
+    },
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/PhotoAssetStoreTests.swift": {
+        "testCloudRestoreUsesExactOpaqueIDAndRebuildsBothVariantsIdempotently",
+        "restoreCloudAsset(id:",
+        "cloudAssetBytes(id:",
+        "deleteCloudAsset(id:",
+    },
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/ProgressPhotoGalleryViewModelTests.swift": {
+        "testSuccessfulSyncReloadsExactMissingAndCorruptGalleryStatesInOpenLifecycle",
+        "ProgressPhotoAssetSyncLifecycle",
+        "comparison?.before.assetState",
+        "fullImageRequests.filter",
+    },
+    "Packages/HealthTrackingModules/Tests/PersistenceKitTests/ProgressPhotoRepositoryTests.swift": {
+        "testCommittedMetadataDeletionPersistsUntilCloudRetrySucceedsAfterRelaunch",
+        "testRepositoryCloudReferenceSnapshotIsImmutableAcrossLaterMetadataChange",
+        "testInboundCloudAssetSurvivesCoordinatorRestoreCrashAndRepositoryRelaunch",
+        "testSuccessfulInboundSyncRetainsIntentUntilMetadataReferencesAsset",
+        "testRepositoryConsumesOnlyInboundIDsMatchedByMetadataAcrossRelaunches",
+        "testSnapshotReconcilesInboundOwnershipArrivingAfterInitialFetchPerID",
+        "testInboundApplyFinishesBeforeQueuedDeleteAndFinalStateRemainsDeleted",
+        "testRepositoryInboundApplyWithoutCommittedDeletionPreservesAssetBeforeMetadata",
+        "testDeleteCommittedBeforeStaleChangedPageDiscardsInboundAndRetainsIntent",
+        "testStaleChangedPageCannotRestoreDeletionQuarantinedByNewerAccountResolution",
+        "testStaleGenerationCancelsPreparedInboundLeaseBeforeAnySideEffectAndRepositoryReacquires",
+        "testInboundPreparationLeaseRejectsABAAndReleasesAfterCancellation",
+        "PausingBeforeRecordCloudPhotoAssetDeletionIntentStore",
+        "ObservedCloudPhotoAssetInboundApplier",
+        "recordedReceipt.quarantineIdentityHint",
+        "durableText.contains(recordedReceipt.intentID.uuidString)",
+        "calls.commitLeaseAssetIDs.isEmpty",
+        "calls.cancelLeaseAssetIDs, [inboundID]",
+        "repository.cancelInboundApply(firstLease)",
+        "repository.commitInboundApply(secondLease",
+        "retryPreparation",
+        "inboundAssetStore: assetStore",
+        "inboundAssetApplier: repository",
+        "waitForFetchCall(1)",
+        "finishedWhileRestoreHeld",
+        "transfersAfterRace.isEmpty",
+        "pendingAfterDeferred, [assetID]",
+        "testInboundRestoreProtectsPreviouslyFailedOrphanFromCleanupRetry",
+        "testInitialOrphanSweepRereadsInboundOwnershipAtDeleteBoundary",
+        "testInboundJournalReadFailureStopsPendingCleanupRetryBeforeDelete",
+        "testCleanupRetryRechecksInboundOwnershipAfterEarlierAssetDeleteSuspends",
+        "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
+        "testCancelledInboundRecordRemovesExactWaiterAndAllowsLaterCleanupLease",
+        "waitForInboundRecordWaiter",
+        "inboundRecordWaiterIDs",
+        "A cancelled inbound record must finish before lease release.",
+        "waitersAfterCancellation.isEmpty",
+        "pendingBeforeLeaseRelease.isEmpty",
+        "laterLease",
+        "CleanupLeaseInterleavingAssetStore",
+        "SequencedCloudPhotoAssetInboundJournal",
+        "snapshotAfterA",
+        "testMetadataDeleteSaveFailureNeverCreatesCloudDeletionIntent",
+        "testCompensatedLocalDeleteFailureClearsCloudIntentBeforeReturning",
+        "testCompensationClearsExactHintedIntentPromotedWhileReceiptIsPaused",
+        "PausingAfterRecordCloudPhotoAssetDeletionIntentStore",
+        "scopedAfterCompensation.isEmpty",
+        "quarantineAfterCompensation.isEmpty",
+        "XCTAssertEqual(intentCalls.recordCalls, [])",
+        "XCTAssertEqual(intentCalls.clearCalls, [])",
+        "let persistedContext = ModelContext(container)",
+        "persistedPhotoIDs([])",
+        "pendingAfterA, [assetB]",
+        "pendingAfterARelaunch, [assetB]",
+        "cloudAssets[assetB], bytesB",
+        "FileCloudPhotoAssetDeletionIntentStore",
+        "FileCloudPhotoAssetInboundJournal",
+        "inboundAssetJournal:",
+        "CloudPhotoAssetLocalStoring",
+        "func usableCloudAssetIDs()",
+    },
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudKitPrivatePhotoAssetDatabaseTests.swift": {
+        "testActualAdapterOwnsDownloadBeforeSystemURLDisappearsAtReturnBoundary",
+        "testActualAdapterReturnsChangingOpaqueAccountIdentity",
+        "testActualAdapterAndCoordinatorConsumeAndRemoveOneSharedOwnedTransfer",
+        "testActualAdapterRepairsMatchingMetadataWithoutUsableBinaryAndKeepsValidAssetIdempotent",
+        "CloudPhotoAssetSystemRecord",
+        "hasUsableBinaryAsset: false",
+        "hasUsableBinaryAsset: true",
+        "missingBinary.saveRequests.map",
+        "validBinary.saveRequests.isEmpty",
+        "testActualCKRecordMappingRequiresReadableRegularCKAssetFile",
+        "testExplicitChangedKeysModifyRepairsSameIDAssetAndPreservesUnknownFields",
+        "testExplicitModifySurfacesExactPerRecordFailure",
+        "ConflictAwareCloudKitPhotoAssetRecordModifier",
+        "savePolicy: .ifServerRecordUnchanged",
+        "RecordSavePolicy.changedKeys.rawValue",
+        "serverOnly",
+        "perRecordFailure",
+        "CloudKitPhotoAssetRecordMapper.systemRecord",
+        "missingAsset",
+        "wrongTypeAsset",
+        "invalidFileAsset",
+        "directoryAsset",
+        "validAsset",
+        "CloudPhotoAssetSystemURLLifetimeOwner",
+        "XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))",
+        "CloudKitPrivatePhotoAssetDatabase",
+        "systemDatabase:",
+        "accountIdentityProvider:",
+        "downloadStore:",
+        "CloudPhotoAssetLocalStoring",
+        "func usableCloudAssetIDs()",
+    },
+}
+
+for relative_path, tokens in m39_tests.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.9 test file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.9 RED contracts: {absent}")
+
+    async_autoclosure_lines = async_xctest_autoclosure_lines(text)
+    if async_autoclosure_lines:
+        locations = ", ".join(
+            f"{relative_path}:{line}" for line in async_autoclosure_lines
+        )
+        raise SystemExit(
+            "M3.9 XCTest autoclosures must evaluate async values first: "
+            f"{locations}"
+        )
+
+m39_coordinator_tests_text = (
+    root
+    / "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudPhotoAssetCoordinatorTests.swift"
+).read_text(encoding="utf-8")
+if "synchronize(snapshot:" in m39_coordinator_tests_text:
+    raise SystemExit(
+        "M3.9 RED must exercise shipped no-argument synchronize(), not an unused overload"
+    )
+
+m39_production = {
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetDomain.swift": {
+        "CloudPhotoAssetRecordContract",
+        'zoneName = "ProgressPhotoAssetsZone"',
+        'recordType = "ProgressPhotoAsset"',
+        "CloudPhotoAssetChecksum",
+        "CloudPhotoAssetSyncState",
+        "pendingUploadAssetIDs",
+        "pendingDeletionAssetIDs",
+        "uploadedAssetIDs",
+        "changeToken",
+        "PrivateCloudPhotoAssetDatabase",
+        "CloudPhotoAssetSynchronizing",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetCoordinator.swift": {
+        "public actor CloudPhotoAssetCoordinator",
+        "database.accountStatus()",
+        "database.ensureZone",
+        "reconcile(",
+        "temporaryStore.createUploadFile",
+        "CloudPhotoAssetChecksum.validate",
+        "CloudPhotoAssetDatabaseError.changeTokenExpired",
+        "CloudPhotoAssetDatabaseError.recordNotFound",
+        "retryPolicy.delay",
+        "ensureCurrent",
+        "generation &+= 1",
+        "state.changeToken = page.changeToken",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/FileCloudPhotoAssetStores.swift": {
+        "FileCloudPhotoAssetSyncStateStore",
+        "FileCloudPhotoAssetTemporaryStore",
+        ".completeFileProtection",
+        "removeFile",
+        "NoOpCloudPhotoAssetCoordinator",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudKitPrivatePhotoAssetDatabase.swift": {
+        "@preconcurrency import CloudKit",
+        "public actor CloudKitPrivatePhotoAssetDatabase",
+        "privateCloudDatabase",
+        "CKRecordZone",
+        "CKAsset(fileURL:",
+        "recordZoneChanges(",
+        "CKServerChangeToken",
+        "requiringSecureCoding: true",
+        "retryAfterSeconds",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/AssetStore/LocalPhotoAssetStore.swift": {
+        "CloudPhotoAssetLocalStoring",
+        "cloudAssetBytes(id:",
+        "restoreCloudAsset(id:",
+        "deleteCloudAsset(id:",
+        "replacingExisting: true",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Gallery/ProgressPhotoLifecycleView.swift": {
+        "assetSynchronizer: any CloudPhotoAssetSynchronizing",
+        "await synchronizeAssets()",
+    },
+    "App/Application/TrackerFeatureBundle.swift": {
+        "progressPhotoAssetSynchronizer",
+        "makeProgressPhotoAssetSynchronizer",
+        "guard case let .cloud(containerIdentifier, storeURL)",
+        "NoOpCloudPhotoAssetCoordinator.shared",
+        "CloudKitPrivatePhotoAssetDatabase",
+        "FileCloudPhotoAssetSyncStateStore",
+        "FileCloudPhotoAssetTemporaryStore",
+    },
+    ".github/workflows/ios.yml": {
+        "Targeted M3.7-M3.9 photo lifecycle, gallery, and cloud asset tests",
+        "scripts/test-ios.sh --only-testing ProgressPhotosKitTests",
+    },
+}
+
+for relative_path, tokens in m39_production.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.9 production file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(
+            f"{relative_path} is missing M3.9 production contracts: {absent}"
+        )
+
+m39_coordinator_path = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetCoordinator.swift"
+m39_coordinator_text = m39_coordinator_path.read_text(encoding="utf-8")
+if not any(
+    token in m39_coordinator_text
+    for token in ("temporaryStore.copyDownloadedFile", "record.stagedFileURL")
+):
+    raise SystemExit("M3.9 coordinator is missing a download consumption boundary")
+
+m39_transfer_path = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/FileCloudPhotoAssetStores.swift"
+m39_transfer_text = m39_transfer_path.read_text(encoding="utf-8")
+if not any(
+    token in m39_transfer_text
+    for token in ("copyDownloadedFile", "stageDownload")
+):
+    raise SystemExit("M3.9 temporary store is missing a download staging boundary")
+
+m39_lifecycle_path = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Gallery/ProgressPhotoLifecycleView.swift"
+m39_lifecycle_text = m39_lifecycle_path.read_text(encoding="utf-8")
+if not any(
+    token in m39_lifecycle_text
+    for token in ("await assetSynchronizer.synchronize()", "await assetSyncLifecycle.synchronize()")
+):
+    raise SystemExit("M3.9 lifecycle is missing cloud synchronization delegation")
+
+m39_domain_source = (
+    root
+    / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetDomain.swift"
+).read_text(encoding="utf-8")
+m39_field_block = m39_domain_source.split("fieldNames = [", 1)[1].split("]", 1)[0]
+m39_fields = set(re.findall(r'"([A-Za-z]+)"', m39_field_block))
+m39_allowed_fields = {"assetID", "asset", "checksum", "byteCount"}
+if m39_fields != m39_allowed_fields:
+    raise SystemExit(
+        f"M3.9 CKAsset record field allowlist changed: {sorted(m39_fields)}"
+    )
+
+m39_cloudkit_source = (
+    root
+    / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudKitPrivatePhotoAssetDatabase.swift"
+).read_text(encoding="utf-8")
+m39_record_fields = set(re.findall(r'record\["([A-Za-z]+)"\]', m39_cloudkit_source))
+if m39_record_fields != m39_allowed_fields:
+    raise SystemExit(
+        f"M3.9 CloudKit adapter persisted an unexpected field: {sorted(m39_record_fields)}"
+    )
+for forbidden_payload in ("date", "pose", "note", "filePath", "tracker", "health"):
+    if re.search(rf'record\["{forbidden_payload}"\]', m39_cloudkit_source, re.I):
+        raise SystemExit(
+            f"M3.9 CKAsset record must not contain {forbidden_payload}"
+        )
+
+# These production-quality gates activate atomically when GREEN introduces the
+# reference snapshot boundary. RED remains statically verifiable while the
+# behavior tests fail to compile on the intentionally missing contracts.
+if "CloudPhotoAssetReferenceSnapshotProviding" in m39_domain_source:
+    for required in (
+        "CloudPhotoAssetSystemRecord",
+        "hasUsableBinaryAsset",
+        "async throws -> CloudPhotoAssetSystemRecord?",
+    ):
+        if required not in m39_domain_source:
+            raise SystemExit(
+                f"M3.9 system record contract is missing binary presence: {required}"
+            )
+    for required in (
+        "CloudPhotoAssetDeletionIntentReceipt",
+        "public let intentID: UUID",
+        "CloudPhotoAssetAccountAuthorization",
+        "CloudPhotoAssetAccountResolution",
+        "quarantineIdentityHint",
+        "beginAccountResolution()",
+        "activateAccountIdentity",
+        "resolution: CloudPhotoAssetAccountResolution",
+        "async throws -> CloudPhotoAssetAccountAuthorization",
+        "suspendAccountAuthorization(_ authorization: CloudPhotoAssetAccountAuthorization)",
+        "pendingDeletionIntents(",
+        "async throws -> [CloudPhotoAssetDeletionIntentReceipt]",
+        "pendingDeletionAssetIDs(",
+        "forAccountIdentity accountIdentity: String",
+        "unresolvedDeletionAssetIDs",
+        "hasCommittedLocalDeletionIntent(assetID: String)",
+        "-> CloudPhotoAssetDeletionIntentReceipt",
+    ):
+        if required not in m39_domain_source:
+            raise SystemExit(
+                f"M3.9 deletion intent protocol is missing account scope: {required}"
+            )
+    for required in (
+        "CloudPhotoAssetInboundCleanupLease",
+        "acquireCleanupLease(for assetID: String)",
+        "releaseCleanupLease(_ lease: CloudPhotoAssetInboundCleanupLease)",
+    ):
+        if required not in m39_domain_source:
+            raise SystemExit(
+                f"M3.9 inbound cleanup journal is missing atomic lease contract: {required}"
+            )
+    for required in (
+        "CloudPhotoAssetInboundApplyLease",
+        "CloudPhotoAssetInboundApplyPreparation",
+        "case prepared(CloudPhotoAssetInboundApplyLease)",
+        "case discardedCommittedDeletion",
+        "CloudPhotoAssetInboundApplying",
+        "func prepareInboundApply(",
+        "func commitInboundApply(",
+        "func cancelInboundApply(",
+    ):
+        if required not in m39_domain_source:
+            raise SystemExit(
+                f"M3.9 domain is missing serialized inbound apply contract: {required}"
+            )
+    try:
+        m39_inbound_protocol = m39_domain_source.split(
+            "public protocol CloudPhotoAssetInboundApplying", 1
+        )[1].split("public struct CloudPhotoAssetDeletionIntentReceipt", 1)[0]
+    except IndexError as error:
+        raise SystemExit(
+            "M3.9 domain is missing serialized inbound apply signature"
+        ) from error
+    for required in (
+        "id assetID: String",
+        "forAccountIdentity accountIdentity: String",
+        "async throws -> CloudPhotoAssetInboundApplyPreparation",
+        "_ lease: CloudPhotoAssetInboundApplyLease",
+        "bytes: Data",
+    ):
+        if required not in m39_inbound_protocol:
+            raise SystemExit(
+                f"M3.9 domain is missing serialized inbound apply signature: {required}"
+            )
+    if "clearAllCommittedDeletions" in m39_domain_source:
+        raise SystemExit(
+            "M3.9 deletion authority must not expose a destructive unscoped clear-all"
+        )
+    if "func suspendAccountAuthorization() async" in m39_domain_source:
+        raise SystemExit(
+            "M3.9 account resolution must use an opaque epoch instead of unqualified suspension"
+        )
+
+    for required in (
+        "public protocol CloudPhotoAssetLocalStoring",
+        "func storedAssetIDs()",
+        "func usableCloudAssetIDs()",
+    ):
+        if required not in m39_domain_source:
+            raise SystemExit(
+                "M3.9 local cloud store must separate physical inventory from "
+                f"usable availability: {required}"
+            )
+    try:
+        m39_usable_inventory_body = local_photo_store_source.split(
+            "public func usableCloudAssetIDs() async throws -> Set<String> {",
+            1,
+        )[1].split("private func prepareStorage", 1)[0]
+    except IndexError as error:
+        raise SystemExit(
+            "M3.9 real local store is missing complete cloud asset availability"
+        ) from error
+    if "try!" in m39_usable_inventory_body:
+        raise SystemExit(
+            "M3.9 usable availability must propagate load errors without force-try"
+        )
+    for required in (
+        "let physicalAssetIDs = try await storedAssetIDs()",
+        "var usableAssetIDs: Set<String> = []",
+        "for assetID in physicalAssetIDs.sorted()",
+        "let full = try await loadAsset(id: assetID, variant: .full)",
+        "guard case .available = full else { continue }",
+        "let thumbnail = try await loadAsset(id: assetID, variant: .thumbnail)",
+        "guard case .available = thumbnail else { continue }",
+        "usableAssetIDs.insert(assetID)",
+        "return usableAssetIDs",
+    ):
+        if required not in m39_usable_inventory_body:
+            raise SystemExit(
+                "M3.9 real local store must validate full and thumbnail before "
+                f"reporting usable availability: {required}"
+            )
+    if "try?" in m39_usable_inventory_body or "catch" in m39_usable_inventory_body:
+        raise SystemExit(
+            "M3.9 usable availability must fail closed on protected-data and I/O errors"
+        )
+    for relative_path in (
+        "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/AssetStore/LocalPhotoAssetStore.swift",
+        "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudPhotoAssetCoordinatorTests.swift",
+        "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudKitPrivatePhotoAssetDatabaseTests.swift",
+        "Packages/HealthTrackingModules/Tests/PersistenceKitTests/ProgressPhotoRepositoryTests.swift",
+    ):
+        conformer_source = (root / relative_path).read_text(encoding="utf-8")
+        if (
+            "CloudPhotoAssetLocalStoring" in conformer_source
+            and "func usableCloudAssetIDs()" not in conformer_source
+        ):
+            raise SystemExit(
+                "M3.9 local cloud store conformer is missing explicit usable "
+                f"availability: {relative_path}"
+            )
+
+    m39_coordinator_source = (
+        root
+        / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetCoordinator.swift"
+    ).read_text(encoding="utf-8")
+    for required in (
+        "public func synchronize()",
+        "referenceSnapshotProvider",
+        "await referenceSnapshotProvider.snapshot()",
+        "deletionIntentStore",
+        "let accountResolution = await deletionIntentStore.beginAccountResolution()",
+        "let accountAuthorization = try await deletionIntentStore.activateAccountIdentity(",
+        "resolution: accountResolution",
+        "await deletionIntentStore.suspendAccountAuthorization(accountAuthorization)",
+        "pendingDeletionIntents(forAccountIdentity: accountIdentity)",
+        "try validate(state: state)",
+        "clearCommittedDeletion(",
+        "clearCommittedDeletion(intent)",
+        "forAccountIdentity: accountIdentity",
+        "let deletions = committedDeletionIDs",
+        "let referencedDeletionIntents = committedDeletionIntents.filter",
+        "let referencedDeletionIDs = Set(referencedDeletionIntents.map(\\.assetID))",
+        "onDiscard: { [temporaryStore = self.temporaryStore] page in",
+        "inboundAssetApplier",
+        "inboundAssetApplier.prepareInboundApply(",
+        "inboundAssetApplier.commitInboundApply(",
+        "inboundAssetApplier.cancelInboundApply(",
+        "forAccountIdentity: accountIdentity",
+        "case .discardedCommittedDeletion:",
+        "temporaryStore.removeFile(at: record.stagedFileURL)",
+    ):
+        if required not in m39_coordinator_source:
+            raise SystemExit(
+                f"M3.9 shipped no-argument sync is missing injected quality contract: {required}"
+            )
+    if "localStore.storedAssetIDs()" in m39_coordinator_source:
+        raise SystemExit(
+            "M3.9 coordinator must not treat physical inventory as usable availability"
+        )
+    for required in (
+        "let usableLocalAssetIDs = try await localStore.usableCloudAssetIDs()",
+        "try validate(assetIDs: usableLocalAssetIDs)",
+        "reconcile(usableLocalAssetIDs: usableLocalAssetIDs,",
+    ):
+        if required not in m39_coordinator_source:
+            raise SystemExit(
+                "M3.9 coordinator must reconcile complete usable availability: "
+                f"{required}"
+            )
+    try:
+        m39_cloud_reconcile_body = m39_coordinator_source.split(
+            "private func reconcile(", 1
+        )[1].split("private func markUploaded", 1)[0]
+    except IndexError as error:
+        raise SystemExit(
+            "M3.9 coordinator is missing usable-availability reconciliation"
+        ) from error
+    for required in (
+        "usableLocalAssetIDs: Set<String>",
+        "let referencedUsable = usableLocalAssetIDs.intersection(referencedAssetIDs)",
+        ".intersection(referencedUsable)",
+        ".union(referencedUsable.subtracting(uploaded))",
+        ".subtracting(usableLocalAssetIDs)",
+        "state.changeToken = nil",
+    ):
+        if required not in m39_cloud_reconcile_body:
+            raise SystemExit(
+                "M3.9 incomplete uploaded assets must replay from nil without upload: "
+                f"{required}"
+            )
+    try:
+        m39_coordinator_init = m39_coordinator_source.split(
+            "public init(", 1
+        )[1].split(") {", 1)[0]
+    except IndexError as error:
+        raise SystemExit(
+            "M3.9 coordinator must require an explicit inbound applier"
+        ) from error
+    if (
+        "inboundAssetApplier: any CloudPhotoAssetInboundApplying"
+        not in m39_coordinator_init
+        or re.search(r"inboundAssetApplier\s*:[^,\n]*(?:\?|=)", m39_coordinator_init)
+    ):
+        raise SystemExit(
+            "M3.9 coordinator must require an explicit inbound applier"
+        )
+    if (
+        "recordInboundAssetID" in m39_coordinator_source
+        or "restoreCloudAsset(id: record.assetID" in m39_coordinator_source
+    ):
+        raise SystemExit(
+            "M3.9 coordinator must delegate inbound ownership to the serialized applier"
+        )
+    try:
+        m39_apply_body = m39_coordinator_source.split(
+            "private func apply(", 1
+        )[1].split("private func performWithRetry", 1)[0]
+    except IndexError as error:
+        raise SystemExit(
+            "M3.9 coordinator is missing deletion-aware inbound apply ordering"
+        ) from error
+    inbound_prepare = m39_apply_body.find(
+        "inboundAssetApplier.prepareInboundApply("
+    )
+    precommit_generation_check = m39_apply_body.find(
+        "try ensureCurrent(generation)",
+        inbound_prepare,
+    )
+    inbound_commit = m39_apply_body.find(
+        "inboundAssetApplier.commitInboundApply(",
+        precommit_generation_check,
+    )
+    inbound_cancel = m39_apply_body.find(
+        "inboundAssetApplier.cancelInboundApply(",
+        inbound_prepare,
+    )
+    postcommit_generation_check = m39_apply_body.find(
+        "try ensureCurrent(generation)",
+        inbound_commit,
+    )
+    discard_case = m39_apply_body.find("case .discardedCommittedDeletion:")
+    discard_return = m39_apply_body.find("return", discard_case)
+    mark_uploaded = m39_apply_body.find("markUploaded(record.assetID, state: &state)")
+    remove_deletion = m39_apply_body.find(
+        "remove(record.assetID, from: &state.pendingDeletionAssetIDs)"
+    )
+    if not (
+        0 <= inbound_prepare < discard_case < discard_return < mark_uploaded
+        and discard_return < remove_deletion
+    ):
+        raise SystemExit(
+            "M3.9 discarded committed deletion must not mutate uploaded/deletion state"
+        )
+    if not (
+        0 <= inbound_prepare
+        < precommit_generation_check
+        < inbound_commit
+        < postcommit_generation_check
+        < mark_uploaded
+        and inbound_prepare < inbound_cancel < mark_uploaded
+    ):
+        raise SystemExit(
+            "M3.9 coordinator must generation-check and exact-cancel a prepared inbound lease"
+        )
+    if "inboundAssetApplier.applyInboundAsset(" in m39_apply_body:
+        raise SystemExit(
+            "M3.9 coordinator must not use the stale one-shot inbound apply boundary"
+        )
+    deletion_read = m39_coordinator_source.find(
+        "pendingDeletionIntents(forAccountIdentity: accountIdentity)"
+    )
+    state_validation = m39_coordinator_source.find("try validate(state: state)")
+    account_activation = m39_coordinator_source.find(
+        "resolution: accountResolution"
+    )
+    reference_read = m39_coordinator_source.find(
+        "await referenceSnapshotProvider.snapshot()"
+    )
+    if (
+        state_validation < 0
+        or account_activation < 0
+        or state_validation > account_activation
+        or account_activation > deletion_read
+    ):
+        raise SystemExit(
+            "M3.9 account transition must validate state and activate the current "
+            "scope before loading deletion intents"
+        )
+    neutralization_start = m39_coordinator_source.find(
+        "let referencedDeletionIntents = committedDeletionIntents.filter"
+    )
+    neutralization_end = m39_coordinator_source.find(
+        "committedDeletionIDs.subtract(referencedDeletionIDs)",
+        neutralization_start,
+    )
+    neutralization_source = m39_coordinator_source[
+        neutralization_start:neutralization_end
+    ]
+    if (
+        neutralization_start < 0
+        or neutralization_end < 0
+        or "clearCommittedDeletion(intent)" not in neutralization_source
+        or "assetID: assetID" in neutralization_source
+        or "forAccountIdentity:" in neutralization_source
+    ):
+        raise SystemExit(
+            "M3.9 referenced-intent neutralization must clear only exact observed receipts"
+        )
+    remote_delete_start = m39_coordinator_source.find(
+        "private func processDeletions("
+    )
+    remote_delete_end = m39_coordinator_source.find(
+        "private func processUploads(",
+        remote_delete_start,
+    )
+    remote_delete_source = m39_coordinator_source[
+        remote_delete_start:remote_delete_end
+    ]
+    if (
+        remote_delete_start < 0
+        or remote_delete_end < 0
+        or "database.deleteRecord(" not in remote_delete_source
+        or "clearCommittedDeletion(\n                assetID: assetID," not in remote_delete_source
+        or "forAccountIdentity: accountIdentity" not in remote_delete_source
+    ):
+        raise SystemExit(
+            "M3.9 confirmed remote deletion must clear all matching current-account intents"
+        )
+    account_resolution_begin = m39_coordinator_source.find(
+        "let accountResolution = await deletionIntentStore.beginAccountResolution()"
+    )
+    account_status_read = m39_coordinator_source.find("database.accountStatus()")
+    if (
+        account_resolution_begin < 0
+        or account_status_read < 0
+        or account_resolution_begin > account_status_read
+    ):
+        raise SystemExit(
+            "M3.9 coordinator must begin a fresh account-resolution epoch before status resolution"
+        )
+    if m39_coordinator_source.count(
+        "await deletionIntentStore.suspendAccountAuthorization(accountAuthorization)"
+    ) < 2:
+        raise SystemExit(
+            "M3.9 coordinator must close bounded account authorization on success and failure"
+        )
+    if deletion_read < 0 or reference_read < 0 or deletion_read > reference_read:
+        raise SystemExit(
+            "M3.9 coordinator must snapshot committed deletions before references"
+        )
+    if (
+        "clearAllCommittedDeletions" in m39_coordinator_source
+        or "pendingDeletionAssetIDs()" in m39_coordinator_source
+    ):
+        raise SystemExit(
+            "M3.9 coordinator must never read or clear unscoped deletion authority"
+        )
+
+    m39_file_store_source = m39_transfer_text
+    for required in (
+        "activeAccountResolutionID",
+        "public func beginAccountResolution()",
+        "activeAccountAuthorization = nil",
+        "activeAccountResolutionID = resolution.resolutionID",
+        "guard activeAccountResolutionID == resolution.resolutionID else",
+        "activeAccountResolutionID = nil",
+        "throw CancellationError()",
+    ):
+        if required not in m39_file_store_source:
+            raise SystemExit(
+                f"M3.9 account activation is missing resolution-epoch CAS: {required}"
+            )
+    resolution_begin_start = m39_file_store_source.find(
+        "public func beginAccountResolution()"
+    )
+    resolution_activate_start = m39_file_store_source.find(
+        "public func activateAccountIdentity(",
+        resolution_begin_start,
+    )
+    resolution_begin_source = m39_file_store_source[
+        resolution_begin_start:resolution_activate_start
+    ]
+    if (
+        resolution_begin_start < 0
+        or resolution_activate_start < 0
+        or "activeAccountAuthorization = nil" not in resolution_begin_source
+        or "activeAccountResolutionID = resolution.resolutionID"
+        not in resolution_begin_source
+    ):
+        raise SystemExit(
+            "M3.9 account activation is missing resolution-epoch CAS: begin boundary"
+        )
+    for required in (
+        "FileCloudPhotoAssetDeletionIntentRecord",
+        "static let currentSchemaVersion = 3",
+        "public func pendingDeletionIntents(",
+        "async throws -> [CloudPhotoAssetDeletionIntentReceipt]",
+        "intent.accountIdentity == accountIdentity",
+        "intent.quarantineIdentityHint == nil",
+        "intentID: intent.intentID",
+        "intentID: UUID()",
+        "state.intents",
+        "$0.intentID == intent.intentID",
+        "$0.assetID == canonicalID",
+        "state.intents[index].accountIdentity = accountIdentity",
+        "state.intents[index].quarantineIdentityHint = nil",
+        "FileCloudPhotoAssetDeletionIntentV2State",
+    ):
+        if required not in m39_file_store_source:
+            raise SystemExit(
+                f"M3.9 deletion receipts are missing stable exact intent identity: {required}"
+            )
+    receipt_clear_start = m39_file_store_source.find(
+        "public func clearCommittedDeletion(\n        _ intent:"
+    )
+    account_clear_start = m39_file_store_source.find(
+        "public func clearCommittedDeletion(\n        assetID:",
+        receipt_clear_start,
+    )
+    receipt_clear_source = m39_file_store_source[
+        receipt_clear_start:account_clear_start
+    ]
+    if (
+        receipt_clear_start < 0
+        or account_clear_start < 0
+        or "intent.intentID" not in receipt_clear_source
+        or "storedIntent.assetID == canonicalID" not in receipt_clear_source
+        or "intent.accountIdentity" in receipt_clear_source
+        or "intent.quarantineIdentityHint" in receipt_clear_source
+    ):
+        raise SystemExit(
+            "M3.9 deletion receipts are missing stable exact intent identity: "
+            "receipt clear must locate one exact ID across promotion and validate asset"
+        )
+    for required in (
+        "activeAccountIdentity",
+        "activeAccountAuthorization",
+        "accountAssetIDs",
+        "unresolvedAssetIDs",
+        "quarantinedIntents",
+        "accountIdentityHint",
+        "lastVerifiedAccountIdentity",
+        "quarantineIdentityHint",
+        "static let currentSchemaVersion = 3",
+        "state.intents[index].quarantineIdentityHint == accountIdentity",
+        "forAccountIdentity accountIdentity: String",
+        "unresolvedDeletionAssetIDs",
+        "JSONDecoder().decode([String].self",
+    ):
+        if required not in m39_file_store_source:
+            raise SystemExit(
+                f"M3.9 file deletion store is missing scoped/quarantine durability: {required}"
+            )
+    for required in (
+        "if let activeAccountIdentity {",
+        "accountIdentity: activeAccountIdentity",
+    ):
+        if required not in m39_file_store_source:
+            raise SystemExit(
+                "M3.9 file deletion store must serialize records into the exact "
+                f"active or legacy-quarantine scope: {required}"
+            )
+    for required in (
+        "cleanupLeasesByAssetID",
+        "cleanupLeaseWaitersByAssetID",
+        "waitForCleanupLeaseRelease",
+        "waitForInboundRecordWaiter",
+        "inboundRecordWaiterIDs",
+        "CloudPhotoAssetInboundCleanupLease",
+        "String: [UUID: CheckedContinuation<Void, Error>]",
+        "cleanupLeaseWaitersByAssetID[canonicalID]?.isEmpty != false",
+        "cleanupLeasesByAssetID[canonicalID] == lease.leaseID",
+        "withTaskCancellationHandler",
+        "waiterID: UUID",
+        "cancelInboundRecordWaiter",
+        "removeValue(forKey: waiterID)",
+        "continuation.resume(throwing: CancellationError())",
+        "try await waitForCleanupLeaseRelease(\n                for: canonicalID,\n                waiterID: waiterID\n            )\n            try Task.checkCancellation()",
+        "waiter.resume(returning: ())",
+    ):
+        if required not in m39_file_store_source:
+            raise SystemExit(
+                f"M3.9 file inbound journal is missing serialized cleanup lease: {required}"
+            )
+    if "temporaryStore.copyDownloadedFile" in m39_coordinator_source:
+        raise SystemExit(
+            "M3.9 coordinator must not copy a system-owned download after adapter return"
+        )
+    if "clearInboundAssetID" in m39_coordinator_source:
+        raise SystemExit(
+            "M3.9 coordinator must retain inbound intent until repository metadata ownership"
+        )
+    if "hasCommittedLocalDeletionIntent" in m39_coordinator_source:
+        raise SystemExit(
+            "M3.9 all-scope local suppression must never authorize coordinator remote deletion"
+        )
+    try:
+        m39_local_suppression_body = m39_file_store_source.split(
+            "public func hasCommittedLocalDeletionIntent(assetID: String)", 1
+        )[1].split("public func recordCommittedDeletion", 1)[0]
+    except IndexError as error:
+        raise SystemExit(
+            "M3.9 file deletion store is missing all-scope local suppression"
+        ) from error
+    for required in (
+        "canonicalAssetID(assetID)",
+        "loadState()",
+        "state.intents.contains { $0.assetID == canonicalID }",
+    ):
+        if required not in m39_local_suppression_body:
+            raise SystemExit(
+                f"M3.9 local suppression must inspect every persisted intent scope: {required}"
+            )
+    if "accountIdentity" in m39_local_suppression_body:
+        raise SystemExit(
+            "M3.9 local suppression must not filter scoped, hinted, or unresolved intents"
+        )
+    if m39_file_store_source.count(
+        "public func hasCommittedLocalDeletionIntent(assetID: String)"
+    ) < 2:
+        raise SystemExit(
+            "M3.9 no-op and durable deletion stores must expose local suppression"
+        )
+    for required in (
+        "public actor DirectCloudPhotoAssetInboundApplier",
+        "public func prepareInboundApply(",
+        "public func commitInboundApply(",
+        "public func cancelInboundApply(",
+        "activeInboundApplyLeases",
+        "activeInboundApplyLeases[lease.leaseID] = lease",
+        "guard activeInboundApplyLeases[lease.leaseID] == lease else",
+        "activeInboundApplyLeases.removeValue(forKey: lease.leaseID)",
+    ):
+        if required not in m39_file_store_source:
+            raise SystemExit(
+                f"M3.9 direct inbound applier is missing exact two-phase lease semantics: {required}"
+            )
+
+    for required in (
+        "record.hasUsableBinaryAsset else { return nil }",
+        "CloudPhotoAssetSystemRecord(",
+        "CloudKitPhotoAssetRecordMapper.systemRecord(from: record)",
+        "enum CloudKitPhotoAssetRecordMapper",
+        "static func systemRecord(",
+        "from record: CKRecord",
+        "private static func hasUsableBinaryAsset(in record: CKRecord) -> Bool",
+        'record["asset"] as? CKAsset',
+        "fileURL.isFileURL",
+        "resourceValues.isRegularFile == true",
+        "resourceValues.isReadable == true",
+    ):
+        if required not in m39_cloudkit_source:
+            raise SystemExit(
+                f"M3.9 actual adapter is missing CKAsset binary-presence repair gate: {required}"
+            )
+    for required in (
+        "CloudKitPhotoAssetRecordModifying",
+        "CloudKitPhotoAssetRecordModifyResults",
+        "CloudKitPhotoAssetRecordSaver",
+        "recordModifier.modifyRecords(",
+        "savePolicy: .changedKeys",
+        "atomically: true",
+        "saveResults[record.recordID]",
+        "deleteResults.isEmpty",
+        "try recordResult.get()",
+        "CloudKitPhotoAssetRecordMapper.uploadRecord(",
+        "database.modifyRecords(",
+        "withExtendedLifetime(record)",
+        "defer { withExtendedLifetime(record) {} }",
+    ):
+        if required not in m39_cloudkit_source:
+            raise SystemExit(
+                f"M3.9 CloudKit repair is missing explicit atomic changed-keys modify: {required}"
+            )
+    if "database.save(record)" in m39_cloudkit_source:
+        raise SystemExit(
+            "M3.9 same-ID asset repair must not use default change-tag save policy"
+        )
+
+    m39_repository_source = (
+        root
+        / "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataProgressPhotoRepository.swift"
+    ).read_text(encoding="utf-8")
+    for required in (
+        "deletionIntentStore",
+        "recordCommittedDeletion",
+        "clearCommittedDeletion",
+        "inboundAssetJournal",
+        "pendingInboundAssetIDs",
+        "CloudPhotoAssetInboundApplying",
+        "inboundAssetStore",
+        "public func prepareInboundApply(",
+        "public func commitInboundApply(",
+        "public func cancelInboundApply(",
+    ):
+        if required not in m39_repository_source:
+            raise SystemExit(
+                f"M3.9 repository is missing durable cloud handshake contract: {required}"
+            )
+    if (
+        "let deletionIntent: CloudPhotoAssetDeletionIntentReceipt"
+        not in m39_repository_source
+        or m39_repository_source.count(
+            "clearCommittedDeletion(deletionIntent)"
+        ) < 2
+    ):
+        raise SystemExit(
+            "M3.9 repository compensation must clear the exact recorded scoped receipt"
+        )
+    try:
+        m39_snapshot_body = m39_repository_source.split(
+            "public func snapshot() async throws -> CloudPhotoAssetReferenceSnapshot {",
+            1,
+        )[1].split("public func deletePhoto", 1)[0]
+        m39_reconcile_body = m39_repository_source.split(
+            "private func reconcileAssetStorageIfNeeded",
+            1,
+        )[1].split("private func recordPendingCleanup", 1)[0]
+        m39_retry_body = m39_repository_source.split(
+            "public func retryPendingAssetCleanup() async throws {",
+            1,
+        )[1].split("private func reconcileAssetStorageIfNeeded", 1)[0]
+    except IndexError as error:
+        raise SystemExit(
+            "M3.9 repository is missing snapshot/inbound reconciliation boundaries"
+        ) from error
+    if "reconcileAssetStorageIfNeeded(rows: rows)" not in m39_snapshot_body:
+        raise SystemExit(
+            "M3.9 repository snapshot must reconcile inbound metadata ownership"
+        )
+    inbound_read = m39_reconcile_body.find(
+        "loadPendingInboundAssetIDsFailClosed()"
+    )
+    orphan_guard = m39_reconcile_body.find(
+        "guard !hasReconciledAssetStorage else { return }"
+    )
+    if inbound_read < 0 or orphan_guard < 0 or inbound_read > orphan_guard:
+        raise SystemExit(
+            "M3.9 inbound ownership reconciliation must precede one-shot orphan sweep"
+        )
+    fresh_inbound_call = "try await loadPendingInboundAssetIDsFailClosed()"
+    fresh_inbound_guard = "freshPendingInboundAssetIDs.contains(assetID)"
+    if (
+        fresh_inbound_call not in m39_retry_body
+        or fresh_inbound_guard not in m39_retry_body
+    ):
+        raise SystemExit(
+            "M3.9 pending cleanup retry must reread and subtract fresh inbound ownership"
+        )
+    if (
+        m39_reconcile_body.count(fresh_inbound_call) < 2
+        or fresh_inbound_guard not in m39_reconcile_body
+    ):
+        raise SystemExit(
+            "M3.9 orphan sweep must fail closed on a fresh inbound read at delete boundary"
+        )
+    if "private func loadPendingInboundAssetIDsFailClosed" not in m39_repository_source:
+        raise SystemExit(
+            "M3.9 repository is missing the fail-closed inbound journal read boundary"
+        )
+    for required in (
+        "deleteAssetIfNotInbound",
+        "acquireCleanupLease(for: assetID)",
+        "releaseCleanupLease(lease)",
+    ):
+        if required not in m39_repository_source:
+            raise SystemExit(
+                f"M3.9 repository is missing atomic inbound-safe deletion: {required}"
+            )
+    if m39_repository_source.count("deleteAssetIfNotInbound(assetID)") < 2:
+        raise SystemExit(
+            "M3.9 retry and initial orphan sweep must share the atomic inbound-safe delete boundary"
+        )
+    if m39_repository_source.count("releaseCleanupLease(lease)") < 2:
+        raise SystemExit(
+            "M3.9 repository must release the inbound cleanup lease on success and failure"
+        )
+    try:
+        m39_inbound_prepare_body = m39_repository_source.split(
+            "public func prepareInboundApply(", 1
+        )[1].split("public func commitInboundApply(", 1)[0]
+        m39_inbound_commit_body = m39_repository_source.split(
+            "public func commitInboundApply(", 1
+        )[1].split("public func cancelInboundApply(", 1)[0]
+        m39_inbound_cancel_body = m39_repository_source.split(
+            "public func cancelInboundApply(", 1
+        )[1].split("public func fetchPhotos()", 1)[0]
+    except IndexError as error:
+        raise SystemExit(
+            "M3.9 repository is missing serialized inbound apply transaction"
+        ) from error
+    for required in (
+        "await acquireExclusiveOperation()",
+        "hasCommittedLocalDeletionIntent(assetID: assetID)",
+        "return .discardedCommittedDeletion",
+        "activeInboundApplyLease = lease",
+        "return .prepared(lease)",
+    ):
+        if required not in m39_inbound_prepare_body:
+            raise SystemExit(
+                "M3.9 repository is missing retained inbound preparation transaction: "
+                + required
+            )
+    if (
+        "defer { releaseExclusiveOperation() }" in m39_inbound_prepare_body
+        or m39_inbound_prepare_body.count("releaseExclusiveOperation()") < 2
+    ):
+        raise SystemExit(
+            "M3.9 repository preparation must retain the lock only for an exact prepared lease"
+        )
+    for required in (
+        "activeInboundApplyLease",
+        "guard activeInboundApplyLease == lease else",
+        "defer { releaseInboundApplyLease(lease) }",
+        "inboundAssetJournal.recordInboundAssetID(lease.assetID)",
+        "try Task.checkCancellation()",
+        "inboundAssetStore.restoreCloudAsset(id: lease.assetID, bytes: bytes)",
+    ):
+        if required not in m39_inbound_commit_body:
+            raise SystemExit(
+                "M3.9 repository inbound commit must consume and release one exact lease: "
+                + required
+            )
+    for required in (
+        "guard activeInboundApplyLease == lease else { return }",
+        "releaseInboundApplyLease(lease)",
+    ):
+        if required not in m39_inbound_cancel_body:
+            raise SystemExit(
+                "M3.9 repository inbound cancel must release only its exact lease: "
+                + required
+            )
+    for required in (
+        "private func releaseInboundApplyLease(",
+        "activeInboundApplyLease = nil",
+    ):
+        if required not in m39_repository_source:
+            raise SystemExit(
+                "M3.9 repository inbound lease release must be exact and reusable: "
+                + required
+            )
+    if m39_repository_source.count(
+        "guard activeInboundApplyLease == lease else { return }"
+    ) < 2:
+        raise SystemExit(
+            "M3.9 stale inbound lease cancellation must not release a newer lease"
+        )
+    intent_read = m39_inbound_prepare_body.find(
+        "hasCommittedLocalDeletionIntent(assetID: assetID)"
+    )
+    discard = m39_inbound_prepare_body.find("return .discardedCommittedDeletion")
+    prepared = m39_inbound_prepare_body.find("return .prepared(lease)")
+    journal_record = m39_inbound_commit_body.find(
+        "inboundAssetJournal.recordInboundAssetID(lease.assetID)"
+    )
+    cancellation_check = m39_inbound_commit_body.find(
+        "try Task.checkCancellation()",
+        journal_record,
+    )
+    restore = m39_inbound_commit_body.find(
+        "inboundAssetStore.restoreCloudAsset(id: lease.assetID, bytes: bytes)"
+    )
+    if not (
+        0 <= intent_read < discard < prepared
+        and 0 <= journal_record < cancellation_check < restore
+    ):
+        raise SystemExit(
+            "M3.9 repository inbound prepare/commit must fail closed before journal and restore"
+        )
+    if "releaseExclusiveOperation()" in m39_inbound_prepare_body.split(
+        "return .prepared(lease)", 1
+    )[0].rsplit("return .discardedCommittedDeletion", 1)[-1]:
+        raise SystemExit(
+            "M3.9 repository must retain its exclusive operation with a prepared lease"
+        )
+    if (
+        "as? CloudPhotoAssetLocalStoring" in m39_repository_source
+        or "as! CloudPhotoAssetLocalStoring" in m39_repository_source
+    ):
+        raise SystemExit(
+            "M3.9 repository inbound restore dependency must be explicit and type-safe"
+        )
+
+    m39_factory_source = (
+        root / "App/Application/TrackerFeatureBundle.swift"
+    ).read_text(encoding="utf-8")
+    for local_boundary in (
+        "guard case .cloud = environment else",
+        "NoOpCloudPhotoAssetDeletionIntentStore.shared",
+        "NoOpCloudPhotoAssetInboundJournal.shared",
+    ):
+        if local_boundary not in m39_factory_source:
+            raise SystemExit(
+                "M3.9 local/UI composition must not persist cloud handshakes: "
+                + local_boundary
+            )
+    for declaration in (
+        "let deletionIntentStore = FileCloudPhotoAssetDeletionIntentStore(",
+        "let inboundAssetJournal = FileCloudPhotoAssetInboundJournal(",
+    ):
+        if m39_factory_source.count(declaration) != 1:
+            raise SystemExit(
+                f"M3.9 app composition must create one shared provider: {declaration}"
+            )
+    for shared_argument in (
+        "deletionIntentStore: deletionIntentStore",
+    ):
+        if m39_factory_source.count(shared_argument) != 2:
+            raise SystemExit(
+                f"M3.9 repository and coordinator must receive the same provider: {shared_argument}"
+            )
+    if m39_factory_source.count("inboundAssetJournal: inboundAssetJournal") != 1:
+        raise SystemExit(
+            "M3.9 repository must receive the one shared inbound journal"
+        )
+    if m39_factory_source.count(
+        "referenceSnapshotProvider: progressPhotoRepository"
+    ) != 1:
+        raise SystemExit(
+            "M3.9 shipped coordinator must receive the real repository snapshot provider"
+        )
+    for shared_inbound_contract in (
+        "inboundAssetStore: progressPhotoAssetStore",
+        "inboundAssetApplier: progressPhotoRepository",
+        "any CloudPhotoAssetReferenceSnapshotProviding & CloudPhotoAssetInboundApplying",
+    ):
+        if shared_inbound_contract not in m39_factory_source:
+            raise SystemExit(
+                "M3.9 shipped composition must share one repository inbound transaction: "
+                + shared_inbound_contract
+            )
+    transfer_declaration = (
+        "let cloudPhotoAssetTransferStore = FileCloudPhotoAssetTemporaryStore("
+    )
+    if m39_factory_source.count(transfer_declaration) != 1:
+        raise SystemExit(
+            "M3.9 app composition must create exactly one shared cloud transfer store"
+        )
+    for shared_transfer_argument in (
+        "downloadStore: cloudPhotoAssetTransferStore",
+        "temporaryStore: cloudPhotoAssetTransferStore",
+    ):
+        if m39_factory_source.count(shared_transfer_argument) != 1:
+            raise SystemExit(
+                "M3.9 adapter and coordinator must receive the same transfer store: "
+                + shared_transfer_argument
+            )
+
+    for required in (
+        "downloadStore.stageDownload(",
+        "accountIdentityProvider.accountIdentity()",
+        "let owned = try withExtendedLifetime(record) {",
+        "lifetimeOwner: asset",
+    ):
+        if required not in m39_cloudkit_source:
+            raise SystemExit(
+                f"M3.9 actual CloudKit adapter is missing ownership/account contract: {required}"
+            )
+    if "stagedFileURL: stagedFileURL" in m39_cloudkit_source:
+        raise SystemExit(
+            "M3.9 CloudKit adapter must not return the system CKAsset URL"
+        )
+
+    m39_file_store_source = (
+        root
+        / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/FileCloudPhotoAssetStores.swift"
+    ).read_text(encoding="utf-8")
+    m39_transfer_store = m39_file_store_source.split(
+        "public final class FileCloudPhotoAssetTemporaryStore", 1
+    )[1]
+    for forbidden in (
+        "fileManager.copyItem",
+        "Data(contentsOf:",
+        "readToEnd",
+    ):
+        if forbidden in m39_transfer_store:
+            raise SystemExit(
+                f"M3.9 download staging must not use unbounded I/O: {forbidden}"
+            )
+    for required in (
+        "FileHandle",
+        "fileHandleFactory",
+        "read(upToCount: remaining + 1)",
+        "isCanonicalTransferFileName",
+    ):
+        if required not in m39_transfer_store:
+            raise SystemExit(
+                f"M3.9 download staging is missing bounded streaming primitive: {required}"
+            )
+    if m39_transfer_store.count("isCanonicalTransferFileName(") < 3:
+        raise SystemExit(
+            "M3.9 canonical transfer ownership must gate both sweep and access"
+        )
+    if "guard isOwned(url) else" not in m39_transfer_store:
+        raise SystemExit(
+            "M3.9 coordinator reads must retain the app-owned transfer boundary"
+        )
+    try:
+        m39_validated_copy = m39_transfer_store.split(
+            "private func copyValidatedDownload", 1
+        )[1].split("private func copyFile", 1)[0]
+    except IndexError as error:
+        raise SystemExit(
+            "M3.9 download staging is missing its validated streaming boundary"
+        ) from error
+    if "try close(reader: reader, writer: writer)" not in m39_validated_copy:
+        raise SystemExit(
+            "M3.9 validated staging must propagate writer/reader close failure"
+        )
+
+    m39_lifecycle_source = (
+        root
+        / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Gallery/ProgressPhotoLifecycleView.swift"
+    ).read_text(encoding="utf-8")
+    if "await assetSyncLifecycle.synchronize()" not in m39_lifecycle_source:
+        raise SystemExit(
+            "M3.9 shipped lifecycle view must delegate successful sync cache repair"
+        )
+    if "await assetSynchronizer.synchronize()" in m39_lifecycle_source:
+        raise SystemExit(
+            "M3.9 lifecycle view must not bypass the tested sync lifecycle"
+        )
+    for required in (
+        "accountIdentity",
+        "CloudPhotoAssetReferenceSnapshotProviding",
+        "CloudPhotoAssetDeletionIntentStoring",
+        "CloudPhotoAssetInboundJournaling",
+    ):
+        if required not in m39_domain_source:
+            raise SystemExit(
+                f"M3.9 cloud domain is missing persisted identity/provider contract: {required}"
+            )
 
 m32_production = {
     "Packages/HealthTrackingModules/Sources/MetricsKit/Domain/BodyMetricDomain.swift": {
@@ -2082,7 +3542,7 @@ fixture_files = {
             '"m3-bloodwork-empty-light"',
             '"m3-bloodwork-editor-dark-high-contrast"',
             '"m3-bloodwork-editor-ax5"',
-            "Targeted M3.7-M3.8 photo lifecycle and gallery tests",
+            "Targeted M3.7-M3.9 photo lifecycle, gallery, and cloud asset tests",
             "scripts/test-ios.sh --only-testing ProgressPhotosKitTests",
             '"ProgressPhotoLifecycleUITests"',
         ]
@@ -2909,6 +4369,28 @@ fixture_files = {
             "scenario == .m3PhotoGallery",
             "progressPhotoRepository: UITestProgressPhotoGalleryRepository()",
             "func fullImage(assetID:",
+            "progressPhotoAssetSynchronizer",
+            "makeProgressPhotoAssetSynchronizer",
+            "guard case let .cloud(containerIdentifier, storeURL)",
+            "NoOpCloudPhotoAssetCoordinator.shared",
+            "guard case .cloud = environment else",
+            "NoOpCloudPhotoAssetDeletionIntentStore.shared",
+            "NoOpCloudPhotoAssetInboundJournal.shared",
+            "CloudKitPrivatePhotoAssetDatabase",
+            "FileCloudPhotoAssetSyncStateStore",
+            "FileCloudPhotoAssetTemporaryStore",
+            "let deletionIntentStore = FileCloudPhotoAssetDeletionIntentStore(",
+            "let inboundAssetJournal = FileCloudPhotoAssetInboundJournal(",
+            "deletionIntentStore: deletionIntentStore",
+            "deletionIntentStore: deletionIntentStore",
+            "inboundAssetJournal: inboundAssetJournal",
+            "inboundAssetStore: progressPhotoAssetStore",
+            "referenceSnapshotProvider: progressPhotoRepository",
+            "inboundAssetApplier: progressPhotoRepository",
+            "any CloudPhotoAssetReferenceSnapshotProviding & CloudPhotoAssetInboundApplying",
+            "let cloudPhotoAssetTransferStore = FileCloudPhotoAssetTemporaryStore(",
+            "downloadStore: cloudPhotoAssetTransferStore",
+            "temporaryStore: cloudPhotoAssetTransferStore",
         ]
     ),
     "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/PhotoAssetStoreTests.swift": " ".join(
@@ -2924,6 +4406,10 @@ fixture_files = {
             "testDeleteIsIdempotentAndProtectedDataFailureKeepsAssetForRetry",
             "testImportPurgesStaleStagingBeforeWritingNewProtectedAsset",
             "protectedWriteURLs",
+            "testCloudRestoreUsesExactOpaqueIDAndRebuildsBothVariantsIdempotently",
+            "restoreCloudAsset(id:",
+            "cloudAssetBytes(id:",
+            "deleteCloudAsset(id:",
         ]
     ),
     "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/PhotoAssetCleanupJournalTests.swift": " ".join(
@@ -2952,6 +4438,66 @@ fixture_files = {
             "testReconciliationSerializesAConcurrentImportAcrossSuspension",
             "testJournalAndImmediateDeleteFailureQueuesOrphanForCurrentProcessRetry",
             "testJournalAndDeleteCompensationFailureQueuesOrphanForRetry",
+            "testCommittedMetadataDeletionPersistsUntilCloudRetrySucceedsAfterRelaunch",
+            "testRepositoryCloudReferenceSnapshotIsImmutableAcrossLaterMetadataChange",
+            "testInboundCloudAssetSurvivesCoordinatorRestoreCrashAndRepositoryRelaunch",
+            "testSuccessfulInboundSyncRetainsIntentUntilMetadataReferencesAsset",
+            "testRepositoryConsumesOnlyInboundIDsMatchedByMetadataAcrossRelaunches",
+            "testSnapshotReconcilesInboundOwnershipArrivingAfterInitialFetchPerID",
+            "testInboundApplyFinishesBeforeQueuedDeleteAndFinalStateRemainsDeleted",
+            "testRepositoryInboundApplyWithoutCommittedDeletionPreservesAssetBeforeMetadata",
+            "testDeleteCommittedBeforeStaleChangedPageDiscardsInboundAndRetainsIntent",
+            "testStaleChangedPageCannotRestoreDeletionQuarantinedByNewerAccountResolution",
+            "testStaleGenerationCancelsPreparedInboundLeaseBeforeAnySideEffectAndRepositoryReacquires",
+            "testInboundPreparationLeaseRejectsABAAndReleasesAfterCancellation",
+            "PausingBeforeRecordCloudPhotoAssetDeletionIntentStore",
+            "ObservedCloudPhotoAssetInboundApplier",
+            "recordedReceipt.quarantineIdentityHint",
+            "durableText.contains(recordedReceipt.intentID.uuidString)",
+            "calls.commitLeaseAssetIDs.isEmpty",
+            "calls.cancelLeaseAssetIDs, [inboundID]",
+            "repository.cancelInboundApply(firstLease)",
+            "repository.commitInboundApply(secondLease",
+            "retryPreparation",
+            "inboundAssetStore: assetStore",
+            "inboundAssetApplier: repository",
+            "waitForFetchCall(1)",
+            "finishedWhileRestoreHeld",
+            "transfersAfterRace.isEmpty",
+            "pendingAfterDeferred, [assetID]",
+            "testInboundRestoreProtectsPreviouslyFailedOrphanFromCleanupRetry",
+            "testInitialOrphanSweepRereadsInboundOwnershipAtDeleteBoundary",
+            "testInboundJournalReadFailureStopsPendingCleanupRetryBeforeDelete",
+            "testCleanupRetryRechecksInboundOwnershipAfterEarlierAssetDeleteSuspends",
+            "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
+            "testCancelledInboundRecordRemovesExactWaiterAndAllowsLaterCleanupLease",
+            "waitForInboundRecordWaiter",
+            "inboundRecordWaiterIDs",
+            "A cancelled inbound record must finish before lease release.",
+            "waitersAfterCancellation.isEmpty",
+            "pendingBeforeLeaseRelease.isEmpty",
+            "laterLease",
+            "CleanupLeaseInterleavingAssetStore",
+            "SequencedCloudPhotoAssetInboundJournal",
+            "snapshotAfterA",
+            "testMetadataDeleteSaveFailureNeverCreatesCloudDeletionIntent",
+            "testCompensatedLocalDeleteFailureClearsCloudIntentBeforeReturning",
+            "testCompensationClearsExactHintedIntentPromotedWhileReceiptIsPaused",
+            "PausingAfterRecordCloudPhotoAssetDeletionIntentStore",
+            "scopedAfterCompensation.isEmpty",
+            "quarantineAfterCompensation.isEmpty",
+            "XCTAssertEqual(intentCalls.recordCalls, [])",
+            "XCTAssertEqual(intentCalls.clearCalls, [])",
+            "let persistedContext = ModelContext(container)",
+            "persistedPhotoIDs([])",
+            "pendingAfterA, [assetB]",
+            "pendingAfterARelaunch, [assetB]",
+            "cloudAssets[assetB], bytesB",
+            "FileCloudPhotoAssetDeletionIntentStore",
+            "FileCloudPhotoAssetInboundJournal",
+            "inboundAssetJournal:",
+            "CloudPhotoAssetLocalStoring",
+            "func usableCloudAssetIDs()",
         ]
     ),
     "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/PhotoImportViewModelTests.swift": " ".join(
@@ -2991,6 +4537,10 @@ fixture_files = {
             "repository.fullImageRequests",
             "loadComparisonImages()",
             "retryUnavailableAssets()",
+            "testSuccessfulSyncReloadsExactMissingAndCorruptGalleryStatesInOpenLifecycle",
+            "ProgressPhotoAssetSyncLifecycle",
+            "comparison?.before.assetState",
+            "fullImageRequests.filter",
         ]
     ),
     "HealthTrackingAppUITests/ProgressPhotoGalleryUITests.swift": " ".join(
@@ -3072,7 +4622,23 @@ fixture_files = {
             "public actor LocalPhotoAssetStore",
             "prepareStorage",
             "storedAssetIDs",
+            "public func usableCloudAssetIDs() async throws -> Set<String> {",
+            "let physicalAssetIDs = try await storedAssetIDs()",
+            "var usableAssetIDs: Set<String> = []",
+            "for assetID in physicalAssetIDs.sorted()",
+            "let full = try await loadAsset(id: assetID, variant: .full)",
+            "guard case .available = full else { continue }",
+            "let thumbnail = try await loadAsset(id: assetID, variant: .thumbnail)",
+            "guard case .available = thumbnail else { continue }",
+            "usableAssetIDs.insert(assetID)",
+            "return usableAssetIDs",
+            "private func prepareStorage",
             "error as? PhotoAssetStoreError",
+            "CloudPhotoAssetLocalStoring",
+            "cloudAssetBytes(id:",
+            "restoreCloudAsset(id:",
+            "deleteCloudAsset(id:",
+            "replacingExisting: true",
         ]
     ),
     "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Platform/ImageIOPhotoImageProcessor.swift": " ".join(
@@ -3156,6 +4722,416 @@ fixture_files = {
             "galleryViewModel.retryUnavailableAssets()",
             "switch galleryViewModel.phase",
             "galleryViewModel.items.isEmpty",
+            "assetSynchronizer: any CloudPhotoAssetSynchronizing",
+            "assetSyncLifecycle",
+            "await assetSyncLifecycle.synchronize()",
+            "await synchronizeAssets()",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudPhotoAssetContractTests.swift": " ".join(
+        [
+            "testRecordContractUsesDeterministicOpaqueNameAndPrivacyAllowlist",
+            "testChecksumIsStableAndValidationRejectsSizeOrDigestMismatch",
+            "testOpaqueSyncStatePersistsQueuesKnownIDsAndChangeToken",
+            "testTemporaryStoreOwnsUploadAndDownloadCopiesUntilExplicitCleanup",
+            "testAdapterStagesDownloadIntoOwnedStorageBeforeSystemSourceDisappears",
+            "testDownloadStagingRejectsOversizedMetadataBeforeOpeningSource",
+            "testDownloadStagingBoundsActualBytesAndRejectsMetadataMismatch",
+            "testRealBoundedStagerLimitsReadRequestsAndNeverWritesMaximumPlusOneByte",
+            "testDownloadStagingDeletesOutputAndClosesReaderWhenWriterCloseFails",
+            "XCTAssertEqual(snapshot.closeCallCount, 2)",
+            "fileHandleFactory:",
+            "testTemporaryStoreRecreationSweepsStaleTransferFiles",
+            "CocoaError.Code.fileReadNoPermission.rawValue",
+            "nestedUnrelated",
+            "unrelatedAsset",
+            "symlinkTarget",
+            "testLegacyUnscopedSyncStateRecreatesWithNilAccountIdentity",
+            "testDeletionIntentStoreSerializesAccountTransitionAndPersistsEveryScope",
+            "testLegacyDeletionIntentSetMovesToQuarantineWithoutAuthorizingCurrentAccount",
+            "testDeletionIntentStoreRecreationPromotesOnlyMatchingVerifiedAccountHint",
+            "testExactIntentReceiptSurvivesPromotionAndDoesNotClearSameAssetABA",
+            "testStaleAccountResolutionCannotAuthorizeAfterNewerEpochBegins",
+            "testDeletionIntentStoreMigratesV1AndRejectsUnknownSchemaFailClosed",
+            "receipt1.intentID",
+            "receipt2.intentID",
+            "pendingAfterFirstClear",
+            "staleResolution",
+            "newerResolution",
+            "catch is CancellationError",
+            "quarantineUnderB",
+            "A consumed resolution epoch must never authorize a second account.",
+            "receiptAfterResolutionReuse.accountIdentity",
+            "quarantineIdentityHint",
+            "lastVerifiedAccountIdentity",
+            "quarantinedIntents",
+            "unresolvedDeletionAssetIDs",
+            "forAccountIdentity:",
+            "FileCloudPhotoAssetSyncStateStore",
+            "FileCloudPhotoAssetTemporaryStore",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudPhotoAssetCoordinatorTests.swift": " ".join(
+        [
+            "testEveryUnavailableAccountStateDefersWithoutTouchingLocalAssetsOrQueue",
+            "testBackfillWaitsForServerResponseUsesPrivateZoneAndCleansUploadFile",
+            "testMatchingExistingRecordIsIdempotentAndSkipsAssetSave",
+            "testRetryableSaveUsesInjectedExponentialBackoffThenCommits",
+            "testPaginatedChangesPersistOpaqueTokenRebuildDownloadAndApplyDeletion",
+            "testExpiredChangeTokenClearsPersistedTokenAndRestartsFromNil",
+            "testInvalidDownloadDoesNotAdvanceTokenOrMutateLocalStore",
+            "testDeletionQueueTreatsMissingServerRecordAsIdempotentSuccess",
+            "testStateOnlyDeletionQueueCannotAuthorizeServerDeletion",
+            "testNewerSynchronizationWinsWhenOlderUploadCompletesLate",
+            "testReferencedMissingAssetRestoresFromCloudWithoutInferringDeletion",
+            "testOnlyExplicitCommittedMetadataDeletionQueuesServerDeletion",
+            "testReferencedMetadataNeutralizesStaleDeletionIntentWithoutDeletingCloudAsset",
+            "testReferencedSnapshotNeutralizesOnlyObservedIntentAcrossSameAssetABA",
+            "observedStaleIntent",
+            "replacementIntent",
+            "XCTAssertEqual(remainingIntents.map",
+            "retrySnapshot.deleteRequests",
+            "intentsAfterRetry.isEmpty",
+            "stateAfterRetry.pendingDeletionAssetIDs.isEmpty",
+            "testAccountIdentityChangeResetsStateAndBackfillsNewAccount",
+            "testAccountResetLoadsCurrentScopeAndPreservesOldAccountQueue",
+            "testAccountTransitionProcessesOnlyCurrentScopeAndPreservesOldAndUnresolvedIntents",
+            "testVerifiedAccountOfflineDeletionSurvivesFailureAndRelaunchRetry",
+            "testDeferredAccountTransitionQuarantinesOldHintUntilMatchingAccountReturns",
+            "postCancellationReceipt.quarantineIdentityHint",
+            "postFailureReceipt.quarantineIdentityHint",
+            "oldAccountIDs",
+            "unresolvedIDs",
+            "testLegacyUnscopedFileStateResetsFailClosedAndBackfillsCurrentAccount",
+            "testCancelledSynchronizationCleansOwnedPageDiscardedAfterSuspendedFetch",
+            "suspendedChangeCalls",
+            "testIntentCommittedAfterReadIsNotClearedAgainstOlderReferenceSnapshot",
+            "pendingAfterFirst",
+            "testCorruptFullVariantWithPhysicalDirectoryReplaysNilTokenAndRepairsWithoutUpload",
+            "testMissingThumbnailWithPhysicalDirectoryReplaysNilTokenAndRepairsWithoutUpload",
+            "let localStore = LocalPhotoAssetStore(",
+            "CloudRepairPhotoAssetFileSystem",
+            "try Data([0xff]).write(to: fullURL, options: .atomic)",
+            "try FileManager.default.removeItem(at: thumbnailURL)",
+            "let physicalBeforeRepair = try await localStore.storedAssetIDs()",
+            "let usableBeforeRepair = try await localStore.usableCloudAssetIDs()",
+            "NilTokenOnlyRepairCloudPhotoAssetDatabase",
+            "guard previousToken == nil else",
+            "databaseSnapshot.changeTokens, [nil, repairedChangeToken]",
+            "databaseSnapshot.nilTokenRepairResponseCount, 1",
+            "pendingUploadAssetIDs: [assetID]",
+            "databaseSnapshot.saveRequests.isEmpty",
+            "databaseSnapshot.deleteRequests.isEmpty",
+            "repairedFull, .available(Data([0x10]))",
+            "repairedThumbnail, .available(Data([0x20]))",
+            "physicalAfterRepair, [assetID]",
+            "usableAfterRepair, [assetID]",
+            "firstState, finalState",
+            "CloudPhotoAssetLocalStoring",
+            "func usableCloudAssetIDs()",
+            "referenceSnapshotProvider:",
+            "deletionIntentStore:",
+            "inboundAssetJournal:",
+            "try await coordinator.synchronize()",
+            "PrivateCloudPhotoAssetDatabase",
+            "CloudPhotoAssetDatabaseError",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudKitPrivatePhotoAssetDatabaseTests.swift": " ".join(
+        [
+            "testActualAdapterOwnsDownloadBeforeSystemURLDisappearsAtReturnBoundary",
+            "testActualAdapterReturnsChangingOpaqueAccountIdentity",
+            "testActualAdapterAndCoordinatorConsumeAndRemoveOneSharedOwnedTransfer",
+            "testActualAdapterRepairsMatchingMetadataWithoutUsableBinaryAndKeepsValidAssetIdempotent",
+            "CloudPhotoAssetSystemRecord",
+            "hasUsableBinaryAsset: false",
+            "hasUsableBinaryAsset: true",
+            "missingBinary.saveRequests.map",
+            "validBinary.saveRequests.isEmpty",
+            "testActualCKRecordMappingRequiresReadableRegularCKAssetFile",
+            "testExplicitChangedKeysModifyRepairsSameIDAssetAndPreservesUnknownFields",
+            "testExplicitModifySurfacesExactPerRecordFailure",
+            "ConflictAwareCloudKitPhotoAssetRecordModifier",
+            "savePolicy: .ifServerRecordUnchanged",
+            "RecordSavePolicy.changedKeys.rawValue",
+            "serverOnly",
+            "perRecordFailure",
+            "CloudKitPhotoAssetRecordMapper.systemRecord",
+            "missingAsset",
+            "wrongTypeAsset",
+            "invalidFileAsset",
+            "directoryAsset",
+            "validAsset",
+            "CloudPhotoAssetSystemURLLifetimeOwner",
+            "XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))",
+            "CloudKitPrivatePhotoAssetDatabase",
+            "systemDatabase:",
+            "accountIdentityProvider:",
+            "downloadStore:",
+            "CloudPhotoAssetLocalStoring",
+            "func usableCloudAssetIDs()",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetDomain.swift": "\n".join(
+        [
+            'public static let fieldNames = ["assetID", "asset", "checksum", "byteCount"]',
+            'zoneName = "ProgressPhotoAssetsZone"',
+            'recordType = "ProgressPhotoAsset"',
+            "CloudPhotoAssetRecordContract",
+            "CloudPhotoAssetChecksum",
+            "CloudPhotoAssetSyncState",
+            "pendingUploadAssetIDs",
+            "pendingDeletionAssetIDs",
+            "uploadedAssetIDs",
+            "changeToken",
+            "accountIdentity",
+            "CloudPhotoAssetReferenceSnapshotProviding",
+            "CloudPhotoAssetDeletionIntentStoring",
+            "CloudPhotoAssetDeletionIntentReceipt",
+            "public let intentID: UUID",
+            "CloudPhotoAssetAccountAuthorization",
+            "CloudPhotoAssetAccountResolution",
+            "quarantineIdentityHint",
+            "beginAccountResolution()",
+            "activateAccountIdentity",
+            "resolution: CloudPhotoAssetAccountResolution",
+            "async throws -> CloudPhotoAssetAccountAuthorization",
+            "suspendAccountAuthorization(_ authorization: CloudPhotoAssetAccountAuthorization)",
+            "pendingDeletionIntents(",
+            "async throws -> [CloudPhotoAssetDeletionIntentReceipt]",
+            "pendingDeletionAssetIDs(",
+            "forAccountIdentity accountIdentity: String",
+            "unresolvedDeletionAssetIDs",
+            "hasCommittedLocalDeletionIntent(assetID: String)",
+            "-> CloudPhotoAssetDeletionIntentReceipt",
+            "CloudPhotoAssetSystemRecord",
+            "hasUsableBinaryAsset",
+            "async throws -> CloudPhotoAssetSystemRecord?",
+            "CloudPhotoAssetInboundJournaling",
+            "CloudPhotoAssetInboundCleanupLease",
+            "acquireCleanupLease(for assetID: String)",
+            "releaseCleanupLease(_ lease: CloudPhotoAssetInboundCleanupLease)",
+            "CloudPhotoAssetInboundApplyLease",
+            "CloudPhotoAssetInboundApplyPreparation",
+            "case prepared(CloudPhotoAssetInboundApplyLease)",
+            "case discardedCommittedDeletion",
+            "CloudPhotoAssetInboundApplying",
+            "public protocol CloudPhotoAssetLocalStoring",
+            "func storedAssetIDs()",
+            "func usableCloudAssetIDs()",
+            "public protocol CloudPhotoAssetInboundApplying",
+            "func prepareInboundApply(",
+            "func commitInboundApply(",
+            "func cancelInboundApply(",
+            "id assetID: String",
+            "bytes: Data",
+            "forAccountIdentity accountIdentity: String",
+            "async throws -> CloudPhotoAssetInboundApplyPreparation",
+            "_ lease: CloudPhotoAssetInboundApplyLease",
+            "public struct CloudPhotoAssetDeletionIntentReceipt",
+            "PrivateCloudPhotoAssetDatabase",
+            "CloudPhotoAssetSynchronizing",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetCoordinator.swift": " ".join(
+        [
+            "public actor CloudPhotoAssetCoordinator",
+            "public init( inboundAssetApplier: any CloudPhotoAssetInboundApplying ) {",
+            "let accountResolution = await deletionIntentStore.beginAccountResolution()",
+            "database.accountStatus()",
+            "database.ensureZone",
+            "let usableLocalAssetIDs = try await localStore.usableCloudAssetIDs()",
+            "try validate(assetIDs: usableLocalAssetIDs)",
+            "reconcile(usableLocalAssetIDs: usableLocalAssetIDs,",
+            "private func reconcile(",
+            "usableLocalAssetIDs: Set<String>",
+            "let referencedUsable = usableLocalAssetIDs.intersection(referencedAssetIDs)",
+            ".intersection(referencedUsable)",
+            ".union(referencedUsable.subtracting(uploaded))",
+            ".subtracting(usableLocalAssetIDs)",
+            "state.changeToken = nil",
+            "private func markUploaded",
+            "temporaryStore.createUploadFile",
+            "record.stagedFileURL",
+            "CloudPhotoAssetChecksum.validate",
+            "CloudPhotoAssetDatabaseError.changeTokenExpired",
+            "CloudPhotoAssetDatabaseError.recordNotFound",
+            "retryPolicy.delay",
+            "ensureCurrent",
+            "generation &+= 1",
+            "state.changeToken = page.changeToken",
+            "public func synchronize()",
+            "deletionIntentStore",
+            "try validate(state: state)",
+            "let accountAuthorization = try await deletionIntentStore.activateAccountIdentity(",
+            "resolution: accountResolution",
+            "pendingDeletionIntents(forAccountIdentity: accountIdentity)",
+            "await deletionIntentStore.suspendAccountAuthorization(accountAuthorization)",
+            "await deletionIntentStore.suspendAccountAuthorization(accountAuthorization)",
+            "referenceSnapshotProvider",
+            "await referenceSnapshotProvider.snapshot()",
+            "clearCommittedDeletion(",
+            "forAccountIdentity: accountIdentity",
+            "let deletions = committedDeletionIDs",
+            "let referencedDeletionIntents = committedDeletionIntents.filter",
+            "clearCommittedDeletion(intent)",
+            "let referencedDeletionIDs = Set(referencedDeletionIntents.map(\\.assetID))",
+            "committedDeletionIDs.subtract(referencedDeletionIDs)",
+            "private func processDeletions(",
+            "database.deleteRecord(",
+            "clearCommittedDeletion(\n                assetID: assetID,",
+            "forAccountIdentity: accountIdentity",
+            "private func processUploads(",
+            "onDiscard: { [temporaryStore = self.temporaryStore] page in",
+            "private func apply(",
+            "private let inboundAssetApplier: any CloudPhotoAssetInboundApplying",
+            "inboundAssetApplier: any CloudPhotoAssetInboundApplying",
+            "inboundAssetApplier.prepareInboundApply(",
+            "forAccountIdentity: accountIdentity",
+            "case .discardedCommittedDeletion:\n            return",
+            "case let .prepared(lease):",
+            "try ensureCurrent(generation)",
+            "inboundAssetApplier.commitInboundApply(",
+            "try ensureCurrent(generation)",
+            "inboundAssetApplier.cancelInboundApply(",
+            "markUploaded(record.assetID, state: &state)",
+            "remove(record.assetID, from: &state.pendingDeletionAssetIDs)",
+            "private func performWithRetry",
+            "temporaryStore.removeFile(at: record.stagedFileURL)",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/FileCloudPhotoAssetStores.swift": " ".join(
+        [
+            "FileCloudPhotoAssetSyncStateStore",
+            "public final class FileCloudPhotoAssetTemporaryStore",
+            ".completeFileProtection",
+            "stageDownload",
+            "FileHandle",
+            "fileHandleFactory",
+            "read(upToCount: remaining + 1)",
+            "isCanonicalTransferFileName",
+            "isCanonicalTransferFileName(",
+            "isCanonicalTransferFileName(",
+            "isCanonicalTransferFileName(",
+            "guard isOwned(url) else",
+            "private func copyValidatedDownload",
+            "try close(reader: reader, writer: writer)",
+            "private func copyFile",
+            "removeFile",
+            "NoOpCloudPhotoAssetCoordinator",
+            "activeAccountIdentity",
+            "activeAccountAuthorization",
+            "activeAccountResolutionID",
+            "public func beginAccountResolution()",
+            "activeAccountAuthorization = nil",
+            "activeAccountResolutionID = resolution.resolutionID",
+            "public func activateAccountIdentity(",
+            "guard activeAccountResolutionID == resolution.resolutionID else",
+            "activeAccountResolutionID = nil",
+            "throw CancellationError()",
+            "FileCloudPhotoAssetDeletionIntentRecord",
+            "static let currentSchemaVersion = 3",
+            "public func pendingDeletionIntents(",
+            "async throws -> [CloudPhotoAssetDeletionIntentReceipt]",
+            "intent.accountIdentity == accountIdentity",
+            "intent.quarantineIdentityHint == nil",
+            "intentID: intent.intentID",
+            "intentID: UUID()",
+            "state.intents",
+            "$0.intentID == intent.intentID",
+            "$0.assetID == canonicalID",
+            "state.intents[index].accountIdentity = accountIdentity",
+            "state.intents[index].quarantineIdentityHint = nil",
+            "FileCloudPhotoAssetDeletionIntentV2State",
+            "public func hasCommittedLocalDeletionIntent(assetID: String)",
+            "canonicalAssetID(assetID)",
+            "loadState()",
+            "state.intents.contains { $0.assetID == canonicalID }",
+            "public func recordCommittedDeletion",
+            "public func hasCommittedLocalDeletionIntent(assetID: String)",
+            "public func clearCommittedDeletion(\n        _ intent: CloudPhotoAssetDeletionIntentReceipt) { intent.intentID storedIntent.assetID == canonicalID } public func clearCommittedDeletion(\n        assetID:",
+            "CloudPhotoAssetInboundCleanupLease",
+            "cleanupLeasesByAssetID",
+            "cleanupLeaseWaitersByAssetID",
+            "waitForCleanupLeaseRelease",
+            "waitForInboundRecordWaiter",
+            "inboundRecordWaiterIDs",
+            "String: [UUID: CheckedContinuation<Void, Error>]",
+            "cleanupLeaseWaitersByAssetID[canonicalID]?.isEmpty != false",
+            "cleanupLeasesByAssetID[canonicalID] == lease.leaseID",
+            "withTaskCancellationHandler",
+            "waiterID: UUID",
+            "cancelInboundRecordWaiter",
+            "removeValue(forKey: waiterID)",
+            "continuation.resume(throwing: CancellationError())",
+            "try await waitForCleanupLeaseRelease(\n                for: canonicalID,\n                waiterID: waiterID\n            )\n            try Task.checkCancellation()",
+            "waiter.resume(returning: ())",
+            "accountAssetIDs",
+            "unresolvedAssetIDs",
+            "quarantinedIntents",
+            "accountIdentityHint",
+            "lastVerifiedAccountIdentity",
+            "quarantineIdentityHint",
+            "static let currentSchemaVersion = 3",
+            "state.intents[index].quarantineIdentityHint == accountIdentity",
+            "forAccountIdentity accountIdentity: String",
+            "unresolvedDeletionAssetIDs",
+            "JSONDecoder().decode([String].self",
+            "if let activeAccountIdentity {",
+            "accountIdentity: activeAccountIdentity",
+            "public actor DirectCloudPhotoAssetInboundApplier",
+            "activeInboundApplyLeases",
+            "activeInboundApplyLeases[lease.leaseID] = lease",
+            "guard activeInboundApplyLeases[lease.leaseID] == lease else",
+            "activeInboundApplyLeases.removeValue(forKey: lease.leaseID)",
+            "public func prepareInboundApply(",
+            "public func commitInboundApply(",
+            "public func cancelInboundApply(",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudKitPrivatePhotoAssetDatabase.swift": "\n".join(
+        [
+            "@preconcurrency import CloudKit",
+            "public actor CloudKitPrivatePhotoAssetDatabase",
+            "privateCloudDatabase",
+            "CKRecordZone",
+            "CKAsset(fileURL:",
+            "recordZoneChanges(",
+            "CKServerChangeToken",
+            "requiringSecureCoding: true",
+            "retryAfterSeconds",
+            "downloadStore.stageDownload(",
+            "accountIdentityProvider.accountIdentity()",
+            "let owned = try withExtendedLifetime(record) {",
+            "lifetimeOwner: asset",
+            "record.hasUsableBinaryAsset else { return nil }",
+            "CloudPhotoAssetSystemRecord(",
+            "CloudKitPhotoAssetRecordMapper.systemRecord(from: record)",
+            "enum CloudKitPhotoAssetRecordMapper",
+            "static func systemRecord(",
+            "from record: CKRecord",
+            "private static func hasUsableBinaryAsset(in record: CKRecord) -> Bool",
+            'record["asset"] as? CKAsset',
+            "fileURL.isFileURL",
+            "resourceValues.isRegularFile == true",
+            "resourceValues.isReadable == true",
+            "CloudKitPhotoAssetRecordModifying",
+            "CloudKitPhotoAssetRecordModifyResults",
+            "CloudKitPhotoAssetRecordSaver",
+            "recordModifier.modifyRecords(",
+            "savePolicy: .changedKeys",
+            "atomically: true",
+            "saveResults[record.recordID]",
+            "deleteResults.isEmpty",
+            "try recordResult.get()",
+            "CloudKitPhotoAssetRecordMapper.uploadRecord(",
+            "database.modifyRecords(",
+            "withExtendedLifetime(record)",
+            "defer { withExtendedLifetime(record) {} }",
+            'record["assetID"]',
+            'record["asset"]',
+            'record["checksum"]',
+            'record["byteCount"]',
         ]
     ),
     "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Gallery/ProgressPhotoGalleryViewModel.swift": " ".join(
@@ -3246,6 +5222,58 @@ fixture_files = {
             "pendingCleanup.insert(row.snapshot.imageRef)",
             "public func fullImage(assetID:",
             "variant: .full",
+            "deletionIntentStore",
+            "recordCommittedDeletion",
+            "clearCommittedDeletion",
+            "let deletionIntent: CloudPhotoAssetDeletionIntentReceipt",
+            "clearCommittedDeletion(deletionIntent)",
+            "clearCommittedDeletion(deletionIntent)",
+            "inboundAssetJournal",
+            "pendingInboundAssetIDs",
+            "CloudPhotoAssetInboundApplying",
+            "inboundAssetStore",
+            "activeInboundApplyLease",
+            "public func prepareInboundApply(",
+            "await acquireExclusiveOperation()",
+            "hasCommittedLocalDeletionIntent(assetID: assetID)",
+            "releaseExclusiveOperation()",
+            "releaseExclusiveOperation()",
+            "return .discardedCommittedDeletion",
+            "activeInboundApplyLease = lease",
+            "return .prepared(lease)",
+            "public func commitInboundApply(",
+            "guard activeInboundApplyLease == lease else",
+            "defer { releaseInboundApplyLease(lease) }",
+            "inboundAssetJournal.recordInboundAssetID(lease.assetID)",
+            "try Task.checkCancellation()",
+            "inboundAssetStore.restoreCloudAsset(id: lease.assetID, bytes: bytes)",
+            "public func cancelInboundApply(",
+            "guard activeInboundApplyLease == lease else { return }",
+            "releaseInboundApplyLease(lease)",
+            "private func releaseInboundApplyLease(",
+            "guard activeInboundApplyLease == lease else { return }",
+            "activeInboundApplyLease = nil",
+            "public func fetchPhotos()",
+            "deleteAssetIfNotInbound",
+            "deleteAssetIfNotInbound(assetID)",
+            "deleteAssetIfNotInbound(assetID)",
+            "acquireCleanupLease(for: assetID)",
+            "releaseCleanupLease(lease)",
+            "releaseCleanupLease(lease)",
+            "public func snapshot() async throws -> CloudPhotoAssetReferenceSnapshot {",
+            "reconcileAssetStorageIfNeeded(rows: rows)",
+            "public func deletePhoto",
+            "public func retryPendingAssetCleanup() async throws {",
+            "let freshPendingInboundAssetIDs = try await loadPendingInboundAssetIDsFailClosed()",
+            "freshPendingInboundAssetIDs.contains(assetID)",
+            "private func reconcileAssetStorageIfNeeded",
+            "let pendingInboundAssetIDs = try await loadPendingInboundAssetIDsFailClosed()",
+            "guard !hasReconciledAssetStorage else { return }",
+            "let freshPendingInboundAssetIDs = try await loadPendingInboundAssetIDsFailClosed()",
+            "freshPendingInboundAssetIDs.contains(assetID)",
+            "private func loadPendingInboundAssetIDsFailClosed",
+            "pendingInboundAssetIDs()",
+            "private func recordPendingCleanup",
         ]
     ),
     "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Resources/Localizable.xcstrings": " ".join(
@@ -3387,6 +5415,1480 @@ with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     make_fixture(root)
     run(root)
+
+    autoclosure_repository_tests = root / (
+        "Packages/HealthTrackingModules/Tests/PersistenceKitTests/"
+        "ProgressPhotoRepositoryTests.swift"
+    )
+    original_autoclosure_repository_tests = autoclosure_repository_tests.read_text(
+        encoding="utf-8"
+    )
+    autoclosure_repository_tests.write_text(
+        original_autoclosure_repository_tests
+        + "\nfunc invalidAsyncAutoclosure() async throws {\n"
+        + "    _ = try XCTUnwrap(\n"
+        + "        try await inboundJournal.acquireCleanupLease(for: assetID)\n"
+        + "    )\n"
+        + "}\n",
+        encoding="utf-8",
+    )
+    run(root, "M3.9 XCTest autoclosures must evaluate async values first")
+    autoclosure_repository_tests.write_text(
+        original_autoclosure_repository_tests,
+        encoding="utf-8",
+    )
+
+    cloud_domain = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetDomain.swift"
+    original_cloud_domain = cloud_domain.read_text(encoding="utf-8")
+    cloud_domain.write_text(
+        original_cloud_domain.replace('"byteCount"', '"pose"', 1),
+        encoding="utf-8",
+    )
+    run(root, "CKAsset record field allowlist changed")
+    cloud_domain.write_text(original_cloud_domain, encoding="utf-8")
+
+    cloud_adapter = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudKitPrivatePhotoAssetDatabase.swift"
+    original_cloud_adapter = cloud_adapter.read_text(encoding="utf-8")
+    cloud_adapter.write_text(
+        original_cloud_adapter.replace('record["byteCount"]', 'record["note"]', 1),
+        encoding="utf-8",
+    )
+    run(root, "CloudKit adapter persisted an unexpected field")
+    cloud_adapter.write_text(original_cloud_adapter, encoding="utf-8")
+
+    cloud_contract_tests = root / "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudPhotoAssetContractTests.swift"
+    original_cloud_contract_tests = cloud_contract_tests.read_text(encoding="utf-8")
+    cloud_contract_tests.write_text(
+        original_cloud_contract_tests.replace(
+            "testAdapterStagesDownloadIntoOwnedStorageBeforeSystemSourceDisappears",
+            "ownedDownloadRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testAdapterStagesDownloadIntoOwnedStorageBeforeSystemSourceDisappears")
+    cloud_contract_tests.write_text(original_cloud_contract_tests, encoding="utf-8")
+
+    cloud_contract_tests.write_text(
+        original_cloud_contract_tests.replace(
+            "testRealBoundedStagerLimitsReadRequestsAndNeverWritesMaximumPlusOneByte",
+            "realBoundedStagerRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testRealBoundedStagerLimitsReadRequestsAndNeverWritesMaximumPlusOneByte")
+    cloud_contract_tests.write_text(original_cloud_contract_tests, encoding="utf-8")
+
+    for close_regression in (
+        "testDownloadStagingDeletesOutputAndClosesReaderWhenWriterCloseFails",
+        "XCTAssertEqual(snapshot.closeCallCount, 2)",
+    ):
+        cloud_contract_tests.write_text(
+            original_cloud_contract_tests.replace(
+                close_regression,
+                "writerCloseRegressionRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, close_regression)
+        cloud_contract_tests.write_text(
+            original_cloud_contract_tests,
+            encoding="utf-8",
+        )
+
+    for ownership_evidence in (
+        "CocoaError.Code.fileReadNoPermission.rawValue",
+        "nestedUnrelated",
+        "unrelatedAsset",
+        "symlinkTarget",
+    ):
+        cloud_contract_tests.write_text(
+            original_cloud_contract_tests.replace(
+                ownership_evidence,
+                "ownershipEvidenceRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, ownership_evidence)
+        cloud_contract_tests.write_text(
+            original_cloud_contract_tests,
+            encoding="utf-8",
+        )
+
+    for scoped_intent_regression in (
+        "testDeletionIntentStoreSerializesAccountTransitionAndPersistsEveryScope",
+        "testLegacyDeletionIntentSetMovesToQuarantineWithoutAuthorizingCurrentAccount",
+        "testDeletionIntentStoreRecreationPromotesOnlyMatchingVerifiedAccountHint",
+        "testExactIntentReceiptSurvivesPromotionAndDoesNotClearSameAssetABA",
+        "testStaleAccountResolutionCannotAuthorizeAfterNewerEpochBegins",
+        "testDeletionIntentStoreMigratesV1AndRejectsUnknownSchemaFailClosed",
+        "receipt1.intentID",
+        "receipt2.intentID",
+        "pendingAfterFirstClear",
+        "staleResolution",
+        "newerResolution",
+        "catch is CancellationError",
+        "quarantineUnderB",
+        "A consumed resolution epoch must never authorize a second account.",
+        "receiptAfterResolutionReuse.accountIdentity",
+        "quarantineIdentityHint",
+        "lastVerifiedAccountIdentity",
+        "quarantinedIntents",
+        "unresolvedDeletionAssetIDs",
+        "forAccountIdentity:",
+    ):
+        cloud_contract_tests.write_text(
+            original_cloud_contract_tests.replace(
+                scoped_intent_regression,
+                "scopedIntentRegressionRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, scoped_intent_regression)
+        cloud_contract_tests.write_text(
+            original_cloud_contract_tests,
+            encoding="utf-8",
+        )
+
+    cloud_coordinator_tests = root / "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudPhotoAssetCoordinatorTests.swift"
+    original_cloud_coordinator_tests = cloud_coordinator_tests.read_text(encoding="utf-8")
+    for local_repair_regression in (
+        "testCorruptFullVariantWithPhysicalDirectoryReplaysNilTokenAndRepairsWithoutUpload",
+        "testMissingThumbnailWithPhysicalDirectoryReplaysNilTokenAndRepairsWithoutUpload",
+        "let localStore = LocalPhotoAssetStore(",
+        "CloudRepairPhotoAssetFileSystem",
+        "try Data([0xff]).write(to: fullURL, options: .atomic)",
+        "try FileManager.default.removeItem(at: thumbnailURL)",
+        "let physicalBeforeRepair = try await localStore.storedAssetIDs()",
+        "let usableBeforeRepair = try await localStore.usableCloudAssetIDs()",
+        "NilTokenOnlyRepairCloudPhotoAssetDatabase",
+        "guard previousToken == nil else",
+        "databaseSnapshot.changeTokens, [nil, repairedChangeToken]",
+        "databaseSnapshot.nilTokenRepairResponseCount, 1",
+        "pendingUploadAssetIDs: [assetID]",
+        "databaseSnapshot.saveRequests.isEmpty",
+        "databaseSnapshot.deleteRequests.isEmpty",
+        "repairedFull, .available(Data([0x10]))",
+        "repairedThumbnail, .available(Data([0x20]))",
+        "physicalAfterRepair, [assetID]",
+        "usableAfterRepair, [assetID]",
+        "firstState, finalState",
+    ):
+        cloud_coordinator_tests.write_text(
+            original_cloud_coordinator_tests.replace(
+                local_repair_regression,
+                "localRepairRegressionRemoved",
+            ),
+            encoding="utf-8",
+        )
+        run(root, local_repair_regression)
+        cloud_coordinator_tests.write_text(
+            original_cloud_coordinator_tests,
+            encoding="utf-8",
+        )
+    cloud_coordinator_tests.write_text(
+        original_cloud_coordinator_tests.replace(
+            "testReferencedMissingAssetRestoresFromCloudWithoutInferringDeletion",
+            "referencedMissingRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testReferencedMissingAssetRestoresFromCloudWithoutInferringDeletion")
+    cloud_coordinator_tests.write_text(original_cloud_coordinator_tests, encoding="utf-8")
+
+    cloud_coordinator_tests.write_text(
+        original_cloud_coordinator_tests.replace(
+            "testReferencedMetadataNeutralizesStaleDeletionIntentWithoutDeletingCloudAsset",
+            "staleReferencedDeletionRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(
+        root,
+        "testReferencedMetadataNeutralizesStaleDeletionIntentWithoutDeletingCloudAsset",
+    )
+    cloud_coordinator_tests.write_text(original_cloud_coordinator_tests, encoding="utf-8")
+
+    for exact_neutralization_regression in (
+        "testReferencedSnapshotNeutralizesOnlyObservedIntentAcrossSameAssetABA",
+        "observedStaleIntent",
+        "replacementIntent",
+        "XCTAssertEqual(remainingIntents.map",
+        "retrySnapshot.deleteRequests",
+        "intentsAfterRetry.isEmpty",
+        "stateAfterRetry.pendingDeletionAssetIDs.isEmpty",
+    ):
+        cloud_coordinator_tests.write_text(
+            original_cloud_coordinator_tests.replace(
+                exact_neutralization_regression,
+                "exactNeutralizationRegressionRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, exact_neutralization_regression)
+        cloud_coordinator_tests.write_text(
+            original_cloud_coordinator_tests,
+            encoding="utf-8",
+        )
+
+    cloud_coordinator_tests.write_text(
+        original_cloud_coordinator_tests.replace(
+            "testStateOnlyDeletionQueueCannotAuthorizeServerDeletion",
+            "stateOnlyDeletionAuthorityRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testStateOnlyDeletionQueueCannotAuthorizeServerDeletion")
+    cloud_coordinator_tests.write_text(original_cloud_coordinator_tests, encoding="utf-8")
+
+    for concurrency_regression in (
+        "testCancelledSynchronizationCleansOwnedPageDiscardedAfterSuspendedFetch",
+        "testIntentCommittedAfterReadIsNotClearedAgainstOlderReferenceSnapshot",
+        "pendingAfterFirst",
+    ):
+        cloud_coordinator_tests.write_text(
+            original_cloud_coordinator_tests.replace(
+                concurrency_regression,
+                "cloudConcurrencyRegressionRemoved",
+            ),
+            encoding="utf-8",
+        )
+        run(root, concurrency_regression)
+        cloud_coordinator_tests.write_text(
+            original_cloud_coordinator_tests,
+            encoding="utf-8",
+        )
+
+    for account_reset_regression in (
+        "testAccountResetLoadsCurrentScopeAndPreservesOldAccountQueue",
+        "testAccountTransitionProcessesOnlyCurrentScopeAndPreservesOldAndUnresolvedIntents",
+        "testVerifiedAccountOfflineDeletionSurvivesFailureAndRelaunchRetry",
+        "testDeferredAccountTransitionQuarantinesOldHintUntilMatchingAccountReturns",
+        "postCancellationReceipt.quarantineIdentityHint",
+        "postFailureReceipt.quarantineIdentityHint",
+        "oldAccountIDs",
+        "unresolvedIDs",
+    ):
+        cloud_coordinator_tests.write_text(
+            original_cloud_coordinator_tests.replace(
+                account_reset_regression,
+                "accountResetOrderingRegressionRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, account_reset_regression)
+        cloud_coordinator_tests.write_text(
+            original_cloud_coordinator_tests,
+            encoding="utf-8",
+        )
+
+    cloud_coordinator_tests.write_text(
+        original_cloud_coordinator_tests.replace(
+            "try await coordinator.synchronize()",
+            "try await coordinator.synchronize(snapshot: fixture)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "try await coordinator.synchronize()")
+    cloud_coordinator_tests.write_text(original_cloud_coordinator_tests, encoding="utf-8")
+
+    gallery_tests = root / "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/ProgressPhotoGalleryViewModelTests.swift"
+    original_gallery_tests = gallery_tests.read_text(encoding="utf-8")
+    gallery_tests.write_text(
+        original_gallery_tests.replace(
+            "testSuccessfulSyncReloadsExactMissingAndCorruptGalleryStatesInOpenLifecycle",
+            "openLifecycleSyncRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testSuccessfulSyncReloadsExactMissingAndCorruptGalleryStatesInOpenLifecycle")
+    gallery_tests.write_text(original_gallery_tests, encoding="utf-8")
+
+    photo_repository_tests = root / "Packages/HealthTrackingModules/Tests/PersistenceKitTests/ProgressPhotoRepositoryTests.swift"
+    original_photo_repository_tests = photo_repository_tests.read_text(encoding="utf-8")
+    photo_repository_tests.write_text(
+        original_photo_repository_tests.replace(
+            "testInboundCloudAssetSurvivesCoordinatorRestoreCrashAndRepositoryRelaunch",
+            "inboundCrashHandshakeRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testInboundCloudAssetSurvivesCoordinatorRestoreCrashAndRepositoryRelaunch")
+    photo_repository_tests.write_text(original_photo_repository_tests, encoding="utf-8")
+
+    for regression in (
+        "testSuccessfulInboundSyncRetainsIntentUntilMetadataReferencesAsset",
+        "testRepositoryConsumesOnlyInboundIDsMatchedByMetadataAcrossRelaunches",
+        "testSnapshotReconcilesInboundOwnershipArrivingAfterInitialFetchPerID",
+        "testInboundApplyFinishesBeforeQueuedDeleteAndFinalStateRemainsDeleted",
+        "testRepositoryInboundApplyWithoutCommittedDeletionPreservesAssetBeforeMetadata",
+        "testDeleteCommittedBeforeStaleChangedPageDiscardsInboundAndRetainsIntent",
+        "testStaleChangedPageCannotRestoreDeletionQuarantinedByNewerAccountResolution",
+        "testStaleGenerationCancelsPreparedInboundLeaseBeforeAnySideEffectAndRepositoryReacquires",
+        "testInboundPreparationLeaseRejectsABAAndReleasesAfterCancellation",
+        "PausingBeforeRecordCloudPhotoAssetDeletionIntentStore",
+        "ObservedCloudPhotoAssetInboundApplier",
+        "recordedReceipt.quarantineIdentityHint",
+        "durableText.contains(recordedReceipt.intentID.uuidString)",
+        "calls.commitLeaseAssetIDs.isEmpty",
+        "calls.cancelLeaseAssetIDs, [inboundID]",
+        "repository.cancelInboundApply(firstLease)",
+        "repository.commitInboundApply(secondLease",
+        "retryPreparation",
+        "inboundAssetStore: assetStore",
+        "inboundAssetApplier: repository",
+        "waitForFetchCall(1)",
+        "finishedWhileRestoreHeld",
+        "transfersAfterRace.isEmpty",
+        "pendingAfterDeferred, [assetID]",
+        "testInboundRestoreProtectsPreviouslyFailedOrphanFromCleanupRetry",
+        "testInitialOrphanSweepRereadsInboundOwnershipAtDeleteBoundary",
+        "testInboundJournalReadFailureStopsPendingCleanupRetryBeforeDelete",
+        "testCleanupRetryRechecksInboundOwnershipAfterEarlierAssetDeleteSuspends",
+        "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
+        "testCancelledInboundRecordRemovesExactWaiterAndAllowsLaterCleanupLease",
+        "waitForInboundRecordWaiter",
+        "inboundRecordWaiterIDs",
+        "A cancelled inbound record must finish before lease release.",
+        "waitersAfterCancellation.isEmpty",
+        "pendingBeforeLeaseRelease.isEmpty",
+        "laterLease",
+        "testMetadataDeleteSaveFailureNeverCreatesCloudDeletionIntent",
+        "testCompensatedLocalDeleteFailureClearsCloudIntentBeforeReturning",
+        "testCompensationClearsExactHintedIntentPromotedWhileReceiptIsPaused",
+        "PausingAfterRecordCloudPhotoAssetDeletionIntentStore",
+        "scopedAfterCompensation.isEmpty",
+        "quarantineAfterCompensation.isEmpty",
+    ):
+        photo_repository_tests.write_text(
+            original_photo_repository_tests.replace(
+                regression,
+                "roundTwoRegressionRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, regression)
+        photo_repository_tests.write_text(
+            original_photo_repository_tests,
+            encoding="utf-8",
+        )
+
+    for required_evidence, weakened_evidence in (
+        (
+            "XCTAssertEqual(intentCalls.recordCalls, [])",
+            "XCTAssertEqual(intentCalls.recordCalls, [assetID])",
+        ),
+        (
+            "XCTAssertEqual(intentCalls.clearCalls, [])",
+            "XCTAssertEqual(intentCalls.clearCalls, [assetID])",
+        ),
+        (
+            "let persistedContext = ModelContext(container)",
+            "let persistedContext = context",
+        ),
+        (
+            "pendingAfterA, [assetB]",
+            "pendingAfterA, []",
+        ),
+        (
+            "pendingAfterARelaunch, [assetB]",
+            "pendingAfterARelaunch, []",
+        ),
+        (
+            "cloudAssets[assetB], bytesB",
+            "cloudAssets[assetB], Data()",
+        ),
+        (
+            "snapshotAfterA",
+            "snapshotEvidenceRemoved",
+        ),
+    ):
+        photo_repository_tests.write_text(
+            original_photo_repository_tests.replace(
+                required_evidence,
+                weakened_evidence,
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, required_evidence)
+        photo_repository_tests.write_text(
+            original_photo_repository_tests,
+            encoding="utf-8",
+        )
+
+    quality_domain = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetDomain.swift"
+    original_quality_domain = quality_domain.read_text(encoding="utf-8")
+    quality_domain.write_text(
+        original_quality_domain.replace(
+            "func usableCloudAssetIDs()",
+            "func physicalInventoryMistakenForUsableAvailability()",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 local cloud store must separate physical inventory from usable availability")
+    quality_domain.write_text(original_quality_domain, encoding="utf-8")
+
+    quality_local_store = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/AssetStore/LocalPhotoAssetStore.swift"
+    original_quality_local_store = quality_local_store.read_text(encoding="utf-8")
+    for safe_load, forced_load in (
+        (
+            "let full = try await loadAsset(id: assetID, variant: .full)",
+            "let full = try! await loadAsset(id: assetID, variant: .full)",
+        ),
+        (
+            "let thumbnail = try await loadAsset(id: assetID, variant: .thumbnail)",
+            "let thumbnail = try! await loadAsset(id: assetID, variant: .thumbnail)",
+        ),
+    ):
+        quality_local_store.write_text(
+            original_quality_local_store.replace(safe_load, forced_load, 1),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 usable availability must propagate load errors without force-try")
+        quality_local_store.write_text(
+            original_quality_local_store,
+            encoding="utf-8",
+        )
+    for usable_inventory_contract in (
+        "let physicalAssetIDs = try await storedAssetIDs()",
+        "for assetID in physicalAssetIDs.sorted()",
+        "loadAsset(id: assetID, variant: .full)",
+        "guard case .available = full else { continue }",
+        "loadAsset(id: assetID, variant: .thumbnail)",
+        "guard case .available = thumbnail else { continue }",
+        "usableAssetIDs.insert(assetID)",
+        "return usableAssetIDs",
+    ):
+        quality_local_store.write_text(
+            original_quality_local_store.replace(
+                usable_inventory_contract,
+                "usableInventoryContractRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 real local store must validate full and thumbnail")
+        quality_local_store.write_text(
+            original_quality_local_store,
+            encoding="utf-8",
+        )
+    quality_local_store.write_text(
+        original_quality_local_store.replace(
+            "return usableAssetIDs",
+            "try? ignoredAvailabilityError()\n        return usableAssetIDs",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 usable availability must fail closed")
+    quality_local_store.write_text(original_quality_local_store, encoding="utf-8")
+
+    for lease_contract in (
+        "CloudPhotoAssetInboundCleanupLease",
+        "acquireCleanupLease(for assetID: String)",
+        "releaseCleanupLease(_ lease: CloudPhotoAssetInboundCleanupLease)",
+    ):
+        quality_domain.write_text(
+            original_quality_domain.replace(
+                lease_contract,
+                "atomicInboundLeaseContractRemoved",
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 inbound cleanup journal is missing atomic lease contract")
+        quality_domain.write_text(original_quality_domain, encoding="utf-8")
+
+    for inbound_apply_contract in (
+        "CloudPhotoAssetInboundApplyLease",
+        "CloudPhotoAssetInboundApplyPreparation",
+        "case prepared(CloudPhotoAssetInboundApplyLease)",
+        "case discardedCommittedDeletion",
+        "CloudPhotoAssetInboundApplying",
+        "func prepareInboundApply(",
+        "func commitInboundApply(",
+        "func cancelInboundApply(",
+    ):
+        quality_domain.write_text(
+            original_quality_domain.replace(
+                inbound_apply_contract,
+                "serializedInboundApplyContractRemoved",
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 domain is missing serialized inbound apply contract")
+        quality_domain.write_text(original_quality_domain, encoding="utf-8")
+
+    for inbound_signature_contract in (
+        "id assetID: String",
+        "bytes: Data",
+        "async throws -> CloudPhotoAssetInboundApplyPreparation",
+        "_ lease: CloudPhotoAssetInboundApplyLease",
+    ):
+        quality_domain.write_text(
+            original_quality_domain.replace(
+                inbound_signature_contract,
+                "serializedInboundApplySignatureRemoved",
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 domain is missing serialized inbound apply signature")
+        quality_domain.write_text(original_quality_domain, encoding="utf-8")
+
+    quality_domain.write_text(
+        original_quality_domain.replace(
+            "forAccountIdentity accountIdentity: String",
+            "serializedInboundAccountIdentityRemoved",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 deletion intent protocol is missing account scope")
+    quality_domain.write_text(original_quality_domain, encoding="utf-8")
+
+    for account_authorization_contract in (
+        "CloudPhotoAssetAccountAuthorization",
+        "CloudPhotoAssetAccountResolution",
+        "quarantineIdentityHint",
+        "beginAccountResolution()",
+        "resolution: CloudPhotoAssetAccountResolution",
+        "pendingDeletionIntents(",
+        "async throws -> [CloudPhotoAssetDeletionIntentReceipt]",
+        "hasCommittedLocalDeletionIntent(assetID: String)",
+    ):
+        quality_domain.write_text(
+            original_quality_domain.replace(
+                account_authorization_contract,
+                "boundedAccountAuthorizationContractRemoved",
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 deletion intent protocol is missing account scope")
+        quality_domain.write_text(original_quality_domain, encoding="utf-8")
+
+    quality_coordinator = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetCoordinator.swift"
+    original_quality_coordinator = quality_coordinator.read_text(encoding="utf-8")
+    for usable_reconcile_contract, expected_failure in (
+        (
+            "let usableLocalAssetIDs = try await localStore.usableCloudAssetIDs()",
+            "M3.9 coordinator must reconcile complete usable availability",
+        ),
+        (
+            "try validate(assetIDs: usableLocalAssetIDs)",
+            "M3.9 coordinator must reconcile complete usable availability",
+        ),
+        (
+            "reconcile(usableLocalAssetIDs: usableLocalAssetIDs,",
+            "M3.9 coordinator must reconcile complete usable availability",
+        ),
+        (
+            "let referencedUsable = usableLocalAssetIDs.intersection(referencedAssetIDs)",
+            "M3.9 incomplete uploaded assets must replay from nil without upload",
+        ),
+        (
+            ".intersection(referencedUsable)",
+            "M3.9 incomplete uploaded assets must replay from nil without upload",
+        ),
+        (
+            ".union(referencedUsable.subtracting(uploaded))",
+            "M3.9 incomplete uploaded assets must replay from nil without upload",
+        ),
+        (
+            ".subtracting(usableLocalAssetIDs)",
+            "M3.9 incomplete uploaded assets must replay from nil without upload",
+        ),
+    ):
+        quality_coordinator.write_text(
+            original_quality_coordinator.replace(
+                usable_reconcile_contract,
+                "usableReconcileContractRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, expected_failure)
+        quality_coordinator.write_text(
+            original_quality_coordinator,
+            encoding="utf-8",
+        )
+    quality_coordinator.write_text(
+        original_quality_coordinator.replace(
+            "localStore.usableCloudAssetIDs()",
+            "localStore.storedAssetIDs()",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 coordinator must not treat physical inventory as usable availability")
+    quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+
+    for inbound_coordinator_contract, expected_failure in (
+        (
+            "inboundAssetApplier: any CloudPhotoAssetInboundApplying",
+            "M3.9 coordinator must require an explicit inbound applier",
+        ),
+        (
+            "inboundAssetApplier.prepareInboundApply(",
+            "M3.9 shipped no-argument sync is missing injected quality contract",
+        ),
+        (
+            "inboundAssetApplier.commitInboundApply(",
+            "M3.9 shipped no-argument sync is missing injected quality contract",
+        ),
+        (
+            "inboundAssetApplier.cancelInboundApply(",
+            "M3.9 shipped no-argument sync is missing injected quality contract",
+        ),
+        (
+            "case .discardedCommittedDeletion:",
+            "M3.9 shipped no-argument sync is missing injected quality contract",
+        ),
+    ):
+        quality_coordinator.write_text(
+            original_quality_coordinator.replace(
+                inbound_coordinator_contract,
+                "serializedInboundCoordinatorContractRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, expected_failure)
+        quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+
+    quality_coordinator.write_text(
+        original_quality_coordinator.replace(
+            "case .discardedCommittedDeletion:\n            return",
+            "case .discardedCommittedDeletion:\n            break",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 discarded committed deletion must not mutate uploaded/deletion state")
+    quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+    quality_coordinator.write_text(
+        original_quality_coordinator.replace(
+            "try ensureCurrent(generation)",
+            "preparedInboundGenerationCheckRemoved",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 coordinator must generation-check and exact-cancel a prepared inbound lease")
+    quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+    for coordinator_authorization_contract, expected_failure in (
+        (
+            "let accountResolution = await deletionIntentStore.beginAccountResolution()",
+            "M3.9 shipped no-argument sync is missing injected quality contract",
+        ),
+        (
+            "resolution: accountResolution",
+            "M3.9 shipped no-argument sync is missing injected quality contract",
+        ),
+        (
+            "let accountAuthorization = try await deletionIntentStore.activateAccountIdentity(",
+            "M3.9 shipped no-argument sync is missing injected quality contract",
+        ),
+        (
+            "await deletionIntentStore.suspendAccountAuthorization(accountAuthorization)",
+            "M3.9 coordinator must close bounded account authorization on success and failure",
+        ),
+    ):
+        quality_coordinator.write_text(
+            original_quality_coordinator.replace(
+                coordinator_authorization_contract,
+                "boundedAccountAuthorizationRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, expected_failure)
+        quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+
+    quality_coordinator.write_text(
+        original_quality_coordinator.replace(
+            "public func synchronize()",
+            "public func synchronize(snapshot:)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 shipped no-argument sync is missing injected quality contract")
+    quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+
+    quality_coordinator.write_text(
+        original_quality_coordinator.replace(
+            "let deletions = committedDeletionIDs",
+            "let deletions = Set(state.pendingDeletionAssetIDs).union(committedDeletionIDs)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 shipped no-argument sync is missing injected quality contract")
+    quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+
+    quality_coordinator.write_text(
+        original_quality_coordinator.replace(
+            "let referencedDeletionIDs = Set(referencedDeletionIntents.map(\\.assetID))",
+            "let referencedDeletionIDs = Set(state.pendingDeletionAssetIDs)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 shipped no-argument sync is missing injected quality contract")
+    quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+
+    for exact_neutralization_contract in (
+        "let referencedDeletionIntents = committedDeletionIntents.filter",
+        "clearCommittedDeletion(intent)",
+        "let referencedDeletionIDs = Set(referencedDeletionIntents.map(\\.assetID))",
+    ):
+        quality_coordinator.write_text(
+            original_quality_coordinator.replace(
+                exact_neutralization_contract,
+                "exactObservedNeutralizationRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 shipped no-argument sync is missing injected quality contract")
+        quality_coordinator.write_text(
+            original_quality_coordinator,
+            encoding="utf-8",
+        )
+
+    quality_coordinator.write_text(
+        original_quality_coordinator.replace(
+            "clearCommittedDeletion(\n                assetID: assetID,",
+            "clearCommittedDeletion(intent)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(
+        root,
+        "M3.9 confirmed remote deletion must clear all matching current-account intents",
+    )
+    quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+
+    quality_coordinator.write_text(
+        original_quality_coordinator.replace(
+            "onDiscard: { [temporaryStore = self.temporaryStore] page in",
+            "onDiscard: { _ in",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 shipped no-argument sync is missing injected quality contract")
+    quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+
+    quality_coordinator.write_text(
+        original_quality_coordinator.replace(
+            "try validate(state: state)",
+            "resolution: accountResolution try validate(state: state)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 account transition must validate state and activate the current scope")
+    quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+
+    quality_coordinator.write_text(
+        original_quality_coordinator.replace(
+            "resolution: accountResolution",
+            "clearAllCommittedDeletions()",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 shipped no-argument sync is missing injected quality contract")
+    quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+
+    quality_coordinator.write_text(
+        original_quality_coordinator.replace(
+            "pendingDeletionIntents(forAccountIdentity: accountIdentity)",
+            "await referenceSnapshotProvider.snapshot() pendingDeletionIntents(forAccountIdentity: accountIdentity)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 coordinator must snapshot committed deletions before references")
+    quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+
+    quality_repository = root / "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataProgressPhotoRepository.swift"
+    original_quality_repository = quality_repository.read_text(encoding="utf-8")
+    for inbound_repository_contract, expected_failure in (
+        (
+            "await acquireExclusiveOperation()",
+            "M3.9 repository is missing retained inbound preparation transaction",
+        ),
+        (
+            "hasCommittedLocalDeletionIntent(assetID: assetID)",
+            "M3.9 repository is missing retained inbound preparation transaction",
+        ),
+        (
+            "return .discardedCommittedDeletion",
+            "M3.9 repository is missing retained inbound preparation transaction",
+        ),
+        (
+            "releaseExclusiveOperation()",
+            "M3.9 repository preparation must retain the lock only for an exact prepared lease",
+        ),
+        (
+            "activeInboundApplyLease = lease",
+            "M3.9 repository is missing retained inbound preparation transaction",
+        ),
+        (
+            "return .prepared(lease)",
+            "M3.9 repository is missing retained inbound preparation transaction",
+        ),
+        (
+            "guard activeInboundApplyLease == lease else",
+            "M3.9 repository inbound commit must consume and release one exact lease",
+        ),
+        (
+            "defer { releaseInboundApplyLease(lease) }",
+            "M3.9 repository inbound commit must consume and release one exact lease",
+        ),
+        (
+            "inboundAssetJournal.recordInboundAssetID(lease.assetID)",
+            "M3.9 repository inbound commit must consume and release one exact lease",
+        ),
+        (
+            "try Task.checkCancellation()",
+            "M3.9 repository inbound commit must consume and release one exact lease",
+        ),
+        (
+            "inboundAssetStore.restoreCloudAsset(id: lease.assetID, bytes: bytes)",
+            "M3.9 repository inbound commit must consume and release one exact lease",
+        ),
+        (
+            "guard activeInboundApplyLease == lease else { return }",
+            "M3.9 stale inbound lease cancellation must not release a newer lease",
+        ),
+        (
+            "private func releaseInboundApplyLease(",
+            "M3.9 repository inbound lease release must be exact and reusable",
+        ),
+        (
+            "activeInboundApplyLease = nil",
+            "M3.9 repository inbound lease release must be exact and reusable",
+        ),
+    ):
+        quality_repository.write_text(
+            original_quality_repository.replace(
+                inbound_repository_contract,
+                "serializedInboundRepositoryContractRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, expected_failure)
+        quality_repository.write_text(original_quality_repository, encoding="utf-8")
+    for repository_lease_contract, expected_failure in (
+        (
+            "acquireCleanupLease(for: assetID)",
+            "M3.9 repository is missing atomic inbound-safe deletion",
+        ),
+        (
+            "releaseCleanupLease(lease)",
+            "M3.9 repository must release the inbound cleanup lease on success and failure",
+        ),
+        (
+            "deleteAssetIfNotInbound(assetID)",
+            "M3.9 retry and initial orphan sweep must share the atomic inbound-safe delete boundary",
+        ),
+    ):
+        quality_repository.write_text(
+            original_quality_repository.replace(
+                repository_lease_contract,
+                "atomicInboundDeletionContractRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, expected_failure)
+        quality_repository.write_text(original_quality_repository, encoding="utf-8")
+
+    quality_repository.write_text(
+        original_quality_repository.replace(
+            "recordCommittedDeletion",
+            "skipDurableCloudIntentRecord",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 repository is missing durable cloud handshake contract")
+    quality_repository.write_text(original_quality_repository, encoding="utf-8")
+
+    quality_repository.write_text(
+        original_quality_repository.replace(
+            "clearCommittedDeletion(deletionIntent)",
+            "clearCommittedDeletion(CloudPhotoAssetDeletionIntentReceipt(assetID: deletionIntent.assetID, accountIdentity: nil))",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 repository compensation must clear the exact recorded scoped receipt")
+    quality_repository.write_text(original_quality_repository, encoding="utf-8")
+
+    quality_repository.write_text(
+        original_quality_repository.replace(
+            "reconcileAssetStorageIfNeeded(rows: rows)",
+            "skipInboundSnapshotReconciliation(rows: rows)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 repository snapshot must reconcile inbound metadata ownership")
+    quality_repository.write_text(original_quality_repository, encoding="utf-8")
+
+    quality_repository.write_text(
+        original_quality_repository.replace(
+            "let pendingInboundAssetIDs = try await loadPendingInboundAssetIDsFailClosed() guard !hasReconciledAssetStorage else { return }",
+            "guard !hasReconciledAssetStorage else { return } let pendingInboundAssetIDs = try await loadPendingInboundAssetIDsFailClosed()",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 inbound ownership reconciliation must precede one-shot orphan sweep")
+    quality_repository.write_text(original_quality_repository, encoding="utf-8")
+
+    quality_repository.write_text(
+        original_quality_repository.replace(
+            "let freshPendingInboundAssetIDs = try await loadPendingInboundAssetIDsFailClosed()",
+            "let freshPendingInboundAssetIDs = Set<String>()",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 pending cleanup retry must reread and subtract fresh inbound ownership")
+    quality_repository.write_text(original_quality_repository, encoding="utf-8")
+
+    reconcile_boundary = original_quality_repository.rfind(
+        "let freshPendingInboundAssetIDs = try await loadPendingInboundAssetIDsFailClosed()"
+    )
+    if reconcile_boundary < 0:
+        raise SystemExit("M3.9 orphan-sweep inbound mutation fixture is missing")
+    quality_repository.write_text(
+        original_quality_repository[:reconcile_boundary]
+        + original_quality_repository[reconcile_boundary:].replace(
+            "let freshPendingInboundAssetIDs = try await loadPendingInboundAssetIDsFailClosed()",
+            "let freshPendingInboundAssetIDs = Set<String>()",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 orphan sweep must fail closed on a fresh inbound read at delete boundary")
+    quality_repository.write_text(original_quality_repository, encoding="utf-8")
+
+    quality_coordinator.write_text(
+        original_quality_coordinator.replace(
+            "temporaryStore.removeFile(at: record.stagedFileURL)",
+            "leaveAdapterOwnedTransferForRelaunch",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 shipped no-argument sync is missing injected quality contract")
+    quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+
+    quality_factory = root / "App/Application/TrackerFeatureBundle.swift"
+    original_quality_factory = quality_factory.read_text(encoding="utf-8")
+    for local_boundary in (
+        "guard case .cloud = environment else",
+        "NoOpCloudPhotoAssetDeletionIntentStore.shared",
+        "NoOpCloudPhotoAssetInboundJournal.shared",
+    ):
+        quality_factory.write_text(
+            original_quality_factory.replace(
+                local_boundary,
+                "unsafePersistentLocalCloudHandshake",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 local/UI composition must not persist cloud handshakes")
+        quality_factory.write_text(original_quality_factory, encoding="utf-8")
+
+    quality_factory.write_text(
+        original_quality_factory.replace(
+            "deletionIntentStore: deletionIntentStore",
+            "deletionIntentStore: isolatedDeletionIntentStore",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 repository and coordinator must receive the same provider")
+    quality_factory.write_text(original_quality_factory, encoding="utf-8")
+
+    quality_factory.write_text(
+        original_quality_factory.replace(
+            "inboundAssetJournal: inboundAssetJournal",
+            "inboundAssetJournal: isolatedInboundAssetJournal",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 repository must receive the one shared inbound journal")
+    quality_factory.write_text(original_quality_factory, encoding="utf-8")
+
+    for inbound_composition_contract in (
+        "inboundAssetStore: progressPhotoAssetStore",
+        "inboundAssetApplier: progressPhotoRepository",
+        "any CloudPhotoAssetReferenceSnapshotProviding & CloudPhotoAssetInboundApplying",
+    ):
+        quality_factory.write_text(
+            original_quality_factory.replace(
+                inbound_composition_contract,
+                "sharedInboundRepositoryCompositionRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 shipped composition must share one repository inbound transaction")
+        quality_factory.write_text(original_quality_factory, encoding="utf-8")
+
+    quality_factory.write_text(
+        original_quality_factory.replace(
+            "referenceSnapshotProvider: progressPhotoRepository",
+            "referenceSnapshotProvider: emptySnapshotProvider",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 shipped coordinator must receive the real repository snapshot provider")
+    quality_factory.write_text(original_quality_factory, encoding="utf-8")
+
+    quality_factory.write_text(
+        original_quality_factory.replace(
+            "downloadStore: cloudPhotoAssetTransferStore",
+            "downloadStore: isolatedAdapterTransferStore",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 adapter and coordinator must receive the same transfer store")
+    quality_factory.write_text(original_quality_factory, encoding="utf-8")
+
+    quality_factory.write_text(
+        original_quality_factory.replace(
+            "temporaryStore: cloudPhotoAssetTransferStore",
+            "temporaryStore: isolatedCoordinatorTransferStore",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 adapter and coordinator must receive the same transfer store")
+    quality_factory.write_text(original_quality_factory, encoding="utf-8")
+
+    quality_adapter = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudKitPrivatePhotoAssetDatabase.swift"
+    original_quality_adapter = quality_adapter.read_text(encoding="utf-8")
+    quality_adapter.write_text(
+        original_quality_adapter.replace(
+            "downloadStore.stageDownload(",
+            "coordinatorStagesDownload(",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 actual CloudKit adapter is missing ownership/account contract")
+    quality_adapter.write_text(original_quality_adapter, encoding="utf-8")
+
+    for lifetime_contract in (
+        "let owned = try withExtendedLifetime(record) {",
+        "lifetimeOwner: asset",
+    ):
+        quality_adapter.write_text(
+            original_quality_adapter.replace(
+                lifetime_contract,
+                "droppedSystemAssetLifetime",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 actual CloudKit adapter is missing ownership/account contract")
+        quality_adapter.write_text(original_quality_adapter, encoding="utf-8")
+
+    for binary_presence_contract in (
+        "record.hasUsableBinaryAsset else { return nil }",
+        "CloudKitPhotoAssetRecordMapper.systemRecord(from: record)",
+        "private static func hasUsableBinaryAsset(in record: CKRecord) -> Bool",
+        "resourceValues.isRegularFile == true",
+        "resourceValues.isReadable == true",
+    ):
+        quality_adapter.write_text(
+            original_quality_adapter.replace(
+                binary_presence_contract,
+                "binaryPresenceContractRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 actual adapter is missing CKAsset binary-presence repair gate")
+        quality_adapter.write_text(original_quality_adapter, encoding="utf-8")
+
+    for explicit_modify_contract in (
+        "CloudKitPhotoAssetRecordModifying",
+        "recordModifier.modifyRecords(",
+        "savePolicy: .changedKeys",
+        "atomically: true",
+        "saveResults[record.recordID]",
+        "deleteResults.isEmpty",
+        "try recordResult.get()",
+        "CloudKitPhotoAssetRecordMapper.uploadRecord(",
+        "database.modifyRecords(",
+        "defer { withExtendedLifetime(record) {} }",
+    ):
+        quality_adapter.write_text(
+            original_quality_adapter.replace(
+                explicit_modify_contract,
+                "explicitCloudKitRepairPolicyRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 CloudKit repair is missing explicit atomic changed-keys modify")
+        quality_adapter.write_text(original_quality_adapter, encoding="utf-8")
+
+    quality_adapter.write_text(
+        original_quality_adapter.replace(
+            "database.modifyRecords(",
+            "database.save(record)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 CloudKit repair is missing explicit atomic changed-keys modify")
+    quality_adapter.write_text(original_quality_adapter, encoding="utf-8")
+
+    quality_transfer_store = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/FileCloudPhotoAssetStores.swift"
+    original_quality_transfer_store = quality_transfer_store.read_text(encoding="utf-8")
+    for account_resolution_contract in (
+        "public func beginAccountResolution()",
+        "activeAccountAuthorization = nil",
+        "activeAccountResolutionID = resolution.resolutionID",
+        "guard activeAccountResolutionID == resolution.resolutionID else",
+        "activeAccountResolutionID = nil",
+        "throw CancellationError()",
+    ):
+        quality_transfer_store.write_text(
+            original_quality_transfer_store.replace(
+                account_resolution_contract,
+                "accountResolutionCASRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 account activation is missing resolution-epoch CAS")
+        quality_transfer_store.write_text(
+            original_quality_transfer_store,
+            encoding="utf-8",
+        )
+
+    for stable_intent_contract in (
+        "FileCloudPhotoAssetDeletionIntentRecord",
+        "static let currentSchemaVersion = 3",
+        "public func pendingDeletionIntents(",
+        "intent.accountIdentity == accountIdentity",
+        "intent.quarantineIdentityHint == nil",
+        "intentID: intent.intentID",
+        "intentID: UUID()",
+        "state.intents[index].accountIdentity = accountIdentity",
+        "state.intents[index].quarantineIdentityHint = nil",
+        "$0.intentID == intent.intentID",
+        "storedIntent.assetID == canonicalID",
+        "FileCloudPhotoAssetDeletionIntentV2State",
+    ):
+        quality_transfer_store.write_text(
+            original_quality_transfer_store.replace(
+                stable_intent_contract,
+                "stableIntentIdentityContractRemoved",
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 deletion receipts are missing stable exact intent identity")
+        quality_transfer_store.write_text(
+            original_quality_transfer_store,
+            encoding="utf-8",
+        )
+
+    for local_suppression_contract in (
+        "canonicalAssetID(assetID)",
+        "loadState()",
+        "state.intents.contains { $0.assetID == canonicalID }",
+    ):
+        quality_transfer_store.write_text(
+            original_quality_transfer_store.replace(
+                local_suppression_contract,
+                "allScopeLocalSuppressionRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 local suppression must inspect every persisted intent scope")
+        quality_transfer_store.write_text(
+            original_quality_transfer_store,
+            encoding="utf-8",
+        )
+
+    for direct_inbound_lease_contract in (
+        "activeInboundApplyLeases[lease.leaseID] = lease",
+        "guard activeInboundApplyLeases[lease.leaseID] == lease else",
+        "activeInboundApplyLeases.removeValue(forKey: lease.leaseID)",
+    ):
+        quality_transfer_store.write_text(
+            original_quality_transfer_store.replace(
+                direct_inbound_lease_contract,
+                "directInboundExactLeaseRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 direct inbound applier is missing exact two-phase lease semantics")
+        quality_transfer_store.write_text(
+            original_quality_transfer_store,
+            encoding="utf-8",
+        )
+
+    for journal_lease_contract in (
+        "cleanupLeaseWaitersByAssetID[canonicalID]?.isEmpty != false",
+        "cleanupLeasesByAssetID[canonicalID] == lease.leaseID",
+        "withTaskCancellationHandler",
+        "waiterID: UUID",
+        "cancelInboundRecordWaiter",
+        "removeValue(forKey: waiterID)",
+        "continuation.resume(throwing: CancellationError())",
+        "try await waitForCleanupLeaseRelease(\n                for: canonicalID,\n                waiterID: waiterID\n            )\n            try Task.checkCancellation()",
+        "waiter.resume(returning: ())",
+    ):
+        quality_transfer_store.write_text(
+            original_quality_transfer_store.replace(
+                journal_lease_contract,
+                "serializedInboundLeaseSemanticsRemoved",
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 file inbound journal is missing serialized cleanup lease")
+        quality_transfer_store.write_text(
+            original_quality_transfer_store,
+            encoding="utf-8",
+        )
+
+    for account_provenance_contract in (
+        "quarantinedIntents",
+        "accountIdentityHint",
+        "lastVerifiedAccountIdentity",
+        "state.intents[index].quarantineIdentityHint == accountIdentity",
+    ):
+        quality_transfer_store.write_text(
+            original_quality_transfer_store.replace(
+                account_provenance_contract,
+                "accountProvenanceContractRemoved",
+            ),
+            encoding="utf-8",
+        )
+        run(root, "M3.9 file deletion store is missing scoped/quarantine durability")
+        quality_transfer_store.write_text(
+            original_quality_transfer_store,
+            encoding="utf-8",
+        )
+
+    quality_transfer_store.write_text(
+        original_quality_transfer_store.replace("remaining + 1", "remaining", 1),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 download staging is missing bounded streaming primitive")
+    quality_transfer_store.write_text(original_quality_transfer_store, encoding="utf-8")
+
+    quality_transfer_store.write_text(
+        original_quality_transfer_store.replace(
+            "accountIdentity: activeAccountIdentity",
+            "accountIdentity: nil",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 file deletion store must serialize records into the exact active or legacy-quarantine scope")
+    quality_transfer_store.write_text(original_quality_transfer_store, encoding="utf-8")
+
+    quality_transfer_store.write_text(
+        original_quality_transfer_store.replace(
+            "fileHandleFactory",
+            "replacementCopier",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 download staging is missing bounded streaming primitive")
+    quality_transfer_store.write_text(original_quality_transfer_store, encoding="utf-8")
+
+    quality_transfer_store.write_text(
+        original_quality_transfer_store.replace(
+            "read(upToCount: remaining + 1)",
+            "readToEnd",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 download staging must not use unbounded I/O")
+    quality_transfer_store.write_text(original_quality_transfer_store, encoding="utf-8")
+
+    quality_transfer_store.write_text(
+        original_quality_transfer_store.replace(
+            "guard isOwned(url) else",
+            "guard true else",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 coordinator reads must retain the app-owned transfer boundary")
+    quality_transfer_store.write_text(original_quality_transfer_store, encoding="utf-8")
+
+    quality_transfer_store.write_text(
+        original_quality_transfer_store.replace(
+            "isCanonicalTransferFileName(",
+            "hasAssetSuffix(",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 canonical transfer ownership must gate both sweep and access")
+    quality_transfer_store.write_text(original_quality_transfer_store, encoding="utf-8")
+
+    quality_transfer_store.write_text(
+        original_quality_transfer_store.replace(
+            "try close(reader: reader, writer: writer)",
+            "try? close(reader: reader, writer: writer)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 validated staging must propagate writer/reader close failure")
+    quality_transfer_store.write_text(original_quality_transfer_store, encoding="utf-8")
+
+    quality_lifecycle = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Gallery/ProgressPhotoLifecycleView.swift"
+    original_quality_lifecycle = quality_lifecycle.read_text(encoding="utf-8")
+    quality_lifecycle.write_text(
+        original_quality_lifecycle.replace(
+            "await assetSyncLifecycle.synchronize()",
+            "await assetSynchronizer.synchronize()",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 shipped lifecycle view must delegate successful sync cache repair")
+    quality_lifecycle.write_text(original_quality_lifecycle, encoding="utf-8")
+
+    gallery_tests.write_text(
+        original_gallery_tests.replace(
+            "fullImageRequests.filter",
+            "comparisonReloadEvidenceRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "fullImageRequests.filter")
+    gallery_tests.write_text(original_gallery_tests, encoding="utf-8")
+
+    cloud_contract_tests.write_text(
+        original_cloud_contract_tests.replace(
+            "testLegacyUnscopedSyncStateRecreatesWithNilAccountIdentity",
+            "legacyIdentityRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testLegacyUnscopedSyncStateRecreatesWithNilAccountIdentity")
+    cloud_contract_tests.write_text(original_cloud_contract_tests, encoding="utf-8")
+
+    cloudkit_adapter_tests = root / "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudKitPrivatePhotoAssetDatabaseTests.swift"
+    original_cloudkit_adapter_tests = cloudkit_adapter_tests.read_text(encoding="utf-8")
+    cloudkit_adapter_tests.write_text(
+        original_cloudkit_adapter_tests.replace(
+            "testActualAdapterReturnsChangingOpaqueAccountIdentity",
+            "adapterIdentityRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testActualAdapterReturnsChangingOpaqueAccountIdentity")
+    cloudkit_adapter_tests.write_text(original_cloudkit_adapter_tests, encoding="utf-8")
+
+    cloudkit_adapter_tests.write_text(
+        original_cloudkit_adapter_tests.replace(
+            "testActualAdapterAndCoordinatorConsumeAndRemoveOneSharedOwnedTransfer",
+            "sharedTransferIntegrationRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testActualAdapterAndCoordinatorConsumeAndRemoveOneSharedOwnedTransfer")
+    cloudkit_adapter_tests.write_text(original_cloudkit_adapter_tests, encoding="utf-8")
+
+    for binary_presence_regression in (
+        "testActualAdapterRepairsMatchingMetadataWithoutUsableBinaryAndKeepsValidAssetIdempotent",
+        "hasUsableBinaryAsset: false",
+        "hasUsableBinaryAsset: true",
+        "missingBinary.saveRequests.map",
+        "validBinary.saveRequests.isEmpty",
+        "testActualCKRecordMappingRequiresReadableRegularCKAssetFile",
+        "testExplicitChangedKeysModifyRepairsSameIDAssetAndPreservesUnknownFields",
+        "testExplicitModifySurfacesExactPerRecordFailure",
+        "ConflictAwareCloudKitPhotoAssetRecordModifier",
+        "savePolicy: .ifServerRecordUnchanged",
+        "RecordSavePolicy.changedKeys.rawValue",
+        "serverOnly",
+        "perRecordFailure",
+        "CloudKitPhotoAssetRecordMapper.systemRecord",
+        "missingAsset",
+        "wrongTypeAsset",
+        "invalidFileAsset",
+        "directoryAsset",
+        "validAsset",
+    ):
+        cloudkit_adapter_tests.write_text(
+            original_cloudkit_adapter_tests.replace(
+                binary_presence_regression,
+                "binaryPresenceRegressionRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, binary_presence_regression)
+        cloudkit_adapter_tests.write_text(
+            original_cloudkit_adapter_tests,
+            encoding="utf-8",
+        )
+
+    for lifetime_evidence in (
+        "CloudPhotoAssetSystemURLLifetimeOwner",
+        "XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))",
+    ):
+        cloudkit_adapter_tests.write_text(
+            original_cloudkit_adapter_tests.replace(
+                lifetime_evidence,
+                "systemAssetLifetimeEvidenceRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, lifetime_evidence)
+        cloudkit_adapter_tests.write_text(
+            original_cloudkit_adapter_tests,
+            encoding="utf-8",
+        )
 
     bloodwork_domain_test = root / "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/BloodworkResultDomainTests.swift"
     original_bloodwork_domain_test = bloodwork_domain_test.read_text(encoding="utf-8")

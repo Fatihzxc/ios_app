@@ -291,6 +291,35 @@ public final class ProgressPhotoGalleryViewModel {
         }
     }
 
+    public func reloadMissingAndCorruptAssets() async {
+        let thumbnailIDs = items.compactMap { item in
+            switch item.assetState {
+            case .missing, .corrupt:
+                return item.id
+            case .unloaded, .loading, .available, .unavailable:
+                return nil
+            }
+        }
+        for id in thumbnailIDs {
+            setThumbnailState(.unloaded, id: id, advancesLoadID: true)
+        }
+        for id in thumbnailIDs {
+            await loadThumbnail(id: id)
+        }
+
+        let fullImageIDs = selectedPhotoIDs.filter { id in
+            let state = comparisonAssetStates[id]
+            return state == .missing || state == .corrupt
+        }
+        for id in fullImageIDs {
+            comparisonAssetStates[id] = .unloaded
+        }
+        if !fullImageIDs.isEmpty {
+            comparisonLoadGeneration &+= 1
+            await loadComparisonImages()
+        }
+    }
+
     @discardableResult
     public func toggleSelection(id: UUID) -> ProgressPhotoSelectionResult {
         guard let item = items.first(where: { $0.id == id }) else {

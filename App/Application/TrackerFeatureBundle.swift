@@ -15,6 +15,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
     let healthChecksRepository: any HealthChecksRepository
     let bloodworkRepository: any BloodworkRepository
     let progressPhotoRepository: any ProgressPhotoRepository
+    let progressPhotoAssetSynchronizer: any CloudPhotoAssetSynchronizing
     let bodyMetricViewModel: BodyMetricViewModel
     let postureViewModel: PostureViewModel
     let lifestyleViewModel: LifestyleViewModel
@@ -32,6 +33,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         healthChecksRepository: any HealthChecksRepository,
         bloodworkRepository: any BloodworkRepository,
         progressPhotoRepository: any ProgressPhotoRepository = NoOpProgressPhotoRepository.shared,
+        progressPhotoAssetSynchronizer: any CloudPhotoAssetSynchronizing = NoOpCloudPhotoAssetCoordinator.shared,
         progressPhotoFixtureData: Data? = nil,
         calendar: Calendar,
         now: @escaping @MainActor () -> Date = { .now }
@@ -41,6 +43,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         self.healthChecksRepository = healthChecksRepository
         self.bloodworkRepository = bloodworkRepository
         self.progressPhotoRepository = progressPhotoRepository
+        self.progressPhotoAssetSynchronizer = progressPhotoAssetSynchronizer
         self.progressPhotoFixtureData = progressPhotoFixtureData
         self.calendar = calendar
         self.now = now
@@ -129,6 +132,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
             ProgressPhotoLifecycleView(
                 viewModel: progressPhotoImportViewModel,
                 galleryViewModel: progressPhotoGalleryViewModel,
+                assetSynchronizer: progressPhotoAssetSynchronizer,
                 fixtureImageData: progressPhotoFixtureData,
                 onClose: onClose
             )
@@ -182,11 +186,60 @@ enum DefaultTrackerFeatureFactory {
         let progressPhotoAssetStore = LocalPhotoAssetStore(
             processor: ImageIOPhotoImageProcessor()
         )
+        let progressPhotoCloudRoot: URL
+        switch environment {
+        case let .local(storeURL), let .cloud(_, storeURL):
+            progressPhotoCloudRoot = storeURL.deletingLastPathComponent()
+                .appendingPathComponent("ProgressPhotos", isDirectory: true)
+                .appendingPathComponent("CloudSync", isDirectory: true)
+        case .uiTesting:
+            progressPhotoCloudRoot = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "FOApp-ProgressPhotoCloudSync-\(ProcessInfo.processInfo.processIdentifier)",
+                    isDirectory: true
+                )
+        }
+        let cloudHandshakeStores: (
+            deletion: any CloudPhotoAssetDeletionIntentStoring,
+            inbound: any CloudPhotoAssetInboundJournaling
+        ) = {
+            guard case .cloud = environment else {
+                return (
+                    NoOpCloudPhotoAssetDeletionIntentStore.shared,
+                    NoOpCloudPhotoAssetInboundJournal.shared
+                )
+            }
+            let deletionIntentStore = FileCloudPhotoAssetDeletionIntentStore(
+                fileURL: progressPhotoCloudRoot.appendingPathComponent("deletions.json")
+            )
+            let inboundAssetJournal = FileCloudPhotoAssetInboundJournal(
+                fileURL: progressPhotoCloudRoot.appendingPathComponent("inbound.json")
+            )
+            return (deletionIntentStore, inboundAssetJournal)
+        }()
+        let deletionIntentStore = cloudHandshakeStores.deletion
+        let inboundAssetJournal = cloudHandshakeStores.inbound
+        let cloudPhotoAssetTransferStore = FileCloudPhotoAssetTemporaryStore(
+            directory: progressPhotoCloudRoot.appendingPathComponent(
+                "Transfers",
+                isDirectory: true
+            )
+        )
         let progressPhotoRepository = SwiftDataProgressPhotoRepository(
             modelContext: modelContext,
             assetStore: progressPhotoAssetStore,
             cleanupJournal: FilePhotoAssetCleanupJournal(),
+            deletionIntentStore: deletionIntentStore,
+            inboundAssetJournal: inboundAssetJournal,
+            inboundAssetStore: progressPhotoAssetStore,
             now: now
+        )
+        let progressPhotoAssetSynchronizer = makeProgressPhotoAssetSynchronizer(
+            environment: environment,
+            assetStore: progressPhotoAssetStore,
+            progressPhotoRepository: progressPhotoRepository,
+            cloudDeletionIntents: deletionIntentStore,
+            transferStore: cloudPhotoAssetTransferStore
         )
         #if DEBUG
         if environment == .uiTesting,
@@ -295,8 +348,38 @@ enum DefaultTrackerFeatureFactory {
             healthChecksRepository: healthChecksRepository,
             bloodworkRepository: bloodworkRepository,
             progressPhotoRepository: progressPhotoRepository,
+            progressPhotoAssetSynchronizer: progressPhotoAssetSynchronizer,
             calendar: calendar,
             now: now
+        )
+    }
+
+    private static func makeProgressPhotoAssetSynchronizer(
+        environment: AppEnvironment,
+        assetStore: LocalPhotoAssetStore,
+        progressPhotoRepository: any CloudPhotoAssetReferenceSnapshotProviding & CloudPhotoAssetInboundApplying,
+        cloudDeletionIntents deletionIntentStore: any CloudPhotoAssetDeletionIntentStoring,
+        transferStore cloudPhotoAssetTransferStore: FileCloudPhotoAssetTemporaryStore
+    ) -> any CloudPhotoAssetSynchronizing {
+        guard case let .cloud(containerIdentifier, storeURL) = environment else {
+            return NoOpCloudPhotoAssetCoordinator.shared
+        }
+        let root = storeURL.deletingLastPathComponent()
+            .appendingPathComponent("ProgressPhotos", isDirectory: true)
+            .appendingPathComponent("CloudSync", isDirectory: true)
+        return CloudPhotoAssetCoordinator(
+            database: CloudKitPrivatePhotoAssetDatabase(
+                containerIdentifier: containerIdentifier,
+                downloadStore: cloudPhotoAssetTransferStore
+            ),
+            localStore: assetStore,
+            stateStore: FileCloudPhotoAssetSyncStateStore(
+                fileURL: root.appendingPathComponent("state.json")
+            ),
+            referenceSnapshotProvider: progressPhotoRepository,
+            deletionIntentStore: deletionIntentStore,
+            inboundAssetApplier: progressPhotoRepository,
+            temporaryStore: cloudPhotoAssetTransferStore
         )
     }
 }

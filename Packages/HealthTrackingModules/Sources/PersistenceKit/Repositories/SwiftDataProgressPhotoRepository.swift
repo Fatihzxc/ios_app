@@ -4,10 +4,16 @@ import ProgressPhotosKit
 import SwiftData
 
 @MainActor
-public final class SwiftDataProgressPhotoRepository: ProgressPhotoRepository {
+public final class SwiftDataProgressPhotoRepository:
+    ProgressPhotoRepository,
+    CloudPhotoAssetReferenceSnapshotProviding,
+    CloudPhotoAssetInboundApplying {
     private let modelContext: ModelContext
     private let assetStore: any PhotoAssetStoring
     private let cleanupJournal: any PhotoAssetCleanupJournaling
+    private let deletionIntentStore: any CloudPhotoAssetDeletionIntentStoring
+    private let inboundAssetJournal: any CloudPhotoAssetInboundJournaling
+    private let inboundAssetStore: (any CloudPhotoAssetLocalStoring)?
     private let now: @MainActor () -> Date
     private let makeID: @MainActor () -> UUID
     private let saveOperation: @MainActor () throws -> Void
@@ -16,6 +22,7 @@ public final class SwiftDataProgressPhotoRepository: ProgressPhotoRepository {
     private var hasReconciledAssetStorage = false
     private var hasExclusiveOperation = false
     private var exclusiveOperationWaiters: [CheckedContinuation<Void, Never>] = []
+    private var activeInboundApplyLease: CloudPhotoAssetInboundApplyLease?
 
     public var pendingAssetCleanupIDs: [String] {
         pendingCleanup.sorted()
@@ -25,6 +32,9 @@ public final class SwiftDataProgressPhotoRepository: ProgressPhotoRepository {
         modelContext: ModelContext,
         assetStore: any PhotoAssetStoring,
         cleanupJournal: any PhotoAssetCleanupJournaling,
+        deletionIntentStore: (any CloudPhotoAssetDeletionIntentStoring)? = nil,
+        inboundAssetJournal: (any CloudPhotoAssetInboundJournaling)? = nil,
+        inboundAssetStore: (any CloudPhotoAssetLocalStoring)? = nil,
         now: @escaping @MainActor () -> Date = { .now },
         makeID: @escaping @MainActor () -> UUID = { UUID() },
         save: (@MainActor () throws -> Void)? = nil,
@@ -33,10 +43,71 @@ public final class SwiftDataProgressPhotoRepository: ProgressPhotoRepository {
         self.modelContext = modelContext
         self.assetStore = assetStore
         self.cleanupJournal = cleanupJournal
+        self.deletionIntentStore = deletionIntentStore
+            ?? NoOpCloudPhotoAssetDeletionIntentStore.shared
+        self.inboundAssetJournal = inboundAssetJournal
+            ?? NoOpCloudPhotoAssetInboundJournal.shared
+        self.inboundAssetStore = inboundAssetStore
         self.now = now
         self.makeID = makeID
         saveOperation = save ?? { try modelContext.save() }
         rollbackOperation = rollback ?? { modelContext.rollback() }
+    }
+
+    public func prepareInboundApply(
+        id assetID: String,
+        forAccountIdentity accountIdentity: String
+    ) async throws -> CloudPhotoAssetInboundApplyPreparation {
+        await acquireExclusiveOperation()
+        do {
+            try Task.checkCancellation()
+            guard inboundAssetStore != nil else {
+                throw CloudPhotoAssetSyncError.invalidServerResponse
+            }
+            guard activeInboundApplyLease == nil else {
+                throw CloudPhotoAssetSyncError.invalidServerResponse
+            }
+            guard !accountIdentity.isEmpty,
+                  try CloudPhotoAssetRecordContract.canonicalAssetID(assetID)
+                    == assetID else {
+                throw CloudPhotoAssetContractError.invalidAssetID
+            }
+            if try await deletionIntentStore.hasCommittedLocalDeletionIntent(assetID: assetID) {
+                releaseExclusiveOperation()
+                return .discardedCommittedDeletion
+            }
+            try Task.checkCancellation()
+            let lease = CloudPhotoAssetInboundApplyLease(
+                assetID: assetID,
+                accountIdentity: accountIdentity
+            )
+            activeInboundApplyLease = lease
+            return .prepared(lease)
+        } catch {
+            releaseExclusiveOperation()
+            throw error
+        }
+    }
+
+    public func commitInboundApply(
+        _ lease: CloudPhotoAssetInboundApplyLease,
+        bytes: Data
+    ) async throws {
+        guard activeInboundApplyLease == lease else {
+            throw CloudPhotoAssetSyncError.invalidServerResponse
+        }
+        defer { releaseInboundApplyLease(lease) }
+        guard let inboundAssetStore else {
+            throw CloudPhotoAssetSyncError.invalidServerResponse
+        }
+        try await inboundAssetJournal.recordInboundAssetID(lease.assetID)
+        try Task.checkCancellation()
+        try await inboundAssetStore.restoreCloudAsset(id: lease.assetID, bytes: bytes)
+    }
+
+    public func cancelInboundApply(_ lease: CloudPhotoAssetInboundApplyLease) async {
+        guard activeInboundApplyLease == lease else { return }
+        releaseInboundApplyLease(lease)
     }
 
     public func fetchPhotos() async throws -> [ProgressPhotoSnapshot] {
@@ -128,6 +199,16 @@ public final class SwiftDataProgressPhotoRepository: ProgressPhotoRepository {
         return try await assetStore.loadAsset(id: assetID, variant: .full)
     }
 
+    public func snapshot() async throws -> CloudPhotoAssetReferenceSnapshot {
+        await acquireExclusiveOperation()
+        defer { releaseExclusiveOperation() }
+        let rows = try validatedRows()
+        try await reconcileAssetStorageIfNeeded(rows: rows)
+        return CloudPhotoAssetReferenceSnapshot(
+            referencedAssetIDs: Set(rows.map { $0.snapshot.imageRef })
+        )
+    }
+
     public func deletePhoto(
         id: UUID,
         expectedUpdatedAt: Date
@@ -155,11 +236,29 @@ public final class SwiftDataProgressPhotoRepository: ProgressPhotoRepository {
             throw ProgressPhotoRepositoryOperationError.saveFailed
         }
 
+        let deletionIntent: CloudPhotoAssetDeletionIntentReceipt
+        do {
+            deletionIntent = try await deletionIntentStore.recordCommittedDeletion(
+                assetID: row.snapshot.imageRef
+            )
+        } catch {
+            do {
+                try compensateDeletedMetadata(row.snapshot)
+            } catch {
+                pendingCleanup.insert(row.snapshot.imageRef)
+                throw ProgressPhotoRepositoryOperationError.deleteCompensationFailed
+            }
+            throw ProgressPhotoRepositoryOperationError.cleanupJournalFailed(
+                assetID: row.snapshot.imageRef
+            )
+        }
+
         do {
             try await recordPendingCleanup(row.snapshot.imageRef)
         } catch {
             do {
                 try compensateDeletedMetadata(row.snapshot)
+                try await deletionIntentStore.clearCommittedDeletion(deletionIntent)
             } catch {
                 pendingCleanup.insert(row.snapshot.imageRef)
                 throw ProgressPhotoRepositoryOperationError.deleteCompensationFailed
@@ -176,6 +275,7 @@ public final class SwiftDataProgressPhotoRepository: ProgressPhotoRepository {
             do {
                 try compensateDeletedMetadata(row.snapshot)
                 await clearReferencedCleanupIntent(row.snapshot.imageRef)
+                try await deletionIntentStore.clearCommittedDeletion(deletionIntent)
             } catch {
                 throw ProgressPhotoRepositoryOperationError.deleteCompensationFailed
             }
@@ -192,10 +292,13 @@ public final class SwiftDataProgressPhotoRepository: ProgressPhotoRepository {
         for assetID in pendingAssetCleanupIDs where referenced.contains(assetID) {
             await clearReferencedCleanupIntent(assetID)
         }
-        for assetID in pendingAssetCleanupIDs {
+        let freshPendingInboundAssetIDs = try await loadPendingInboundAssetIDsFailClosed()
+        for assetID in pendingAssetCleanupIDs where
+            !freshPendingInboundAssetIDs.contains(assetID) {
             do {
-                try await assetStore.deleteAsset(id: assetID)
-                try await clearPendingCleanup(assetID)
+                if try await deleteAssetIfNotInbound(assetID) {
+                    try await clearPendingCleanup(assetID)
+                }
             } catch {
                 throw mapAssetDeleteError(error)
             }
@@ -205,8 +308,20 @@ public final class SwiftDataProgressPhotoRepository: ProgressPhotoRepository {
     private func reconcileAssetStorageIfNeeded(
         rows: [ValidatedRow]
     ) async throws {
-        guard !hasReconciledAssetStorage else { return }
         let referenced = Set(rows.map { $0.snapshot.imageRef })
+        let pendingInboundAssetIDs = try await loadPendingInboundAssetIDsFailClosed()
+
+        for assetID in pendingInboundAssetIDs.intersection(referenced).sorted() {
+            do {
+                try await inboundAssetJournal.clearInboundAssetID(assetID)
+            } catch {
+                throw ProgressPhotoRepositoryOperationError.cleanupJournalFailed(
+                    assetID: assetID
+                )
+            }
+        }
+
+        guard !hasReconciledAssetStorage else { return }
         let journalIDs: Set<String>
         let storedIDs: Set<String>
         do {
@@ -226,17 +341,50 @@ public final class SwiftDataProgressPhotoRepository: ProgressPhotoRepository {
         let orphanIDs = journalIDs
             .union(storedIDs.subtracting(referenced))
             .subtracting(referenced)
+            .subtracting(pendingInboundAssetIDs.subtracting(referenced))
         pendingCleanup.formUnion(orphanIDs)
         for assetID in orphanIDs.sorted() {
             try? await cleanupJournal.addPendingAssetID(assetID)
+            let freshPendingInboundAssetIDs = try await loadPendingInboundAssetIDsFailClosed()
+            if freshPendingInboundAssetIDs.contains(assetID) {
+                await clearReferencedCleanupIntent(assetID)
+                continue
+            }
             do {
-                try await assetStore.deleteAsset(id: assetID)
-                try await clearPendingCleanup(assetID)
+                if try await deleteAssetIfNotInbound(assetID) {
+                    try await clearPendingCleanup(assetID)
+                } else if try await loadPendingInboundAssetIDsFailClosed()
+                    .contains(assetID) {
+                    await clearReferencedCleanupIntent(assetID)
+                }
             } catch {
                 pendingCleanup.insert(assetID)
             }
         }
         hasReconciledAssetStorage = true
+    }
+
+    private func loadPendingInboundAssetIDsFailClosed() async throws -> Set<String> {
+        do {
+            return try await inboundAssetJournal.pendingInboundAssetIDs()
+        } catch {
+            throw ProgressPhotoRepositoryOperationError.cleanupJournalFailed(
+                assetID: nil
+            )
+        }
+    }
+
+    private func deleteAssetIfNotInbound(_ assetID: String) async throws -> Bool {
+        guard let lease = try await inboundAssetJournal.acquireCleanupLease(for: assetID)
+        else { return false }
+        do {
+            try await assetStore.deleteAsset(id: assetID)
+            await inboundAssetJournal.releaseCleanupLease(lease)
+            return true
+        } catch {
+            await inboundAssetJournal.releaseCleanupLease(lease)
+            throw error
+        }
     }
 
     private func recordPendingCleanup(_ assetID: String) async throws {
@@ -276,6 +424,14 @@ public final class SwiftDataProgressPhotoRepository: ProgressPhotoRepository {
         }
         let next = exclusiveOperationWaiters.removeFirst()
         next.resume()
+    }
+
+    private func releaseInboundApplyLease(
+        _ lease: CloudPhotoAssetInboundApplyLease
+    ) {
+        guard activeInboundApplyLease == lease else { return }
+        activeInboundApplyLease = nil
+        releaseExclusiveOperation()
     }
 
     private struct ValidatedRow {
