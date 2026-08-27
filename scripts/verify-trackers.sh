@@ -190,7 +190,7 @@ m32_support = {
         "HealthTrackingModules/MetricsKitTests",
     },
     ".github/workflows/ios.yml": {
-        "Targeted M3.5 health-check tests",
+        "Targeted M3.6 bloodwork reference tests",
         "scripts/test-ios.sh --only-testing HealthChecksKitTests",
         '"HealthCheckFlowUITests"',
         '"m3-health-check-detail-ax5"',
@@ -293,7 +293,7 @@ m33_support = {
         "HealthTrackingModules/SleepMoodKitTests",
     },
     ".github/workflows/ios.yml": {
-        "Targeted M3.5 health-check tests",
+        "Targeted M3.6 bloodwork reference tests",
         "scripts/test-ios.sh --only-testing HealthChecksKitTests",
         '"BodyMetricFlowUITests"',
         '"LifestyleFlowUITests"',
@@ -416,7 +416,7 @@ m34_support = {
         "HealthTrackingModules/HealthSafetyKitTests",
     },
     ".github/workflows/ios.yml": {
-        "Targeted M3.5 health-check tests",
+        "Targeted M3.6 bloodwork reference tests",
         "scripts/test-ios.sh --only-testing HealthChecksKitTests",
         '"PostureFlowUITests"',
         '"OHPSafetyFlowUITests"',
@@ -534,7 +534,7 @@ m35_support = {
         "HealthTrackingModules/HealthChecksKitTests",
     },
     ".github/workflows/ios.yml": {
-        "Targeted M3.5 health-check tests",
+        "Targeted M3.6 bloodwork reference tests",
         "scripts/test-ios.sh --only-testing HealthChecksKitTests",
     },
     "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecksKitModule.swift": {
@@ -550,6 +550,194 @@ for relative_path, tokens in m35_support.items():
     absent = sorted(token for token in tokens if token not in text)
     if absent:
         raise SystemExit(f"{relative_path} is missing M3.5 wiring: {absent}")
+
+m36_tests = {
+    "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/BloodworkResultDomainTests.swift": {
+        "BloodworkResultInput",
+        "missingMarker",
+        "missingUnit",
+        "nonFiniteValue",
+        "testInputRequiresFiniteValueButPermitsNegativeReferenceValues",
+        "BloodworkResultOrdering.newestFirst",
+        "testOrderingUsesNewestDateThenStableUUID",
+    },
+    "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/BloodworkViewModelTests.swift": {
+        "BloodworkViewModel",
+        "retryCreate",
+        "undoLastCreate",
+        "testSecondCreateWhileSavingCannotReplacePendingRetryInput",
+        "expectedUpdatedAt: original.updatedAt",
+        "repository.createRequests, [first, first]",
+    },
+    "Packages/HealthTrackingModules/Tests/PersistenceKitTests/BloodworkRepositoryTests.swift": {
+        "SwiftDataBloodworkRepository",
+        "createResult",
+        "updateResult",
+        "deleteResult",
+        "undoResultCreation",
+        "duplicateResultIDs",
+        "resultIDCollision",
+        "staleResult",
+        "testCreateUpdateDeleteAndUndoFailuresRollback",
+        "testUndoRequiresCreationTimestampAndIsIdempotentAfterSuccess",
+    },
+    "HealthTrackingAppUITests/BloodworkFlowUITests.swift": {
+        '"-ui-test-scenario", "m3-bloodwork"',
+        "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir.",
+        "bloodwork.list.error",
+        "bloodwork.list.empty",
+        "bloodwork.editor.content",
+        "bloodwork.detail.content",
+        "bloodwork.detail.delete-confirm",
+        "m3-bloodwork-editor-dark-high-contrast",
+        "m3-bloodwork-editor-ax5",
+    },
+}
+
+for relative_path, tokens in m36_tests.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.6 test file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.6 RED contracts: {absent}")
+
+m36_support = {
+    ".github/workflows/ios.yml": {
+        "Targeted M3.6 bloodwork reference tests",
+        "scripts/test-ios.sh --only-testing HealthChecksKitTests",
+        '"BloodworkFlowUITests"',
+        '"m3-bloodwork-empty-light"',
+        '"m3-bloodwork-editor-dark-high-contrast"',
+        '"m3-bloodwork-editor-ax5"',
+    },
+    "Packages/HealthTrackingModules/Sources/HealthSafetyKit/HealthSafetyKitModule.swift": {
+        "MedicalDisclaimerPresentation",
+        "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir.",
+        "isAlwaysVisible: true",
+    },
+}
+
+for relative_path, tokens in m36_support.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.6 support file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.6 wiring: {absent}")
+
+m36_production = {
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Domain/BloodworkResultDomain.swift": {
+        "BloodworkResultInputError",
+        "guard value.isFinite",
+        "trimmingCharacters(in: .whitespacesAndNewlines)",
+        "BloodworkResultSnapshot",
+        "BloodworkResultOrdering",
+        "BloodworkCreationUndoToken",
+    },
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Repository/BloodworkRepository.swift": {
+        "BloodworkRepositoryIntegrityError",
+        "duplicateResultIDs",
+        "resultIDCollision",
+        "invalidPersistedResult",
+        "BloodworkRepositoryMutationError",
+        "staleResult",
+        "expectedUpdatedAt",
+        "undoResultCreation",
+    },
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Bloodwork/BloodworkViewModel.swift": {
+        "QuickEntryMutationStateMachine<BloodworkCreationUndoToken>",
+        "pendingCreate",
+        "retryCreate",
+        "undoLastCreate",
+        "retryUndo",
+        "generation == loadGeneration",
+        "expectedUpdatedAt: snapshot.updatedAt",
+    },
+    "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataBloodworkRepository.swift": {
+        "validatedRows()",
+        "duplicateResultIDs",
+        "resultIDCollision",
+        "expectedUpdatedAt",
+        "rollbackOperation()",
+        "undoResultCreation",
+        "token.expectedUpdatedAt",
+    },
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Bloodwork/BloodworkListView.swift": {
+        "BloodworkListView",
+        "MedicalDisclaimerPresentation.permanent.text",
+        'accessibilityIdentifier("bloodwork.disclaimer.l1")',
+        'accessibilityIdentifier("bloodwork.list.content")',
+        'accessibilityIdentifier("bloodwork.list.error")',
+        'accessibilityIdentifier("bloodwork.list.empty")',
+        'accessibilityIdentifier("bloodwork.editor.content")',
+        'accessibilityIdentifier("bloodwork.detail.content")',
+        'accessibilityIdentifier("bloodwork.detail.delete-confirm")',
+    },
+    "App/Application/TrackerFeatureRouting.swift": {
+        "makeBloodworkListView",
+        "onOpenBloodwork",
+    },
+    "App/Application/TrackerFeatureBundle.swift": {
+        "BloodworkRepository",
+        "BloodworkViewModel",
+        "SwiftDataBloodworkRepository",
+        "UITestBloodworkRepository",
+        "failsFirstLoad: true",
+        "failsFirstCreate: true",
+    },
+    "App/Application/AppRootView.swift": {
+        "case .bloodwork",
+        "makeBloodworkListView",
+        "onOpenBloodwork",
+    },
+    "App/Support/AppUITestLaunchConfiguration.swift": {
+        'case m3Bloodwork = "m3-bloodwork"',
+    },
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Resources/Localizable.xcstrings": {
+        "bloodwork.title",
+        "bloodwork.add",
+        "bloodwork.editor.save",
+        "bloodwork.detail.delete",
+        "Kan değerleri",
+    },
+}
+
+for relative_path, tokens in m36_production.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.6 production file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(
+            f"{relative_path} is missing M3.6 production contracts: {absent}"
+        )
+
+bloodwork_source_paths = [
+    root / "Packages/HealthTrackingModules/Sources/HealthChecksKit/Domain/BloodworkResultDomain.swift",
+    root / "Packages/HealthTrackingModules/Sources/HealthChecksKit/Bloodwork/BloodworkViewModel.swift",
+    root / "Packages/HealthTrackingModules/Sources/HealthChecksKit/Bloodwork/BloodworkListView.swift",
+    root / "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataBloodworkRepository.swift",
+]
+bloodwork_source = "\n".join(
+    path.read_text(encoding="utf-8") for path in bloodwork_source_paths
+)
+for prohibited in [
+    "normal", "abnormal", "anormal", "referenceRange", "normalRange",
+    "lowerBound", "upperBound", "threshold", "diagnosis", "diagnose",
+    "teşhis", "tanı",
+]:
+    if prohibited.casefold() in bloodwork_source.casefold():
+        raise SystemExit(
+            f"M3.6 bloodwork production must not classify or diagnose values: {prohibited}"
+        )
+
+import re
+if re.search(r"\bvalue\s*(?:<=|>=|<|>)", bloodwork_source):
+    raise SystemExit("M3.6 bloodwork production must not compare values to medical ranges")
 
 m32_production = {
     "Packages/HealthTrackingModules/Sources/MetricsKit/Domain/BodyMetricDomain.swift": {
@@ -1228,7 +1416,7 @@ fixture_files = {
         [
             "scripts/verify-trackers.sh --self-test",
             "scripts/verify-trackers.sh",
-            "Targeted M3.5 health-check tests",
+            "Targeted M3.6 bloodwork reference tests",
             "scripts/test-ios.sh --only-testing HealthChecksKitTests",
             '"BodyMetricFlowUITests"',
             '"LifestyleFlowUITests"',
@@ -1238,6 +1426,10 @@ fixture_files = {
             '"m3-posture-high-contrast"',
             '"HealthCheckFlowUITests"',
             '"m3-health-check-detail-ax5"',
+            '"BloodworkFlowUITests"',
+            '"m3-bloodwork-empty-light"',
+            '"m3-bloodwork-editor-dark-high-contrast"',
+            '"m3-bloodwork-editor-ax5"',
         ]
     ),
     "project.yml": "\n".join(
@@ -1576,6 +1768,54 @@ fixture_files = {
             'XCTAssertEqual(remaining.label, "+1")',
         ]
     ),
+    "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/BloodworkResultDomainTests.swift": " ".join(
+        [
+            "BloodworkResultInput",
+            "missingMarker",
+            "missingUnit",
+            "nonFiniteValue",
+            "testInputRequiresFiniteValueButPermitsNegativeReferenceValues",
+            "BloodworkResultOrdering.newestFirst",
+            "testOrderingUsesNewestDateThenStableUUID",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/BloodworkViewModelTests.swift": " ".join(
+        [
+            "BloodworkViewModel",
+            "retryCreate",
+            "undoLastCreate",
+            "testSecondCreateWhileSavingCannotReplacePendingRetryInput",
+            "expectedUpdatedAt: original.updatedAt",
+            "repository.createRequests, [first, first]",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/PersistenceKitTests/BloodworkRepositoryTests.swift": " ".join(
+        [
+            "SwiftDataBloodworkRepository",
+            "createResult",
+            "updateResult",
+            "deleteResult",
+            "undoResultCreation",
+            "duplicateResultIDs",
+            "resultIDCollision",
+            "staleResult",
+            "testCreateUpdateDeleteAndUndoFailuresRollback",
+            "testUndoRequiresCreationTimestampAndIsIdempotentAfterSuccess",
+        ]
+    ),
+    "HealthTrackingAppUITests/BloodworkFlowUITests.swift": " ".join(
+        [
+            '"-ui-test-scenario", "m3-bloodwork"',
+            "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir.",
+            "bloodwork.list.error",
+            "bloodwork.list.empty",
+            "bloodwork.editor.content",
+            "bloodwork.detail.content",
+            "bloodwork.detail.delete-confirm",
+            "m3-bloodwork-editor-dark-high-contrast",
+            "m3-bloodwork-editor-ax5",
+        ]
+    ),
     "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecksKitModule.swift": (
         "enum HealthChecksKitModuleMarker {}"
     ),
@@ -1665,6 +1905,63 @@ fixture_files = {
             "snapshot.dueState(at: now(), calendar: calendar)",
         ]
     ),
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Domain/BloodworkResultDomain.swift": " ".join(
+        [
+            "BloodworkResultInputError",
+            "guard value.isFinite",
+            "trimmingCharacters(in: .whitespacesAndNewlines)",
+            "BloodworkResultSnapshot",
+            "BloodworkResultOrdering",
+            "BloodworkCreationUndoToken",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Repository/BloodworkRepository.swift": " ".join(
+        [
+            "BloodworkRepositoryIntegrityError",
+            "duplicateResultIDs",
+            "resultIDCollision",
+            "invalidPersistedResult",
+            "BloodworkRepositoryMutationError",
+            "staleResult",
+            "expectedUpdatedAt",
+            "undoResultCreation",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Bloodwork/BloodworkViewModel.swift": " ".join(
+        [
+            "QuickEntryMutationStateMachine<BloodworkCreationUndoToken>",
+            "pendingCreate",
+            "retryCreate",
+            "undoLastCreate",
+            "retryUndo",
+            "generation == loadGeneration",
+            "expectedUpdatedAt: snapshot.updatedAt",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataBloodworkRepository.swift": " ".join(
+        [
+            "validatedRows()",
+            "duplicateResultIDs",
+            "resultIDCollision",
+            "expectedUpdatedAt",
+            "rollbackOperation()",
+            "undoResultCreation",
+            "token.expectedUpdatedAt",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Bloodwork/BloodworkListView.swift": " ".join(
+        [
+            "BloodworkListView",
+            "MedicalDisclaimerPresentation.permanent.text",
+            'accessibilityIdentifier("bloodwork.disclaimer.l1")',
+            'accessibilityIdentifier("bloodwork.list.content")',
+            'accessibilityIdentifier("bloodwork.list.error")',
+            'accessibilityIdentifier("bloodwork.list.empty")',
+            'accessibilityIdentifier("bloodwork.editor.content")',
+            'accessibilityIdentifier("bloodwork.detail.content")',
+            'accessibilityIdentifier("bloodwork.detail.delete-confirm")',
+        ]
+    ),
     "Packages/HealthTrackingModules/Sources/HealthChecksKit/Resources/Localizable.xcstrings": " ".join(
         [
             "health-check.detail.complete",
@@ -1672,13 +1969,23 @@ fixture_files = {
             "health-check.detail.undo",
             "health-check.status.due",
             "Sağlık kontrolleri",
+            "bloodwork.title",
+            "bloodwork.add",
+            "bloodwork.editor.save",
+            "bloodwork.detail.delete",
+            "Kan değerleri",
         ]
     ),
     "App/Application/AppDomainContext.swift": (
         "Calendar(identifier: .gregorian) calendar.timeZone = .autoupdatingCurrent"
     ),
-    "Packages/HealthTrackingModules/Sources/HealthSafetyKit/HealthSafetyKitModule.swift": (
-        "enum HealthSafetyKitModule {}"
+    "Packages/HealthTrackingModules/Sources/HealthSafetyKit/HealthSafetyKitModule.swift": " ".join(
+        [
+            "enum HealthSafetyKitModule {}",
+            "MedicalDisclaimerPresentation",
+            "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir.",
+            "isAlwaysVisible: true",
+        ]
     ),
     "Packages/HealthTrackingModules/Sources/HealthSafetyKit/Resources/Localizable.xcstrings": (
         '"sourceLanguage" : "tr"'
@@ -1854,7 +2161,9 @@ fixture_files = {
             "makeBodyMetricEntryView",
             "makeLifestyleEntryView",
             "makeHealthCheckListView",
+            "makeBloodworkListView",
             "makeProgressView",
+            "onOpenBloodwork",
             "AnyView",
         ]
     ),
@@ -1883,6 +2192,12 @@ fixture_files = {
             "failsFirstCompletion: true",
             "HealthCheckProgressSection",
             "calendar: calendar",
+            "BloodworkRepository",
+            "BloodworkViewModel",
+            "SwiftDataBloodworkRepository",
+            "UITestBloodworkRepository",
+            "failsFirstLoad: true",
+            "failsFirstCreate: true",
         ]
     ),
     "App/Application/AppDependencies.swift": " ".join(
@@ -1923,6 +2238,9 @@ fixture_files = {
             "makeHealthCheckListView",
             "onCommittedMutation",
             "todayViewModel.load()",
+            "case .bloodwork",
+            "makeBloodworkListView",
+            "onOpenBloodwork",
         ]
     ),
     "Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift": (
@@ -1942,6 +2260,7 @@ fixture_files = {
             'case m3SleepMood = "m3-sleep-mood"',
             'case m3Posture = "m3-posture"',
             'case m3HealthChecks = "m3-health-checks"',
+            'case m3Bloodwork = "m3-bloodwork"',
         ]
     ),
 }
@@ -1977,6 +2296,48 @@ with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     make_fixture(root)
     run(root)
+
+    bloodwork_domain_test = root / "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/BloodworkResultDomainTests.swift"
+    original_bloodwork_domain_test = bloodwork_domain_test.read_text(encoding="utf-8")
+    bloodwork_domain_test.write_text(
+        original_bloodwork_domain_test.replace(
+            "testInputRequiresFiniteValueButPermitsNegativeReferenceValues",
+            "finiteCoverageWasRemoved",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testInputRequiresFiniteValueButPermitsNegativeReferenceValues")
+    bloodwork_domain_test.write_text(original_bloodwork_domain_test, encoding="utf-8")
+
+    bloodwork_domain_source = root / "Packages/HealthTrackingModules/Sources/HealthChecksKit/Domain/BloodworkResultDomain.swift"
+    original_bloodwork_domain_source = bloodwork_domain_source.read_text(encoding="utf-8")
+    bloodwork_domain_source.write_text(
+        original_bloodwork_domain_source.replace(
+            "guard value.isFinite",
+            "guard true",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "guard value.isFinite")
+    bloodwork_domain_source.write_text(original_bloodwork_domain_source, encoding="utf-8")
+
+    bloodwork_view_source = root / "Packages/HealthTrackingModules/Sources/HealthChecksKit/Bloodwork/BloodworkListView.swift"
+    original_bloodwork_view_source = bloodwork_view_source.read_text(encoding="utf-8")
+    bloodwork_view_source.write_text(
+        original_bloodwork_view_source + "\nnormalRange\n",
+        encoding="utf-8",
+    )
+    run(root, "must not classify or diagnose values")
+    bloodwork_view_source.write_text(original_bloodwork_view_source, encoding="utf-8")
+
+    workflow = root / ".github/workflows/ios.yml"
+    original_workflow = workflow.read_text(encoding="utf-8")
+    workflow.write_text(
+        original_workflow.replace('"m3-bloodwork-editor-ax5"', '"removed-bloodwork-ax5"'),
+        encoding="utf-8",
+    )
+    run(root, '"m3-bloodwork-editor-ax5"')
+    workflow.write_text(original_workflow, encoding="utf-8")
 
     state_source = root / "Packages/HealthTrackingModules/Sources/DesignSystem/QuickEntry/QuickEntryMutationStateMachine.swift"
     original = state_source.read_text(encoding="utf-8")
