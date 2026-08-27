@@ -34,6 +34,8 @@ targets:
       - package: HealthTrackingModules
         product: MetricsKit
       - package: HealthTrackingModules
+        product: SleepMoodKit
+      - package: HealthTrackingModules
         product: ReportsKit
       - package: HealthTrackingModules
         product: SettingsKit
@@ -85,6 +87,7 @@ schemes:
         - package: HealthTrackingModules/DesignSystemTests
         - package: HealthTrackingModules/NutritionKitTests
         - package: HealthTrackingModules/MetricsKitTests
+        - package: HealthTrackingModules/SleepMoodKitTests
     archive:
       config: Release
   HealthTrackingApp-Cloud:

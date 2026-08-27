@@ -86,7 +86,7 @@ support = {
     ".github/workflows/ios.yml": {
         "scripts/verify-trackers.sh --self-test",
         "scripts/verify-trackers.sh",
-        "--only-testing MetricsKitTests",
+        "--only-testing SleepMoodKitTests",
     },
     "project.yml": {
         "HealthTrackingModules/DesignSystemTests",
@@ -178,17 +178,17 @@ m32_support = {
         '.library(name: "MetricsKit", targets: ["MetricsKit"])',
         'name: "MetricsKit"',
         'dependencies: ["CoreModels", "DesignSystem"]',
-        'dependencies: ["CoreModels", "GuidanceKit", "MetricsKit", "NutritionKit", "TrainingKit"]',
+        'dependencies: ["CoreModels", "GuidanceKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit"]',
         'name: "MetricsKitTests"',
-        'dependencies: ["CoreModels", "MetricsKit", "NutritionKit", "TrainingKit", "PersistenceKit"]',
+        'dependencies: ["CoreModels", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
     },
     "project.yml": {
         "product: MetricsKit",
         "HealthTrackingModules/MetricsKitTests",
     },
     ".github/workflows/ios.yml": {
-        "Targeted M3.2 Metrics tests",
-        "scripts/test-ios.sh --only-testing MetricsKitTests",
+        "Targeted M3.3 SleepMood tests",
+        "scripts/test-ios.sh --only-testing SleepMoodKitTests",
     },
     "Packages/HealthTrackingModules/Sources/MetricsKit/MetricsKitModule.swift": {
         "MetricsKitModuleMarker",
@@ -206,6 +206,113 @@ for relative_path, tokens in m32_support.items():
     absent = sorted(token for token in tokens if token not in text)
     if absent:
         raise SystemExit(f"{relative_path} is missing M3.2 wiring: {absent}")
+
+m33_tests = {
+    "Packages/HealthTrackingModules/Tests/SleepMoodKitTests/LifestyleInputTests.swift": {
+        "SleepEntryInput",
+        "MoodEntryInput",
+        "missingMoodSignal",
+        "turkishCasePairs",
+        "LifestyleDayInput",
+        "SleepLogSnapshot",
+        ".infinity",
+    },
+    "Packages/HealthTrackingModules/Tests/SleepMoodKitTests/LifestyleViewModelTests.swift": {
+        "LifestyleViewModel",
+        "saveFailed",
+        "retrySave",
+        "testDuplicateSaveWhileInFlightCannotReplaceThePendingCombinedRetry",
+        "upserts[0]",
+        "lifestyle.validation.empty",
+    },
+    "Packages/HealthTrackingModules/Tests/PersistenceKitTests/LifestyleRepositoryTests.swift": {
+        "SwiftDataLifestyleRepository",
+        "America/New_York",
+        "25 * 60 * 60",
+        "Europe/Istanbul",
+        "multipleSleepLogs",
+        "multipleMoodLogs",
+        "upsertLifestyleDay",
+        "testSingleSectionUpsertPreservesTheExistingOtherSectionExactly",
+        "testCombinedCreateFailureRollsBackBothNewRows",
+        "saveFailed",
+        "staleMood",
+        "dayMismatch",
+        "invalidPersistedMoodLog",
+    },
+    "HealthTrackingAppUITests/LifestyleFlowUITests.swift": {
+        "m3-sleep-mood",
+        "today.lifestyle.action",
+        "lifestyle.sleep.duration",
+        "lifestyle.mood.tags",
+        "lifestyle.entry.save-error",
+        "lifestyle.entry.retry",
+        "lifestyle.entry.saved",
+        "assertReadingOrder",
+        "m3-lifestyle-combined-light",
+        "lifestyle.progress.loaded",
+        "m3-lifestyle-entry-dark",
+        "m3-lifestyle-entry-ax5",
+    },
+    "HealthTrackingAppTests/TrackerCompositionTests.swift": {
+        "TrackerLifestyleRepositoryStub",
+        "metricsRepository: repository",
+        "lifestyleRepository: lifestyleRepository",
+        "makeTrackerFeatureRouter",
+        "firstRoute === progressRoute",
+        "firstRoute as? TrackerFeatureBundle",
+        "bundle.lifestyleRepository",
+    },
+}
+
+for relative_path, tokens in m33_tests.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.3 test file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.3 RED contracts: {absent}")
+
+m33_support = {
+    "Packages/HealthTrackingModules/Package.swift": {
+        '.library(name: "SleepMoodKit", targets: ["SleepMoodKit"])',
+        'name: "SleepMoodKit"',
+        'dependencies: ["CoreModels", "GuidanceKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit"]',
+        'name: "SleepMoodKitTests"',
+        'dependencies: ["CoreModels", "SleepMoodKit"]',
+        'dependencies: ["CoreModels", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
+    },
+    "project.yml": {
+        "product: SleepMoodKit",
+        "HealthTrackingModules/SleepMoodKitTests",
+    },
+    ".github/workflows/ios.yml": {
+        "Targeted M3.3 SleepMood tests",
+        "scripts/test-ios.sh --only-testing SleepMoodKitTests",
+        '"BodyMetricFlowUITests"',
+        '"LifestyleFlowUITests"',
+        '"m3-lifestyle-progress-light"',
+    },
+    "Packages/HealthTrackingModules/Sources/SleepMoodKit/SleepMoodKitModule.swift": {
+        "SleepMoodKitModuleMarker",
+    },
+    "Packages/HealthTrackingModules/Sources/SleepMoodKit/Resources/Localizable.xcstrings": {
+        '"sourceLanguage" : "tr"',
+    },
+    "App/Support/AppUITestLaunchConfiguration.swift": {
+        'case m3SleepMood = "m3-sleep-mood"',
+    },
+}
+
+for relative_path, tokens in m33_support.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.3 support file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.3 wiring: {absent}")
 
 m32_production = {
     "Packages/HealthTrackingModules/Sources/MetricsKit/Domain/BodyMetricDomain.swift": {
@@ -339,10 +446,26 @@ for source in (root / "Packages/HealthTrackingModules/Sources/MetricsKit").rglob
         relative = source.relative_to(root)
         raise SystemExit(f"{relative} has forbidden feature imports: {forbidden}")
 
-for source in (root / "Packages/HealthTrackingModules/Sources/TrainingKit").rglob("*.swift"):
-    if "import MetricsKit" in source.read_text(encoding="utf-8"):
+for source in (root / "Packages/HealthTrackingModules/Sources/SleepMoodKit").rglob("*.swift"):
+    text = source.read_text(encoding="utf-8")
+    forbidden = sorted(
+        module
+        for module in (
+            "SwiftData", "PersistenceKit", "TrainingKit", "MetricsKit",
+            "UserNotifications", "CloudKit",
+        )
+        if f"import {module}" in text
+    )
+    if forbidden:
         relative = source.relative_to(root)
-        raise SystemExit(f"{relative} must not reverse-import MetricsKit")
+        raise SystemExit(f"{relative} has forbidden feature imports: {forbidden}")
+
+for source in (root / "Packages/HealthTrackingModules/Sources/TrainingKit").rglob("*.swift"):
+    text = source.read_text(encoding="utf-8")
+    for module in ("MetricsKit", "SleepMoodKit"):
+        if f"import {module}" in text:
+            relative = source.relative_to(root)
+            raise SystemExit(f"{relative} must not reverse-import {module}")
 
 body_metric_entry_source = (
     root
@@ -526,8 +649,11 @@ fixture_files = {
         [
             "scripts/verify-trackers.sh --self-test",
             "scripts/verify-trackers.sh",
-            "Targeted M3.2 Metrics tests",
-            "scripts/test-ios.sh --only-testing MetricsKitTests",
+            "Targeted M3.3 SleepMood tests",
+            "scripts/test-ios.sh --only-testing SleepMoodKitTests",
+            '"BodyMetricFlowUITests"',
+            '"LifestyleFlowUITests"',
+            '"m3-lifestyle-progress-light"',
         ]
     ),
     "project.yml": "\n".join(
@@ -535,16 +661,22 @@ fixture_files = {
             "HealthTrackingModules/DesignSystemTests",
             "product: MetricsKit",
             "HealthTrackingModules/MetricsKitTests",
+            "product: SleepMoodKit",
+            "HealthTrackingModules/SleepMoodKitTests",
         ]
     ),
     "Packages/HealthTrackingModules/Package.swift": "\n".join(
         [
             '.library(name: "MetricsKit", targets: ["MetricsKit"])',
+            '.library(name: "SleepMoodKit", targets: ["SleepMoodKit"])',
             'name: "MetricsKit"',
+            'name: "SleepMoodKit"',
             'dependencies: ["CoreModels", "DesignSystem"]',
-            'dependencies: ["CoreModels", "GuidanceKit", "MetricsKit", "NutritionKit", "TrainingKit"]',
+            'dependencies: ["CoreModels", "GuidanceKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit"]',
             'name: "MetricsKitTests"',
-            'dependencies: ["CoreModels", "MetricsKit", "NutritionKit", "TrainingKit", "PersistenceKit"]',
+            'name: "SleepMoodKitTests"',
+            'dependencies: ["CoreModels", "SleepMoodKit"]',
+            'dependencies: ["CoreModels", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
         ]
     ),
     "Packages/HealthTrackingModules/Sources/MetricsKit/MetricsKitModule.swift": (
@@ -595,6 +727,11 @@ fixture_files = {
             "makeTrackerFeatureRouter",
             "factoryCalls",
             "firstRoute === progressRoute",
+            "TrackerLifestyleRepositoryStub",
+            "metricsRepository: repository",
+            "lifestyleRepository: lifestyleRepository",
+            "firstRoute as? TrackerFeatureBundle",
+            "bundle.lifestyleRepository",
         ]
     ),
     "HealthTrackingAppTests/AppBootstrapCompositionTests.swift": " ".join(
@@ -622,6 +759,66 @@ fixture_files = {
             "m3-metrics-entry-dark",
             "m3-metrics-entry-ax5",
         ]
+    ),
+    "Packages/HealthTrackingModules/Tests/SleepMoodKitTests/LifestyleInputTests.swift": " ".join(
+        [
+            "SleepEntryInput",
+            "MoodEntryInput",
+            "missingMoodSignal",
+            "turkishCasePairs",
+            "LifestyleDayInput",
+            "SleepLogSnapshot",
+            ".infinity",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/SleepMoodKitTests/LifestyleViewModelTests.swift": " ".join(
+        [
+            "LifestyleViewModel",
+            "saveFailed",
+            "retrySave",
+            "testDuplicateSaveWhileInFlightCannotReplaceThePendingCombinedRetry",
+            "upserts[0]",
+            "lifestyle.validation.empty",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/PersistenceKitTests/LifestyleRepositoryTests.swift": " ".join(
+        [
+            "SwiftDataLifestyleRepository",
+            "America/New_York",
+            "25 * 60 * 60",
+            "Europe/Istanbul",
+            "multipleSleepLogs",
+            "multipleMoodLogs",
+            "upsertLifestyleDay",
+            "testSingleSectionUpsertPreservesTheExistingOtherSectionExactly",
+            "testCombinedCreateFailureRollsBackBothNewRows",
+            "saveFailed",
+            "staleMood",
+            "dayMismatch",
+            "invalidPersistedMoodLog",
+        ]
+    ),
+    "HealthTrackingAppUITests/LifestyleFlowUITests.swift": " ".join(
+        [
+            "m3-sleep-mood",
+            "today.lifestyle.action",
+            "lifestyle.sleep.duration",
+            "lifestyle.mood.tags",
+            "lifestyle.entry.save-error",
+            "lifestyle.entry.retry",
+            "lifestyle.entry.saved",
+            "assertReadingOrder",
+            "m3-lifestyle-combined-light",
+            "lifestyle.progress.loaded",
+            "m3-lifestyle-entry-dark",
+            "m3-lifestyle-entry-ax5",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/SleepMoodKit/SleepMoodKitModule.swift": (
+        "enum SleepMoodKitModuleMarker {}"
+    ),
+    "Packages/HealthTrackingModules/Sources/SleepMoodKit/Resources/Localizable.xcstrings": (
+        '"sourceLanguage" : "tr"'
     ),
     "Packages/HealthTrackingModules/Sources/MetricsKit/Domain/BodyMetricDomain.swift": " ".join(
         [
@@ -752,8 +949,11 @@ fixture_files = {
     "Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift": (
         "onOpenTrackers today.metrics.action"
     ),
-    "App/Support/AppUITestLaunchConfiguration.swift": (
-        'case m3BodyMetrics = "m3-body-metrics"'
+    "App/Support/AppUITestLaunchConfiguration.swift": " ".join(
+        [
+            'case m3BodyMetrics = "m3-body-metrics"',
+            'case m3SleepMood = "m3-sleep-mood"',
+        ]
     ),
 }
 
@@ -813,6 +1013,15 @@ with tempfile.TemporaryDirectory() as temporary:
     )
     run(root, 'name: "MetricsKitTests"')
     package.write_text(original_package, encoding="utf-8")
+
+    lifestyle_test = root / "Packages/HealthTrackingModules/Tests/PersistenceKitTests/LifestyleRepositoryTests.swift"
+    original_lifestyle_test = lifestyle_test.read_text(encoding="utf-8")
+    lifestyle_test.write_text(
+        original_lifestyle_test.replace("multipleMoodLogs", "duplicateMoodCheckRemoved"),
+        encoding="utf-8",
+    )
+    run(root, "multipleMoodLogs")
+    lifestyle_test.write_text(original_lifestyle_test, encoding="utf-8")
 
     persistence = root / "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataMetricsRepository.swift"
     original_persistence = persistence.read_text(encoding="utf-8")
@@ -960,6 +1169,15 @@ with tempfile.TemporaryDirectory() as temporary:
     metrics_source.write_text("import SwiftData\nenum MetricsKitModuleMarker {}\n", encoding="utf-8")
     run(root, "forbidden feature imports")
     metrics_source.write_text("enum MetricsKitModuleMarker {}\n", encoding="utf-8")
+
+    sleep_mood_source = root / "Packages/HealthTrackingModules/Sources/SleepMoodKit/SleepMoodKitModule.swift"
+    original_sleep_mood_source = sleep_mood_source.read_text(encoding="utf-8")
+    sleep_mood_source.write_text(
+        "import MetricsKit\n" + original_sleep_mood_source,
+        encoding="utf-8",
+    )
+    run(root, "forbidden feature imports")
+    sleep_mood_source.write_text(original_sleep_mood_source, encoding="utf-8")
 
     training_source = root / "Packages/HealthTrackingModules/Sources/TrainingKit/Forbidden.swift"
     training_source.parent.mkdir(parents=True, exist_ok=True)

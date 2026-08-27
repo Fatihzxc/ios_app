@@ -190,7 +190,7 @@ final class AppDependencies: AppDependencyLoading {
                  .nutritionDeleteErrorOnce, .nutritionQuickAdd, .m2Acceptance:
                 trainingRepository = repository
                 shouldLoadFoundation = true
-            case .m3BodyMetrics:
+            case .m3BodyMetrics, .m3SleepMood:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -651,7 +651,8 @@ private enum UITestSessionFixture {
         case .m2Acceptance:
             try installM2Acceptance(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow,
-             .todayEmptyOnce, .todayErrorOnce, .nutritionEmpty, .m3BodyMetrics:
+             .todayEmptyOnce, .todayErrorOnce, .nutritionEmpty, .m3BodyMetrics,
+             .m3SleepMood:
             return
         }
     }
