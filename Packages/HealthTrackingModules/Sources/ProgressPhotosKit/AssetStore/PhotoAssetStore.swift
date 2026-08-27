@@ -120,9 +120,17 @@ public protocol PhotoAssetFileSystem: AnyObject, Sendable {
     func fileExists(at url: URL) -> Bool
     func writeProtectedAtomically(_ data: Data, to url: URL) throws
     func moveItem(at source: URL, to destination: URL) throws
+    func replaceItem(at destination: URL, withItemAt source: URL) throws
     func data(at url: URL) throws -> Data
     func removeItemIfExists(at url: URL) throws
     func contentsOfDirectory(at url: URL) throws -> [URL]
+}
+
+public extension PhotoAssetFileSystem {
+    func replaceItem(at destination: URL, withItemAt source: URL) throws {
+        try removeItemIfExists(at: destination)
+        try moveItem(at: source, to: destination)
+    }
 }
 
 public struct PhotoAssetReference: Equatable, Sendable {

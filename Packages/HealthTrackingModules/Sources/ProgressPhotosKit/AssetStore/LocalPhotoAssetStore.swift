@@ -1,6 +1,6 @@
 import Foundation
 
-public actor LocalPhotoAssetStore: PhotoAssetStoring {
+public actor LocalPhotoAssetStore: PhotoAssetStoring, CloudPhotoAssetLocalStoring {
     private let policy: PhotoAssetPolicy
     private let processor: any PhotoImageProcessing
     private let fileSystem: any PhotoAssetFileSystem
@@ -22,6 +22,41 @@ public actor LocalPhotoAssetStore: PhotoAssetStoring {
     }
 
     public func importAsset(_ bytes: Data) async throws -> PhotoAssetReference {
+        let normalized = try normalizedAsset(from: bytes)
+        let assetID = makeAssetID().uuidString.lowercased()
+        return try persist(
+            normalized,
+            assetID: assetID,
+            replacingExisting: false
+        )
+    }
+
+    public func cloudAssetBytes(id: String) async throws -> Data? {
+        switch try await loadAsset(id: id, variant: .full) {
+        case let .available(bytes):
+            return bytes
+        case .missing, .corrupt:
+            return nil
+        }
+    }
+
+    public func restoreCloudAsset(id: String, bytes: Data) async throws {
+        guard isOpaquePhotoAssetID(id) else {
+            throw PhotoAssetStoreError.invalidAssetID
+        }
+        let normalized = try normalizedAsset(from: bytes)
+        _ = try persist(
+            normalized,
+            assetID: id,
+            replacingExisting: true
+        )
+    }
+
+    public func deleteCloudAsset(id: String) async throws {
+        try await deleteAsset(id: id)
+    }
+
+    private func normalizedAsset(from bytes: Data) throws -> PhotoNormalizedAsset {
         guard !bytes.isEmpty else { throw PhotoAssetStoreError.emptyInput }
         guard bytes.count <= policy.maximumInputBytes else {
             throw PhotoAssetStoreError.inputTooLarge(
@@ -63,7 +98,14 @@ public actor LocalPhotoAssetStore: PhotoAssetStoring {
             throw PhotoAssetStoreError.invalidNormalizedOutput
         }
 
-        let assetID = makeAssetID().uuidString.lowercased()
+        return normalized
+    }
+
+    private func persist(
+        _ normalized: PhotoNormalizedAsset,
+        assetID: String,
+        replacingExisting: Bool
+    ) throws -> PhotoAssetReference {
         guard isOpaquePhotoAssetID(assetID) else {
             throw PhotoAssetStoreError.invalidAssetID
         }
@@ -79,8 +121,14 @@ public actor LocalPhotoAssetStore: PhotoAssetStoring {
             assetID,
             isDirectory: true
         )
-        guard !fileSystem.fileExists(at: finalDirectory) else {
+        let finalExists = fileSystem.fileExists(at: finalDirectory)
+        guard replacingExisting || !finalExists else {
             throw PhotoAssetStoreError.assetIDCollision
+        }
+
+        if finalExists,
+           try existingAssetMatches(normalized, in: finalDirectory) {
+            return PhotoAssetReference(assetID: assetID)
         }
 
         do {
@@ -92,12 +140,39 @@ public actor LocalPhotoAssetStore: PhotoAssetStoring {
                 normalized.thumbnail.bytes,
                 to: thumbnailURL
             )
-            try fileSystem.moveItem(at: stagingDirectory, to: finalDirectory)
+            if finalExists {
+                try fileSystem.replaceItem(
+                    at: finalDirectory,
+                    withItemAt: stagingDirectory
+                )
+            } else {
+                try fileSystem.moveItem(at: stagingDirectory, to: finalDirectory)
+            }
         } catch {
             try? fileSystem.removeItemIfExists(at: stagingDirectory)
             throw mapFileSystemError(error)
         }
         return PhotoAssetReference(assetID: assetID)
+    }
+
+    private func existingAssetMatches(
+        _ normalized: PhotoNormalizedAsset,
+        in directory: URL
+    ) throws -> Bool {
+        do {
+            let full = try fileSystem.data(
+                at: directory.appendingPathComponent("full.jpg")
+            )
+            let thumbnail = try fileSystem.data(
+                at: directory.appendingPathComponent("thumbnail.jpg")
+            )
+            return full == normalized.full.bytes
+                && thumbnail == normalized.thumbnail.bytes
+        } catch PhotoAssetFileSystemError.notFound {
+            return false
+        } catch {
+            throw mapFileSystemError(error)
+        }
     }
 
     public func loadAsset(
@@ -276,6 +351,17 @@ public final class FileManagerPhotoAssetFileSystem:
     public func moveItem(at source: URL, to destination: URL) throws {
         do {
             try fileManager.moveItem(at: source, to: destination)
+        } catch {
+            throw mapped(error)
+        }
+    }
+
+    public func replaceItem(at destination: URL, withItemAt source: URL) throws {
+        do {
+            _ = try fileManager.replaceItemAt(
+                destination,
+                withItemAt: source
+            )
         } catch {
             throw mapped(error)
         }
