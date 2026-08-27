@@ -101,6 +101,13 @@ struct AppRootView: View {
                     trackerFeatureRouter.makePostureEntryView(
                         onClose: { trackerEntryRoute = nil }
                     )
+                case .healthChecks:
+                    trackerFeatureRouter.makeHealthCheckListView(
+                        onCommittedMutation: {
+                            Task { await todayViewModel.load() }
+                        },
+                        onClose: { trackerEntryRoute = nil }
+                    )
                 }
             }
         }
@@ -148,7 +155,8 @@ struct AppRootView: View {
                 onAddMeal: performTodayNutritionAction,
                 onOpenTrackers: performTodayTrackerAction,
                 onOpenLifestyle: performTodayLifestyleAction,
-                onOpenPosture: performTodayPostureAction
+                onOpenPosture: performTodayPostureAction,
+                onOpenHealthChecks: performTodayHealthCheckAction
             )
         case .training:
             FoundationProgramView(
@@ -233,6 +241,11 @@ struct AppRootView: View {
         trackerEntryRoute = .posture
     }
 
+    private func performTodayHealthCheckAction() {
+        resolveTrackerFeatureBundle()
+        trackerEntryRoute = .healthChecks
+    }
+
     private func resolveTrackerFeatureBundle() {
         guard trackerFeatureRouter == nil else { return }
         trackerFeatureRouter = makeTrackerFeatureRouter()
@@ -264,6 +277,7 @@ private enum TrackerEntryRoute: String, Identifiable {
     case bodyMetric
     case lifestyle
     case posture
+    case healthChecks
 
     var id: String { rawValue }
 }

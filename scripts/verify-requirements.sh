@@ -28,8 +28,8 @@ if package.is_file():
     products = re.findall(r'\.([A-Za-z][A-Za-z0-9_]*)\s*\(\s*name:\s*"([^"]+)"', products_block.group(1) if products_block else "")
     expected_products = [
         "CoreModels", "TrainingKit", "GuidanceKit", "PersistenceKit", "DesignSystem",
-        "NutritionKit", "HealthSafetyKit", "MetricsKit", "SleepMoodKit", "ReportsKit",
-        "SettingsKit",
+        "NutritionKit", "HealthSafetyKit", "HealthChecksKit", "MetricsKit",
+        "SleepMoodKit", "ReportsKit", "SettingsKit",
     ]
     expected_product_declarations = [("library", name) for name in expected_products]
     if products != expected_product_declarations:
@@ -47,6 +47,8 @@ if package.is_file():
         ("testTarget", "NutritionKitTests"),
         ("target", "HealthSafetyKit"),
         ("testTarget", "HealthSafetyKitTests"),
+        ("target", "HealthChecksKit"),
+        ("testTarget", "HealthChecksKitTests"),
         ("target", "MetricsKit"),
         ("testTarget", "MetricsKitTests"),
         ("target", "SleepMoodKit"),
@@ -59,7 +61,7 @@ if package.is_file():
     ]
     if missing_module_targets:
         errors.append(
-            f"Package must declare GuidanceKit, NutritionKit, HealthSafetyKit, MetricsKit and SleepMoodKit library/test targets; "
+            f"Package must declare GuidanceKit, NutritionKit, HealthSafetyKit, HealthChecksKit, MetricsKit and SleepMoodKit library/test targets; "
             f"missing {missing_module_targets}"
         )
 
@@ -177,8 +179,8 @@ if project.is_file():
     ]
     expected_package_test_targets = [
         "CoreModelsTests", "GuidanceKitTests", "PersistenceKitTests", "TrainingKitTests",
-        "DesignSystemTests", "NutritionKitTests", "HealthSafetyKitTests", "MetricsKitTests",
-        "SleepMoodKitTests",
+        "DesignSystemTests", "NutritionKitTests", "HealthSafetyKitTests",
+        "HealthChecksKitTests", "MetricsKitTests", "SleepMoodKitTests",
     ]
     if local_package_test_targets != expected_package_test_targets:
         errors.append(

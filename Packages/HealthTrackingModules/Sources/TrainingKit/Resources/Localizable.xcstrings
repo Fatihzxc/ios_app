@@ -1,6 +1,9 @@
 {
   "sourceLanguage" : "tr",
   "strings" : {
+    "today.health-check.action" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Sağlık kontrollerini aç" } } } },
+    "today.health-check.action.hint" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Bekleyen ve tamamlanan sağlık kontrollerini gösterir." } } } },
+    "today.health-check.heading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Zamanı gelen sağlık kontrolü" } } } },
     "today.posture.action" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Duruş ve belirti ekle" } } } },
     "today.posture.action.hint" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Duruş, duvar testi ve belirti günlüğünü açar." } } } },
     "session.ohp.journal.error" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Belirti günlüğe yazılamadı; güvenlik duruşu korunuyor." } } } },

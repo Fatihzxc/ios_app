@@ -76,9 +76,9 @@ jobs:
         timeout-minutes: 15
         run: scripts/test-ios.sh --verify-bootstrap-idempotence
 
-      - name: Targeted M3.4 medical safety tests
+      - name: Targeted M3.5 health-check tests
         timeout-minutes: 20
-        run: scripts/test-ios.sh --only-testing HealthSafetyKitTests
+        run: scripts/test-ios.sh --only-testing HealthChecksKitTests
 
       - name: Test iOS app
         timeout-minutes: 90
@@ -202,6 +202,11 @@ jobs:
               "session-ohp-blocked-light",
               "session-ohp-half-kneeling-alternative-light",
           }
+          health_check_expected = {
+              "m3-health-check-completed-light",
+              "m3-health-check-progress-light",
+              "m3-health-check-detail-ax5",
+          }
           expected = (
               shell_expected
               | gallery_expected
@@ -217,6 +222,7 @@ jobs:
               | lifestyle_expected
               | posture_expected
               | ohp_safety_expected
+              | health_check_expected
           )
 
           owners = {
@@ -275,6 +281,10 @@ jobs:
               "OHPSafetyFlowUITests": {
                   "module": "HealthTrackingAppUITests",
                   "expected": ohp_safety_expected,
+              },
+              "HealthCheckFlowUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": health_check_expected,
               },
           }
 

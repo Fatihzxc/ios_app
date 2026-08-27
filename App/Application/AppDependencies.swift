@@ -207,7 +207,7 @@ final class AppDependencies: AppDependencyLoading {
                  .nutritionDeleteErrorOnce, .nutritionQuickAdd, .m2Acceptance:
                 trainingRepository = repository
                 shouldLoadFoundation = true
-            case .m3BodyMetrics, .m3SleepMood, .m3Posture:
+            case .m3BodyMetrics, .m3SleepMood, .m3Posture, .m3HealthChecks:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -223,6 +223,8 @@ final class AppDependencies: AppDependencyLoading {
 
         todayViewModel = TodayViewModel(
             repository: trainingRepository,
+            calendar: AppDomainContext.makeCalendar(),
+            now: { AppDomainContext.now() },
             launchStartedAt: AppLaunchPerformance.startedAt,
             onFirstMeaningfulContent: { elapsed in
                 AppLaunchPerformance.finish(elapsed)
@@ -696,11 +698,28 @@ private enum UITestSessionFixture {
             try installM2Acceptance(in: modelContext)
         case .m3Posture:
             try installM3Posture(in: modelContext)
+        case .m3HealthChecks:
+            try installM3HealthChecks(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow,
              .todayEmptyOnce, .todayErrorOnce, .nutritionEmpty, .m3BodyMetrics,
              .m3SleepMood:
             return
         }
+    }
+
+    private static func installM3HealthChecks(in modelContext: ModelContext) throws {
+        let reminderID = SeedIdentifiers.generalCheckupReminder
+        guard let reminder = try modelContext.fetch(
+            FetchDescriptor<HealthCheckReminder>(
+                predicate: #Predicate { $0.id == reminderID }
+            )
+        ).first,
+        reminder.status == .pending else {
+            return
+        }
+        reminder.dueDate = Date.now.addingTimeInterval(-60)
+        reminder.updatedAt = Date.now
+        try modelContext.save()
     }
 
     private static func installM3Posture(in modelContext: ModelContext) throws {
@@ -953,6 +972,18 @@ private enum UITestSessionFixture {
         reminder.status = .pending
         reminder.dueDate = .now.addingTimeInterval(-60)
         reminder.updatedAt = .now
+        let now = Date.now
+        modelContext.insert(
+            AppReminder(
+                id: todayMeasurementReminderID,
+                createdAt: now,
+                updatedAt: now,
+                type: .measurement,
+                schedule: "today-reminder-ui-test",
+                message: "Bel ölçümünü kaydet",
+                isEnabled: true
+            )
+        )
         try modelContext.save()
     }
 
@@ -1583,10 +1614,6 @@ private final class UITestFoundationRepository: TrainingRepository {
 
     func fetchCooldownItems(workoutDayID: UUID) async throws -> [CooldownItem] {
         try await repository.fetchCooldownItems(workoutDayID: workoutDayID)
-    }
-
-    func fetchHealthCheckReminders() async throws -> [HealthCheckReminder] {
-        try await repository.fetchHealthCheckReminders()
     }
 
     func fetchProgramState(programID: UUID) async throws -> ProgramState? {

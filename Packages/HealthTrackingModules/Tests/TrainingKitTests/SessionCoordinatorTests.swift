@@ -244,7 +244,6 @@ private final class FakeLifecycleRepository: TrainingRepository {
     func fetchExerciseTemplates(workoutDayID: UUID) async throws -> [ExerciseTemplate] { [] }
     func fetchWarmupItems(workoutDayID: UUID) async throws -> [WarmupItem] { [] }
     func fetchCooldownItems(workoutDayID: UUID) async throws -> [CooldownItem] { [] }
-    func fetchHealthCheckReminders() async throws -> [HealthCheckReminder] { [] }
     func fetchProgramState(programID: UUID) async throws -> ProgramState? { nil }
 
     func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot {

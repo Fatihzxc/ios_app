@@ -213,11 +213,13 @@ final class AccessibilitySmokeUITests: XCTestCase {
     }
 
     private func requireCount(_ query: XCUIElementQuery, expected: Int, _ message: String) {
-        let countExpectation = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "count == %d", expected),
-            object: query
-        )
-        XCTAssertEqual(XCTWaiter.wait(for: [countExpectation], timeout: 8), .completed, "\(message) Found \(query.count).")
+        let deadline = Date().addingTimeInterval(8)
+        var currentCount = query.count
+        while currentCount != expected, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            currentCount = query.count
+        }
+        XCTAssertEqual(currentCount, expected, "\(message) Found \(currentCount).")
     }
 
     @discardableResult
