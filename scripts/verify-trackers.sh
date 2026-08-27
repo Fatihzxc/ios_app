@@ -774,6 +774,245 @@ import re
 if re.search(r"\bvalue\s*(?:<=|>=|<|>)", bloodwork_source):
     raise SystemExit("M3.6 bloodwork production must not compare values to medical ranges")
 
+m37_tests = {
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/PhotoAssetStoreTests.swift": {
+        "testImportNormalizesOrientationAndMetadataIntoBoundedProtectedAtomicFiles",
+        "rightMirrored",
+        "containsMetadata: false",
+        'path.contains(".staging")',
+        "applyCompleteProtection",
+        "testImportRejectsEmptyOversizedCorruptAndPixelBombInputsBeforeWriting",
+        "testImportRejectsProcessorOutputThatRetainsMetadataOrientationOrExceedsBounds",
+        "testLoadReturnsMissingOrCorruptFallbackWithoutExposingAPath",
+        "testDeleteIsIdempotentAndProtectedDataFailureKeepsAssetForRetry",
+    },
+    "Packages/HealthTrackingModules/Tests/PersistenceKitTests/ProgressPhotoRepositoryTests.swift": {
+        "SwiftDataProgressPhotoRepository",
+        "testImportPersistsOnlyOpaqueAssetIDAndNormalizedMetadata",
+        "testMetadataSaveFailureDeletesImportedAssetAndRollsBackModel",
+        "testProtectedCleanupFailureRemainsPendingUntilExactRetrySucceeds",
+        "testAssetDeleteFailureRestoresMetadataForExactRetry",
+        "testThumbnailPassesThroughAvailableMissingAndCorruptFallbacks",
+        "testAbsoluteOrMalformedPersistedImageRefFailsClosed",
+        "retryPendingAssetCleanup",
+    },
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/PhotoImportViewModelTests.swift": {
+        "testCancelledSelectionPreservesDatePoseAndNoteWithoutRepositoryWrite",
+        "testLoadFailureAndEmptyPayloadPreserveExactDraftForRetry",
+        "testSuccessfulSelectionPassesBytesAndNormalizedDraftToRepository",
+        "testDeniedLimitedAndUndeterminedBroaderAccessNeverDisableSystemPicker",
+        "SystemPhotoPickerAvailability.isEnabled(for: .denied)",
+        "SystemPhotoPickerAvailability.isEnabled(for: .limited)",
+    },
+    "HealthTrackingAppUITests/ProgressPhotoLifecycleUITests.swift": {
+        '"-ui-test-scenario", "m3-progress-photos"',
+        "photos.local-only.status",
+        "photos.list.empty",
+        "photos.picker",
+        "photos.import.fixture",
+        "photos.list.content",
+        "photos.delete-confirm",
+        "app.terminate()",
+    },
+}
+
+for relative_path, tokens in m37_tests.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.7 test file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.7 RED contracts: {absent}")
+
+m37_production = {
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Domain/ProgressPhotoDomain.swift": {
+        "ProgressPhotoInput",
+        "trimmingCharacters(in: .whitespacesAndNewlines)",
+        "ProgressPhotoSnapshot",
+        "isOpaquePhotoAssetID",
+        "UUID(uuidString:",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/AssetStore/PhotoAssetStore.swift": {
+        "PhotoAssetPolicy",
+        "maximumInputBytes",
+        "maximumPixelCount",
+        "fullMaximumDimension",
+        "thumbnailMaximumDimension",
+        "encodingQuality",
+        "PhotoImageOrientation",
+        "PhotoImageProcessing",
+        "PhotoAssetFileSystem",
+        "PhotoAssetStoring",
+        "PhotoAssetLoadResult",
+        "protectedDataUnavailable",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/AssetStore/LocalPhotoAssetStore.swift": {
+        "LocalPhotoAssetStore",
+        "bytes.count <= policy.maximumInputBytes",
+        "metadata.pixelWidth <= policy.maximumPixelCount / metadata.pixelHeight",
+        'appendingPathComponent("ProgressPhotos"',
+        'appendingPathComponent(".staging"',
+        "applyCompleteProtection",
+        "moveItem(at:",
+        "removeItemIfExists",
+        "invalidNormalizedOutput",
+        "protectedDataUnavailable",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Platform/ImageIOPhotoImageProcessor.swift": {
+        "import ImageIO",
+        "ImageIOPhotoImageProcessor",
+        "CGImageSourceCreateWithData",
+        "kCGImagePropertyOrientation",
+        "CGImageDestinationCreateWithData",
+        "kCGImageDestinationLossyCompressionQuality",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Repository/ProgressPhotoRepository.swift": {
+        "ProgressPhotoRepository",
+        "importPhoto",
+        "thumbnail",
+        "deletePhoto",
+        "retryPendingAssetCleanup",
+        "ProgressPhotoRepositoryIntegrityError",
+        "ProgressPhotoRepositoryOperationError",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Import/ProgressPhotoImportViewModel.swift": {
+        "ProgressPhotoImportViewModel",
+        "PhotoSelectionLoading",
+        "SystemPhotoPickerAvailability",
+        "case .denied, .limited, .notDetermined, .authorized",
+        "importSelection",
+        "lastImportedSnapshot",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Platform/SystemPhotosPickerView.swift": {
+        "import PhotosUI",
+        "PhotosPicker",
+        "PhotosPickerItem",
+        "loadTransferable(type: Data.self)",
+        'accessibilityIdentifier("photos.picker")',
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Gallery/ProgressPhotoLifecycleView.swift": {
+        "ProgressPhotoLifecycleView",
+        "photos.lifecycle.content",
+        "photos.local-only.status",
+        "photos.list.empty",
+        "photos.list.content",
+        "photos.import.fixture",
+        "photos.delete-confirm",
+    },
+    "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataProgressPhotoRepository.swift": {
+        "SwiftDataProgressPhotoRepository",
+        "assetStore.importAsset",
+        "assetStore.deleteAsset",
+        "pendingAssetCleanupIDs",
+        "retryPendingAssetCleanup",
+        "rollbackOperation()",
+        "compensateDeletedMetadata",
+        "isOpaquePhotoAssetID",
+    },
+    "App/Application/TrackerFeatureRouting.swift": {
+        "makeProgressPhotoLifecycleView",
+        "onOpenProgressPhotos",
+    },
+    "App/Application/TrackerFeatureBundle.swift": {
+        "ProgressPhotoRepository",
+        "ProgressPhotoImportViewModel",
+        "LocalPhotoAssetStore",
+        "ImageIOPhotoImageProcessor",
+        "SwiftDataProgressPhotoRepository",
+        "makeProgressPhotoLifecycleView",
+    },
+    "App/Application/AppRootView.swift": {
+        "case .progressPhotos",
+        "makeProgressPhotoLifecycleView",
+        "onOpenProgressPhotos",
+    },
+    "App/Support/AppUITestLaunchConfiguration.swift": {
+        'case m3ProgressPhotos = "m3-progress-photos"',
+    },
+}
+
+for relative_path, tokens in m37_production.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.7 production file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(
+            f"{relative_path} is missing M3.7 production contracts: {absent}"
+        )
+
+m37_support = {
+    "Packages/HealthTrackingModules/Package.swift": {
+        '.library(name: "ProgressPhotosKit", targets: ["ProgressPhotosKit"])',
+        'name: "ProgressPhotosKit"',
+        'dependencies: ["CoreModels", "DesignSystem"]',
+        'name: "ProgressPhotosKitTests"',
+        'dependencies: ["CoreModels", "ProgressPhotosKit"]',
+    },
+    "project.yml": {
+        "product: ProgressPhotosKit",
+        "HealthTrackingModules/ProgressPhotosKitTests",
+    },
+    ".github/workflows/ios.yml": {
+        "Targeted M3.7 local photo lifecycle tests",
+        "scripts/test-ios.sh --only-testing ProgressPhotosKitTests",
+        '"ProgressPhotoLifecycleUITests"',
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Resources/Localizable.xcstrings": {
+        '"sourceLanguage" : "tr"',
+        "photos.title",
+        "photos.local-only.status",
+        "Fotoğraflar bu cihazda çalışır",
+    },
+}
+
+for relative_path, tokens in m37_support.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.7 support file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.7 wiring: {absent}")
+
+progress_photo_source_root = (
+    root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit"
+)
+for source_path in progress_photo_source_root.rglob("*.swift"):
+    relative = source_path.relative_to(root).as_posix()
+    source = source_path.read_text(encoding="utf-8")
+    for framework in ("PhotosUI", "UIKit", "ImageIO"):
+        if f"import {framework}" not in source:
+            continue
+        allowed = {
+            "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Platform/ImageIOPhotoImageProcessor.swift",
+            "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Platform/SystemPhotosPickerView.swift",
+        }
+        if relative not in allowed:
+            raise SystemExit(
+                f"M3.7 platform import {framework} escaped its named adapter: {relative}"
+            )
+    for forbidden in ("import SwiftData", "import PersistenceKit", "import CloudKit"):
+        if forbidden in source:
+            raise SystemExit(f"M3.7 feature source has forbidden dependency: {forbidden}")
+    if "PHPhotoLibrary" in source or "requestAuthorization" in source:
+        raise SystemExit("M3.7 system picker must not request broad Photo Library access")
+
+project_source = (root / "project.yml").read_text(encoding="utf-8")
+if "NSPhotoLibraryUsageDescription" in project_source:
+    raise SystemExit("M3.7 system picker must not add NSPhotoLibraryUsageDescription")
+
+progress_photo_model_source = (
+    root / "Packages/HealthTrackingModules/Sources/CoreModels/Models/ProgressPhoto.swift"
+).read_text(encoding="utf-8")
+for forbidden in ("Data", "URL", "UIImage", "CGImage"):
+    if forbidden in progress_photo_model_source:
+        raise SystemExit(
+            f"M3.7 ProgressPhoto metadata must not persist binary/path types: {forbidden}"
+        )
+
 m32_production = {
     "Packages/HealthTrackingModules/Sources/MetricsKit/Domain/BodyMetricDomain.swift": {
         "value.isFinite, value > 0",
@@ -1465,6 +1704,9 @@ fixture_files = {
             '"m3-bloodwork-empty-light"',
             '"m3-bloodwork-editor-dark-high-contrast"',
             '"m3-bloodwork-editor-ax5"',
+            "Targeted M3.7 local photo lifecycle tests",
+            "scripts/test-ios.sh --only-testing ProgressPhotosKitTests",
+            '"ProgressPhotoLifecycleUITests"',
         ]
     ),
     "project.yml": "\n".join(
@@ -1478,6 +1720,8 @@ fixture_files = {
             "HealthTrackingModules/HealthSafetyKitTests",
             "product: HealthChecksKit",
             "HealthTrackingModules/HealthChecksKitTests",
+            "product: ProgressPhotosKit",
+            "HealthTrackingModules/ProgressPhotosKitTests",
         ]
     ),
     "Packages/HealthTrackingModules/Package.swift": "\n".join(
@@ -1486,10 +1730,12 @@ fixture_files = {
             '.library(name: "SleepMoodKit", targets: ["SleepMoodKit"])',
             '.library(name: "HealthSafetyKit", targets: ["HealthSafetyKit"])',
             '.library(name: "HealthChecksKit", targets: ["HealthChecksKit"])',
+            '.library(name: "ProgressPhotosKit", targets: ["ProgressPhotosKit"])',
             'name: "MetricsKit"',
             'name: "SleepMoodKit"',
             'name: "HealthSafetyKit"',
             'name: "HealthChecksKit"',
+            'name: "ProgressPhotosKit"',
             'resources: [.process("Resources")]',
             'dependencies: ["CoreModels", "DesignSystem"]',
             'dependencies: ["CoreModels", "DesignSystem", "HealthSafetyKit"]',
@@ -1499,9 +1745,11 @@ fixture_files = {
             'name: "SleepMoodKitTests"',
             'name: "HealthSafetyKitTests"',
             'name: "HealthChecksKitTests"',
+            'name: "ProgressPhotosKitTests"',
             'dependencies: ["HealthSafetyKit"]',
             'dependencies: ["CoreModels", "HealthSafetyKit", "MetricsKit"]',
             'dependencies: ["CoreModels", "SleepMoodKit"]',
+            'dependencies: ["CoreModels", "ProgressPhotosKit"]',
             'dependencies: ["CoreModels", "HealthChecksKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
         ]
     ),
@@ -2215,8 +2463,10 @@ fixture_files = {
             "makeLifestyleEntryView",
             "makeHealthCheckListView",
             "makeBloodworkListView",
+            "makeProgressPhotoLifecycleView",
             "makeProgressView",
             "onOpenBloodwork",
+            "onOpenProgressPhotos",
             "AnyView",
         ]
     ),
@@ -2251,7 +2501,173 @@ fixture_files = {
             "UITestBloodworkRepository",
             "failsFirstLoad: true",
             "failsFirstCreate: true",
+            "ProgressPhotoRepository",
+            "ProgressPhotoImportViewModel",
+            "LocalPhotoAssetStore",
+            "ImageIOPhotoImageProcessor",
+            "SwiftDataProgressPhotoRepository",
+            "makeProgressPhotoLifecycleView",
         ]
+    ),
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/PhotoAssetStoreTests.swift": " ".join(
+        [
+            "testImportNormalizesOrientationAndMetadataIntoBoundedProtectedAtomicFiles",
+            "rightMirrored",
+            "containsMetadata: false",
+            'path.contains(".staging")',
+            "applyCompleteProtection",
+            "testImportRejectsEmptyOversizedCorruptAndPixelBombInputsBeforeWriting",
+            "testImportRejectsProcessorOutputThatRetainsMetadataOrientationOrExceedsBounds",
+            "testLoadReturnsMissingOrCorruptFallbackWithoutExposingAPath",
+            "testDeleteIsIdempotentAndProtectedDataFailureKeepsAssetForRetry",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/PersistenceKitTests/ProgressPhotoRepositoryTests.swift": " ".join(
+        [
+            "SwiftDataProgressPhotoRepository",
+            "testImportPersistsOnlyOpaqueAssetIDAndNormalizedMetadata",
+            "testMetadataSaveFailureDeletesImportedAssetAndRollsBackModel",
+            "testProtectedCleanupFailureRemainsPendingUntilExactRetrySucceeds",
+            "testAssetDeleteFailureRestoresMetadataForExactRetry",
+            "testThumbnailPassesThroughAvailableMissingAndCorruptFallbacks",
+            "testAbsoluteOrMalformedPersistedImageRefFailsClosed",
+            "retryPendingAssetCleanup",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/PhotoImportViewModelTests.swift": " ".join(
+        [
+            "testCancelledSelectionPreservesDatePoseAndNoteWithoutRepositoryWrite",
+            "testLoadFailureAndEmptyPayloadPreserveExactDraftForRetry",
+            "testSuccessfulSelectionPassesBytesAndNormalizedDraftToRepository",
+            "testDeniedLimitedAndUndeterminedBroaderAccessNeverDisableSystemPicker",
+            "SystemPhotoPickerAvailability.isEnabled(for: .denied)",
+            "SystemPhotoPickerAvailability.isEnabled(for: .limited)",
+        ]
+    ),
+    "HealthTrackingAppUITests/ProgressPhotoLifecycleUITests.swift": " ".join(
+        [
+            '"-ui-test-scenario", "m3-progress-photos"',
+            "photos.local-only.status",
+            "photos.list.empty",
+            "photos.picker",
+            "photos.import.fixture",
+            "photos.list.content",
+            "photos.delete-confirm",
+            "app.terminate()",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Domain/ProgressPhotoDomain.swift": " ".join(
+        [
+            "ProgressPhotoInput",
+            "trimmingCharacters(in: .whitespacesAndNewlines)",
+            "ProgressPhotoSnapshot",
+            "isOpaquePhotoAssetID",
+            "UUID(uuidString:",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/AssetStore/PhotoAssetStore.swift": " ".join(
+        [
+            "PhotoAssetPolicy",
+            "maximumInputBytes",
+            "maximumPixelCount",
+            "fullMaximumDimension",
+            "thumbnailMaximumDimension",
+            "encodingQuality",
+            "PhotoImageOrientation",
+            "PhotoImageProcessing",
+            "PhotoAssetFileSystem",
+            "PhotoAssetStoring",
+            "PhotoAssetLoadResult",
+            "protectedDataUnavailable",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/AssetStore/LocalPhotoAssetStore.swift": " ".join(
+        [
+            "LocalPhotoAssetStore",
+            "bytes.count <= policy.maximumInputBytes",
+            "metadata.pixelWidth <= policy.maximumPixelCount / metadata.pixelHeight",
+            'appendingPathComponent("ProgressPhotos"',
+            'appendingPathComponent(".staging"',
+            "applyCompleteProtection",
+            "moveItem(at:",
+            "removeItemIfExists",
+            "invalidNormalizedOutput",
+            "protectedDataUnavailable",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Platform/ImageIOPhotoImageProcessor.swift": " ".join(
+        [
+            "import ImageIO",
+            "ImageIOPhotoImageProcessor",
+            "CGImageSourceCreateWithData",
+            "kCGImagePropertyOrientation",
+            "CGImageDestinationCreateWithData",
+            "kCGImageDestinationLossyCompressionQuality",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Repository/ProgressPhotoRepository.swift": " ".join(
+        [
+            "ProgressPhotoRepository",
+            "importPhoto",
+            "thumbnail",
+            "deletePhoto",
+            "retryPendingAssetCleanup",
+            "ProgressPhotoRepositoryIntegrityError",
+            "ProgressPhotoRepositoryOperationError",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Import/ProgressPhotoImportViewModel.swift": " ".join(
+        [
+            "ProgressPhotoImportViewModel",
+            "PhotoSelectionLoading",
+            "SystemPhotoPickerAvailability",
+            "case .denied, .limited, .notDetermined, .authorized",
+            "importSelection",
+            "lastImportedSnapshot",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Platform/SystemPhotosPickerView.swift": " ".join(
+        [
+            "import PhotosUI",
+            "PhotosPicker",
+            "PhotosPickerItem",
+            "loadTransferable(type: Data.self)",
+            'accessibilityIdentifier("photos.picker")',
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Gallery/ProgressPhotoLifecycleView.swift": " ".join(
+        [
+            "ProgressPhotoLifecycleView",
+            "photos.lifecycle.content",
+            "photos.local-only.status",
+            "photos.list.empty",
+            "photos.list.content",
+            "photos.import.fixture",
+            "photos.delete-confirm",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataProgressPhotoRepository.swift": " ".join(
+        [
+            "SwiftDataProgressPhotoRepository",
+            "assetStore.importAsset",
+            "assetStore.deleteAsset",
+            "pendingAssetCleanupIDs",
+            "retryPendingAssetCleanup",
+            "rollbackOperation()",
+            "compensateDeletedMetadata",
+            "isOpaquePhotoAssetID",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Resources/Localizable.xcstrings": " ".join(
+        [
+            '"sourceLanguage" : "tr"',
+            "photos.title",
+            "photos.local-only.status",
+            "Fotoğraflar bu cihazda çalışır",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/CoreModels/Models/ProgressPhoto.swift": (
+        "ProgressPhoto imageRef String pose note"
     ),
     "App/Application/AppDependencies.swift": " ".join(
         [
@@ -2294,6 +2710,9 @@ fixture_files = {
             "case .bloodwork",
             "makeBloodworkListView",
             "onOpenBloodwork",
+            "case .progressPhotos",
+            "makeProgressPhotoLifecycleView",
+            "onOpenProgressPhotos",
         ]
     ),
     "Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift": (
@@ -2314,6 +2733,7 @@ fixture_files = {
             'case m3Posture = "m3-posture"',
             'case m3HealthChecks = "m3-health-checks"',
             'case m3Bloodwork = "m3-bloodwork"',
+            'case m3ProgressPhotos = "m3-progress-photos"',
         ]
     ),
 }
