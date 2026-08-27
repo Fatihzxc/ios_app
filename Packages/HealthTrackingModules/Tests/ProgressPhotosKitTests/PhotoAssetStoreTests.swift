@@ -277,6 +277,42 @@ final class PhotoAssetStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: finalDirectory.path))
     }
 
+    func testCloudRestoreUsesExactOpaqueIDAndRebuildsBothVariantsIdempotently() async throws {
+        let applicationSupport = temporaryDirectory()
+        let fileSystem = RecordingPhotoAssetFileSystem(applicationSupport: applicationSupport)
+        let processor = PhotoImageProcessorFake(
+            metadata: .init(pixelWidth: 2, pixelHeight: 2, orientation: .up),
+            normalized: .tinyFixture
+        )
+        let store = LocalPhotoAssetStore(
+            policy: .testFixture,
+            processor: processor,
+            fileSystem: fileSystem
+        )
+        let assetID = "00000000-0000-0000-0000-000000000920"
+
+        try await store.restoreCloudAsset(id: assetID, bytes: Data([0x09]))
+        try await store.restoreCloudAsset(id: assetID, bytes: Data([0x09]))
+
+        XCTAssertEqual(try await store.cloudAssetBytes(id: assetID), Data([0x10]))
+        XCTAssertEqual(try await store.storedAssetIDs(), [assetID])
+        let finalDirectory = applicationSupport
+            .appendingPathComponent("ProgressPhotos", isDirectory: true)
+            .appendingPathComponent(assetID, isDirectory: true)
+        XCTAssertEqual(
+            try Data(contentsOf: finalDirectory.appendingPathComponent("full.jpg")),
+            Data([0x10])
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: finalDirectory.appendingPathComponent("thumbnail.jpg")),
+            Data([0x20])
+        )
+
+        try await store.deleteCloudAsset(id: assetID)
+        try await store.deleteCloudAsset(id: assetID)
+        XCTAssertEqual(try await store.storedAssetIDs(), [])
+    }
+
     private func assertImportError(
         _ expected: PhotoAssetStoreError,
         operation: () async throws -> PhotoAssetReference
