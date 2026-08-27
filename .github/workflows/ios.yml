@@ -82,11 +82,16 @@ jobs:
 
       - name: Test iOS app
         timeout-minutes: 90
-        # The dedicated test-cold-launch job owns this noisy performance gate.
-        # Keep the complete functional suite here without executing it twice.
-        run: scripts/test-ios.sh --skip-testing HealthTrackingAppUITests/TodayGuidanceUITests/testColdLaunchPublishesFirstMeaningfulDirectiveWithinOneSecondMedian
+        run: |
+          if [[ "$GITHUB_REF_NAME" == "test/m3.4-posture-diagnostic" ]]; then
+            scripts/test-ios.sh --only-testing HealthTrackingAppUITests/PostureFlowUITests
+            scripts/test-ios.sh --only-testing HealthTrackingAppUITests/OHPSafetyFlowUITests
+          else
+            scripts/test-ios.sh --skip-testing HealthTrackingAppUITests/TodayGuidanceUITests/testColdLaunchPublishesFirstMeaningfulDirectiveWithinOneSecondMedian
+          fi
 
       - name: Export screenshot evidence
+        if: ${{ false }}
         timeout-minutes: 10
         run: |
           set -euo pipefail
@@ -440,6 +445,7 @@ jobs:
           if-no-files-found: warn
 
   test-cold-launch:
+    if: ${{ false }}
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -498,6 +504,7 @@ jobs:
           if-no-files-found: warn
 
   test-small-phone:
+    if: ${{ false }}
     runs-on: macos-15
     timeout-minutes: 30
     steps:

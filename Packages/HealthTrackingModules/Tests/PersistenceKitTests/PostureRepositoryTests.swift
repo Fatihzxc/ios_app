@@ -31,7 +31,8 @@ final class PostureRepositoryTests: XCTestCase {
             try input(date: date(11_000), score: 4, region: "Sağ kol")
         )
 
-        XCTAssertEqual(try await repository.fetchPostureMetrics().map(\.id), [newer.id, older.id])
+        let createdIDs = try await repository.fetchPostureMetrics().map(\.id)
+        XCTAssertEqual(createdIDs, [newer.id, older.id])
         XCTAssertEqual(older.symptomScore, 0)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<PostureMetric>()), 2)
 
@@ -48,7 +49,8 @@ final class PostureRepositoryTests: XCTestCase {
             id: updated.id,
             expectedUpdatedAt: updated.updatedAt
         )
-        XCTAssertEqual(try await repository.fetchPostureMetrics().map(\.id), [newer.id])
+        let remainingIDs = try await repository.fetchPostureMetrics().map(\.id)
+        XCTAssertEqual(remainingIDs, [newer.id])
     }
 
     func testDuplicateInvalidAndGeneratedCollisionFailClosed() async throws {
@@ -190,7 +192,8 @@ final class PostureRepositoryTests: XCTestCase {
                 )
             )
         }
-        XCTAssertEqual(try await repository.fetchPostureMetrics().map(\.id), [existingID])
+        let preservedIDs = try await repository.fetchPostureMetrics().map(\.id)
+        XCTAssertEqual(preservedIDs, [existingID])
     }
 
     func testExternalEventSaveFailureRollsBackSoTheSameStableEventCanRetry() async throws {
