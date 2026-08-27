@@ -348,17 +348,6 @@ public final class SwiftDataTrainingRepository: TrainingRepository,
             }
     }
 
-    public func fetchHealthCheckReminders() async throws -> [HealthCheckReminder] {
-        let reminders = try modelContext.fetch(FetchDescriptor<HealthCheckReminder>())
-
-        return reminders.sorted { lhs, rhs in
-            if lhs.dueDate != rhs.dueDate {
-                return lhs.dueDate < rhs.dueDate
-            }
-            return lhs.id.uuidString < rhs.id.uuidString
-        }
-    }
-
     public func fetchProgramState(programID: UUID) async throws -> ProgramState? {
         let states = try modelContext.fetch(FetchDescriptor<ProgramState>())
             .filter { $0.programId == programID }

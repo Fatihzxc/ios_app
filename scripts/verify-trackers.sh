@@ -89,7 +89,7 @@ support = {
     ".github/workflows/ios.yml": {
         "scripts/verify-trackers.sh --self-test",
         "scripts/verify-trackers.sh",
-        "--only-testing HealthSafetyKitTests",
+        "--only-testing HealthChecksKitTests",
     },
     "project.yml": {
         "HealthTrackingModules/DesignSystemTests",
@@ -181,17 +181,19 @@ m32_support = {
         '.library(name: "MetricsKit", targets: ["MetricsKit"])',
         'name: "MetricsKit"',
         'dependencies: ["CoreModels", "DesignSystem"]',
-        'dependencies: ["CoreModels", "GuidanceKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit"]',
+        'dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit"]',
         'name: "MetricsKitTests"',
-        'dependencies: ["CoreModels", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
+        'dependencies: ["CoreModels", "HealthChecksKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
     },
     "project.yml": {
         "product: MetricsKit",
         "HealthTrackingModules/MetricsKitTests",
     },
     ".github/workflows/ios.yml": {
-        "Targeted M3.4 medical safety tests",
-        "scripts/test-ios.sh --only-testing HealthSafetyKitTests",
+        "Targeted M3.5 health-check tests",
+        "scripts/test-ios.sh --only-testing HealthChecksKitTests",
+        '"HealthCheckFlowUITests"',
+        '"m3-health-check-detail-ax5"',
     },
     "Packages/HealthTrackingModules/Sources/MetricsKit/MetricsKitModule.swift": {
         "MetricsKitModuleMarker",
@@ -281,18 +283,18 @@ m33_support = {
     "Packages/HealthTrackingModules/Package.swift": {
         '.library(name: "SleepMoodKit", targets: ["SleepMoodKit"])',
         'name: "SleepMoodKit"',
-        'dependencies: ["CoreModels", "GuidanceKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit"]',
+        'dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit"]',
         'name: "SleepMoodKitTests"',
         'dependencies: ["CoreModels", "SleepMoodKit"]',
-        'dependencies: ["CoreModels", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
+        'dependencies: ["CoreModels", "HealthChecksKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
     },
     "project.yml": {
         "product: SleepMoodKit",
         "HealthTrackingModules/SleepMoodKitTests",
     },
     ".github/workflows/ios.yml": {
-        "Targeted M3.4 medical safety tests",
-        "scripts/test-ios.sh --only-testing HealthSafetyKitTests",
+        "Targeted M3.5 health-check tests",
+        "scripts/test-ios.sh --only-testing HealthChecksKitTests",
         '"BodyMetricFlowUITests"',
         '"LifestyleFlowUITests"',
         '"m3-lifestyle-progress-light"',
@@ -414,8 +416,8 @@ m34_support = {
         "HealthTrackingModules/HealthSafetyKitTests",
     },
     ".github/workflows/ios.yml": {
-        "Targeted M3.4 medical safety tests",
-        "scripts/test-ios.sh --only-testing HealthSafetyKitTests",
+        "Targeted M3.5 health-check tests",
+        "scripts/test-ios.sh --only-testing HealthChecksKitTests",
         '"PostureFlowUITests"',
         '"OHPSafetyFlowUITests"',
         '"m3-posture-high-contrast"',
@@ -439,6 +441,94 @@ for relative_path, tokens in m34_support.items():
     absent = sorted(token for token in tokens if token not in text)
     if absent:
         raise SystemExit(f"{relative_path} is missing M3.4 wiring: {absent}")
+
+m35_tests = {
+    "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/HealthCheckRecurrenceEngineTests.swift": {
+        "HealthCheckRecurrenceEngine.nextDueDate",
+        "Europe/Istanbul",
+        "America/Los_Angeles",
+        "testMonthlyClampsToTargetMonthAndUsesClampedResultAsNextAnchor",
+        "testQuarterlyClampsInvalidDayAndPreservesLocalTime",
+        "testYearlyLeapDayClampsOnceAndKeepsThatResultAsAnchor",
+        "testLosAngelesDSTChangesOffsetWithoutMovingWallClockTime",
+    },
+    "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/HealthCheckReminderDomainTests.swift": {
+        "HealthCheckReminderInput",
+        "missingName",
+        "dueState(at: now, calendar: calendar)",
+        "HealthCheckReminderOrdering.dueFirst",
+    },
+    "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/HealthChecksViewModelTests.swift": {
+        "HealthChecksViewModel",
+        "retryCompletion",
+        "testSecondCompletionTapWhileSavingCannotReplacePendingRetry",
+        "expectedUpdatedAt: first.updatedAt",
+    },
+    "Packages/HealthTrackingModules/Tests/PersistenceKitTests/HealthChecksRepositoryTests.swift": {
+        "SwiftDataHealthChecksRepository",
+        "createReminder",
+        "updateReminder",
+        "deleteReminder",
+        "completeReminder",
+        "duplicateReminderIDs",
+        "duplicateSuccessorLinks",
+        "testRecurringCompletionIsAtomicAndRetryResolvesTheOpaqueLink",
+        "testCompletionSaveFailureRollsBackStatusSuccessorAndLinkForExactRetry",
+        "testDeleteCleansOnlyItsOwnedSuccessorMetadata",
+    },
+    "HealthTrackingAppUITests/HealthCheckFlowUITests.swift": {
+        '"-ui-test-scenario", "m3-health-checks"',
+        "today.health-check.summary",
+        "today.health-check.action",
+        "health-check.detail.complete-error",
+        "health-check.detail.retry",
+        "health-check.detail.successor",
+        "health-check.history.loaded",
+        "m3-health-check-detail-ax5",
+    },
+}
+
+for relative_path, tokens in m35_tests.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.5 test file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.5 RED contracts: {absent}")
+
+m35_support = {
+    "Packages/HealthTrackingModules/Package.swift": {
+        '.library(name: "HealthChecksKit", targets: ["HealthChecksKit"])',
+        'name: "HealthChecksKit"',
+        'dependencies: ["CoreModels", "DesignSystem", "HealthSafetyKit"]',
+        'resources: [.process("Resources")]',
+        'name: "HealthChecksKitTests"',
+        'dependencies: ["CoreModels", "HealthChecksKit"]',
+        'dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit"]',
+        'dependencies: ["CoreModels", "HealthChecksKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
+    },
+    "project.yml": {
+        "product: HealthChecksKit",
+        "HealthTrackingModules/HealthChecksKitTests",
+    },
+    ".github/workflows/ios.yml": {
+        "Targeted M3.5 health-check tests",
+        "scripts/test-ios.sh --only-testing HealthChecksKitTests",
+    },
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecksKitModule.swift": {
+        "HealthChecksKitModuleMarker",
+    },
+}
+
+for relative_path, tokens in m35_support.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.5 support file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.5 wiring: {absent}")
 
 m32_production = {
     "Packages/HealthTrackingModules/Sources/MetricsKit/Domain/BodyMetricDomain.swift": {
@@ -672,6 +762,110 @@ for relative_path, tokens in m33_production.items():
             f"{relative_path} is missing M3.3 production contracts: {absent}"
         )
 
+m35_production = {
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Domain/HealthCheckReminderDomain.swift": {
+        "HealthCheckReminderInputError",
+        "trimmingCharacters(in: .whitespacesAndNewlines)",
+        "HealthCheckReminderSnapshot",
+        "dueState(",
+        "calendar.startOfDay(for: date)",
+        "HealthCheckReminderOrdering",
+    },
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Domain/HealthCheckRecurrenceEngine.swift": {
+        "HealthCheckRecurrenceEngine",
+        "case .monthly",
+        "case .quarterly",
+        "case .yearly",
+        "min(sourceDay, dayRange.count)",
+        "target.timeZone = calendar.timeZone",
+    },
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Repository/HealthChecksRepository.swift": {
+        "HealthChecksRepositoryIntegrityError",
+        "duplicateReminderIDs",
+        "duplicateSuccessorLinks",
+        "HealthChecksRepositoryMutationError",
+        "expectedUpdatedAt",
+        "completeReminder",
+    },
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecks/HealthChecksViewModel.swift": {
+        "pendingCompletion = request",
+        "guard mutationPhase != .saving",
+        "retryCompletion",
+        "expectedUpdatedAt: request.expectedUpdatedAt",
+        "lastCompletion = mutation",
+    },
+    "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataHealthChecksRepository.swift": {
+        "validatedRows()",
+        "resolveExistingCompletion",
+        "HealthCheckRecurrenceEngine.nextDueDate",
+        "successorLinkKey",
+        "successorID.uuidString.lowercased()",
+        "rollbackOperation()",
+        "saveOrRollback()",
+    },
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecks/HealthCheckListView.swift": {
+        "HealthCheckListView",
+        'accessibilityIdentifier("health-check.list.loaded")',
+        'accessibilityIdentifier("medical.disclaimer.l1")',
+        'accessibilityIdentifier("health-check.detail.complete-error")',
+        'accessibilityIdentifier("health-check.detail.retry")',
+        'accessibilityIdentifier("health-check.detail.successor")',
+    },
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecks/HealthCheckProgressSection.swift": {
+        "HealthCheckProgressSection",
+        'accessibilityIdentifier("health-check.history.loaded")',
+        '"health-check.row.',
+    },
+    "App/Application/TrackerFeatureRouting.swift": {
+        "makeHealthCheckListView",
+    },
+    "App/Application/TrackerFeatureBundle.swift": {
+        "HealthChecksRepository",
+        "HealthChecksViewModel",
+        "SwiftDataHealthChecksRepository",
+        "UITestHealthChecksRepository",
+        "failsFirstCompletion: true",
+        "HealthCheckProgressSection",
+    },
+    "App/Application/AppRootView.swift": {
+        "onOpenHealthChecks: performTodayHealthCheckAction",
+        "trackerEntryRoute = .healthChecks",
+        "makeHealthCheckListView",
+    },
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift": {
+        "onOpenHealthChecks",
+        "today.health-check.action",
+        'accessibilityIdentifier("today.health-check.summary")',
+    },
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Resources/Localizable.xcstrings": {
+        "health-check.detail.complete",
+        "health-check.history.heading",
+        "Sağlık kontrolleri",
+    },
+}
+
+for relative_path, tokens in m35_production.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.5 production file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(
+            f"{relative_path} is missing M3.5 production contracts: {absent}"
+        )
+
+for relative_path in (
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Repository/TrainingRepository.swift",
+    "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataTrainingRepository.swift",
+    "App/Application/AppDependencies.swift",
+):
+    text = (root / relative_path).read_text(encoding="utf-8")
+    if "fetchHealthCheckReminders" in text:
+        raise SystemExit(
+            f"{relative_path} must not retain the legacy mutable health-check API"
+        )
+
 lifestyle_persistence_source = (
     root
     / "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataLifestyleRepository.swift"
@@ -746,9 +940,23 @@ for source in (root / "Packages/HealthTrackingModules/Sources/SleepMoodKit").rgl
         relative = source.relative_to(root)
         raise SystemExit(f"{relative} has forbidden feature imports: {forbidden}")
 
+for source in (root / "Packages/HealthTrackingModules/Sources/HealthChecksKit").rglob("*.swift"):
+    text = source.read_text(encoding="utf-8")
+    forbidden = sorted(
+        module
+        for module in (
+            "SwiftData", "PersistenceKit", "TrainingKit", "MetricsKit",
+            "SleepMoodKit", "UserNotifications", "CloudKit",
+        )
+        if f"import {module}" in text
+    )
+    if forbidden:
+        relative = source.relative_to(root)
+        raise SystemExit(f"{relative} has forbidden feature imports: {forbidden}")
+
 for source in (root / "Packages/HealthTrackingModules/Sources/TrainingKit").rglob("*.swift"):
     text = source.read_text(encoding="utf-8")
-    for module in ("MetricsKit", "SleepMoodKit", "HealthSafetyKit"):
+    for module in ("MetricsKit", "SleepMoodKit", "HealthSafetyKit", "HealthChecksKit"):
         if f"import {module}" in text:
             relative = source.relative_to(root)
             raise SystemExit(f"{relative} must not reverse-import {module}")
@@ -848,6 +1056,9 @@ for forbidden_token in (
     "BodyMetricViewModel",
     "BodyMetricSnapshot",
     "BodyMetricBatchInput",
+    "import HealthChecksKit",
+    "HealthChecksRepository",
+    "HealthChecksViewModel",
 ):
     if forbidden_token in dependencies_source:
         raise SystemExit(
@@ -858,6 +1069,7 @@ for forbidden_token in (
 root_source = (root / "App/Application/AppRootView.swift").read_text(encoding="utf-8")
 for forbidden_token in (
     "import MetricsKit",
+    "import HealthChecksKit",
     ": TrackerFeatureBundle",
     "-> TrackerFeatureBundle",
 ):
@@ -953,14 +1165,16 @@ fixture_files = {
         [
             "scripts/verify-trackers.sh --self-test",
             "scripts/verify-trackers.sh",
-            "Targeted M3.4 medical safety tests",
-            "scripts/test-ios.sh --only-testing HealthSafetyKitTests",
+            "Targeted M3.5 health-check tests",
+            "scripts/test-ios.sh --only-testing HealthChecksKitTests",
             '"BodyMetricFlowUITests"',
             '"LifestyleFlowUITests"',
             '"m3-lifestyle-progress-light"',
             '"PostureFlowUITests"',
             '"OHPSafetyFlowUITests"',
             '"m3-posture-high-contrast"',
+            '"HealthCheckFlowUITests"',
+            '"m3-health-check-detail-ax5"',
         ]
     ),
     "project.yml": "\n".join(
@@ -972,6 +1186,8 @@ fixture_files = {
             "HealthTrackingModules/SleepMoodKitTests",
             "product: HealthSafetyKit",
             "HealthTrackingModules/HealthSafetyKitTests",
+            "product: HealthChecksKit",
+            "HealthTrackingModules/HealthChecksKitTests",
         ]
     ),
     "Packages/HealthTrackingModules/Package.swift": "\n".join(
@@ -979,19 +1195,24 @@ fixture_files = {
             '.library(name: "MetricsKit", targets: ["MetricsKit"])',
             '.library(name: "SleepMoodKit", targets: ["SleepMoodKit"])',
             '.library(name: "HealthSafetyKit", targets: ["HealthSafetyKit"])',
+            '.library(name: "HealthChecksKit", targets: ["HealthChecksKit"])',
             'name: "MetricsKit"',
             'name: "SleepMoodKit"',
             'name: "HealthSafetyKit"',
+            'name: "HealthChecksKit"',
+            'resources: [.process("Resources")]',
             'dependencies: ["CoreModels", "DesignSystem"]',
             'dependencies: ["CoreModels", "DesignSystem", "HealthSafetyKit"]',
-            'dependencies: ["CoreModels", "GuidanceKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit"]',
+            'dependencies: ["CoreModels", "HealthChecksKit"]',
+            'dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit"]',
             'name: "MetricsKitTests"',
             'name: "SleepMoodKitTests"',
             'name: "HealthSafetyKitTests"',
+            'name: "HealthChecksKitTests"',
             'dependencies: ["HealthSafetyKit"]',
             'dependencies: ["CoreModels", "HealthSafetyKit", "MetricsKit"]',
             'dependencies: ["CoreModels", "SleepMoodKit"]',
-            'dependencies: ["CoreModels", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
+            'dependencies: ["CoreModels", "HealthChecksKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
         ]
     ),
     "Packages/HealthTrackingModules/Sources/MetricsKit/MetricsKitModule.swift": (
@@ -1218,6 +1439,136 @@ fixture_files = {
             "medical.safety.l2",
         ]
     ),
+    "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/HealthCheckRecurrenceEngineTests.swift": " ".join(
+        [
+            "HealthCheckRecurrenceEngine.nextDueDate",
+            "Europe/Istanbul",
+            "America/Los_Angeles",
+            "testMonthlyClampsToTargetMonthAndUsesClampedResultAsNextAnchor",
+            "testQuarterlyClampsInvalidDayAndPreservesLocalTime",
+            "testYearlyLeapDayClampsOnceAndKeepsThatResultAsAnchor",
+            "testLosAngelesDSTChangesOffsetWithoutMovingWallClockTime",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/HealthCheckReminderDomainTests.swift": " ".join(
+        [
+            "HealthCheckReminderInput",
+            "missingName",
+            "dueState(at: now, calendar: calendar)",
+            "HealthCheckReminderOrdering.dueFirst",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/HealthChecksViewModelTests.swift": " ".join(
+        [
+            "HealthChecksViewModel",
+            "retryCompletion",
+            "testSecondCompletionTapWhileSavingCannotReplacePendingRetry",
+            "expectedUpdatedAt: first.updatedAt",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/PersistenceKitTests/HealthChecksRepositoryTests.swift": " ".join(
+        [
+            "SwiftDataHealthChecksRepository",
+            "createReminder",
+            "updateReminder",
+            "deleteReminder",
+            "completeReminder",
+            "duplicateReminderIDs",
+            "duplicateSuccessorLinks",
+            "testRecurringCompletionIsAtomicAndRetryResolvesTheOpaqueLink",
+            "testCompletionSaveFailureRollsBackStatusSuccessorAndLinkForExactRetry",
+            "testDeleteCleansOnlyItsOwnedSuccessorMetadata",
+        ]
+    ),
+    "HealthTrackingAppUITests/HealthCheckFlowUITests.swift": " ".join(
+        [
+            '"-ui-test-scenario", "m3-health-checks"',
+            "today.health-check.summary",
+            "today.health-check.action",
+            "health-check.detail.complete-error",
+            "health-check.detail.retry",
+            "health-check.detail.successor",
+            "health-check.history.loaded",
+            "m3-health-check-detail-ax5",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecksKitModule.swift": (
+        "enum HealthChecksKitModuleMarker {}"
+    ),
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Domain/HealthCheckReminderDomain.swift": " ".join(
+        [
+            "HealthCheckReminderInputError",
+            "trimmingCharacters(in: .whitespacesAndNewlines)",
+            "HealthCheckReminderSnapshot",
+            "dueState(",
+            "calendar.startOfDay(for: date)",
+            "HealthCheckReminderOrdering",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Domain/HealthCheckRecurrenceEngine.swift": " ".join(
+        [
+            "HealthCheckRecurrenceEngine",
+            "case .monthly",
+            "case .quarterly",
+            "case .yearly",
+            "min(sourceDay, dayRange.count)",
+            "target.timeZone = calendar.timeZone",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Repository/HealthChecksRepository.swift": " ".join(
+        [
+            "HealthChecksRepositoryIntegrityError",
+            "duplicateReminderIDs",
+            "duplicateSuccessorLinks",
+            "HealthChecksRepositoryMutationError",
+            "expectedUpdatedAt",
+            "completeReminder",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecks/HealthChecksViewModel.swift": " ".join(
+        [
+            "pendingCompletion = request",
+            "guard mutationPhase != .saving",
+            "retryCompletion",
+            "expectedUpdatedAt: request.expectedUpdatedAt",
+            "lastCompletion = mutation",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataHealthChecksRepository.swift": " ".join(
+        [
+            "validatedRows()",
+            "resolveExistingCompletion",
+            "HealthCheckRecurrenceEngine.nextDueDate",
+            "successorLinkKey",
+            "successorID.uuidString.lowercased()",
+            "rollbackOperation()",
+            "saveOrRollback()",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecks/HealthCheckListView.swift": " ".join(
+        [
+            "HealthCheckListView",
+            'accessibilityIdentifier("health-check.list.loaded")',
+            'accessibilityIdentifier("medical.disclaimer.l1")',
+            'accessibilityIdentifier("health-check.detail.complete-error")',
+            'accessibilityIdentifier("health-check.detail.retry")',
+            'accessibilityIdentifier("health-check.detail.successor")',
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecks/HealthCheckProgressSection.swift": " ".join(
+        [
+            "HealthCheckProgressSection",
+            'accessibilityIdentifier("health-check.history.loaded")',
+            '"health-check.row.',
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/Resources/Localizable.xcstrings": " ".join(
+        [
+            "health-check.detail.complete",
+            "health-check.history.heading",
+            "Sağlık kontrolleri",
+        ]
+    ),
     "Packages/HealthTrackingModules/Sources/HealthSafetyKit/HealthSafetyKitModule.swift": (
         "enum HealthSafetyKitModule {}"
     ),
@@ -1394,6 +1745,7 @@ fixture_files = {
             "protocol TrackerFeatureRouting",
             "makeBodyMetricEntryView",
             "makeLifestyleEntryView",
+            "makeHealthCheckListView",
             "makeProgressView",
             "AnyView",
         ]
@@ -1416,6 +1768,12 @@ fixture_files = {
             "failsFirstCreate: true",
             "failsFirstUpsert: true",
             "LifestyleProgressSection",
+            "HealthChecksRepository",
+            "HealthChecksViewModel",
+            "SwiftDataHealthChecksRepository",
+            "UITestHealthChecksRepository",
+            "failsFirstCompletion: true",
+            "HealthCheckProgressSection",
         ]
     ),
     "App/Application/AppDependencies.swift": " ".join(
@@ -1450,11 +1808,16 @@ fixture_files = {
             "makeProgressView",
             "TrackerEntryRoute",
             "trackerEntryRoute = .lifestyle",
+            "onOpenHealthChecks: performTodayHealthCheckAction",
+            "trackerEntryRoute = .healthChecks",
+            "makeHealthCheckListView",
         ]
     ),
     "Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift": (
         "onOpenTrackers today.metrics.action onOpenLifestyle "
-        "today.lifestyle.action today.lifestyle.action.hint"
+        "today.lifestyle.action today.lifestyle.action.hint "
+        "onOpenHealthChecks today.health-check.action "
+        'accessibilityIdentifier("today.health-check.summary")'
     ),
     "Packages/HealthTrackingModules/Sources/TrainingKit/Resources/Localizable.xcstrings": (
         "today.lifestyle.action Uyku ve ruh hali ekle"
@@ -1464,6 +1827,7 @@ fixture_files = {
             'case m3BodyMetrics = "m3-body-metrics"',
             'case m3SleepMood = "m3-sleep-mood"',
             'case m3Posture = "m3-posture"',
+            'case m3HealthChecks = "m3-health-checks"',
         ]
     ),
 }
@@ -1528,6 +1892,71 @@ with tempfile.TemporaryDirectory() as temporary:
     )
     run(root, 'name: "MetricsKitTests"')
     package.write_text(original_package, encoding="utf-8")
+
+    package.write_text(
+        original_package.replace(
+            'name: "HealthChecksKitTests"',
+            'name: "MissingHealthChecksTests"',
+        ),
+        encoding="utf-8",
+    )
+    run(root, 'name: "HealthChecksKitTests"')
+    package.write_text(original_package, encoding="utf-8")
+
+    recurrence_test = root / "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/HealthCheckRecurrenceEngineTests.swift"
+    original_recurrence_test = recurrence_test.read_text(encoding="utf-8")
+    recurrence_test.write_text(
+        original_recurrence_test.replace(
+            "testLosAngelesDSTChangesOffsetWithoutMovingWallClockTime",
+            "dstCoverageWasRemoved",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testLosAngelesDSTChangesOffsetWithoutMovingWallClockTime")
+    recurrence_test.write_text(original_recurrence_test, encoding="utf-8")
+
+    health_checks_repository_test = root / "Packages/HealthTrackingModules/Tests/PersistenceKitTests/HealthChecksRepositoryTests.swift"
+    original_health_checks_repository_test = health_checks_repository_test.read_text(
+        encoding="utf-8"
+    )
+    health_checks_repository_test.write_text(
+        original_health_checks_repository_test.replace(
+            "testCompletionSaveFailureRollsBackStatusSuccessorAndLinkForExactRetry",
+            "transactionRollbackCoverageWasRemoved",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testCompletionSaveFailureRollsBackStatusSuccessorAndLinkForExactRetry")
+    health_checks_repository_test.write_text(
+        original_health_checks_repository_test,
+        encoding="utf-8",
+    )
+
+    health_checks_persistence = root / "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataHealthChecksRepository.swift"
+    original_health_checks_persistence = health_checks_persistence.read_text(
+        encoding="utf-8"
+    )
+    health_checks_persistence.write_text(
+        original_health_checks_persistence.replace(
+            "resolveExistingCompletion",
+            "completionRetryResolutionWasRemoved",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "resolveExistingCompletion")
+    health_checks_persistence.write_text(
+        original_health_checks_persistence,
+        encoding="utf-8",
+    )
+
+    training_repository = root / "Packages/HealthTrackingModules/Sources/TrainingKit/Repository/TrainingRepository.swift"
+    original_training_repository = training_repository.read_text(encoding="utf-8")
+    training_repository.write_text(
+        original_training_repository + "\nfunc fetchHealthCheckReminders() {}\n",
+        encoding="utf-8",
+    )
+    run(root, "must not retain the legacy mutable health-check API")
+    training_repository.write_text(original_training_repository, encoding="utf-8")
 
     lifestyle_test = root / "Packages/HealthTrackingModules/Tests/PersistenceKitTests/LifestyleRepositoryTests.swift"
     original_lifestyle_test = lifestyle_test.read_text(encoding="utf-8")
@@ -1757,6 +2186,15 @@ with tempfile.TemporaryDirectory() as temporary:
     )
     run(root, "forbidden feature imports")
     sleep_mood_source.write_text(original_sleep_mood_source, encoding="utf-8")
+
+    health_checks_source = root / "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecksKitModule.swift"
+    original_health_checks_source = health_checks_source.read_text(encoding="utf-8")
+    health_checks_source.write_text(
+        "import SwiftData\n" + original_health_checks_source,
+        encoding="utf-8",
+    )
+    run(root, "forbidden feature imports")
+    health_checks_source.write_text(original_health_checks_source, encoding="utf-8")
 
     symptom_event_test = root / "Packages/HealthTrackingModules/Tests/TrainingKitTests/SymptomEventContractTests.swift"
     original_symptom_event_test = symptom_event_test.read_text(encoding="utf-8")

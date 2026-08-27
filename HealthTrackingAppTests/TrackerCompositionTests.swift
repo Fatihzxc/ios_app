@@ -1,6 +1,7 @@
 @testable import HealthTrackingApp
 import CoreModels
 import Foundation
+import HealthChecksKit
 import MetricsKit
 import SleepMoodKit
 import XCTest
@@ -11,13 +12,15 @@ final class TrackerCompositionTests: XCTestCase {
         var factoryCalls = 0
         let repository = TrackerMetricsRepositoryStub()
         let lifestyleRepository = TrackerLifestyleRepositoryStub()
+        let healthChecksRepository = TrackerHealthChecksRepositoryStub()
         let dependencies = try AppDependencies(
             environment: .uiTesting,
             makeTrackerFeatureBundle: { _ in
                 factoryCalls += 1
                 return TrackerFeatureBundle(
                     metricsRepository: repository,
-                    lifestyleRepository: lifestyleRepository
+                    lifestyleRepository: lifestyleRepository,
+                    healthChecksRepository: healthChecksRepository
                 )
             }
         )
@@ -56,6 +59,43 @@ final class TrackerCompositionTests: XCTestCase {
         XCTAssertTrue(
             (bundle.lifestyleRepository as AnyObject) === lifestyleRepository
         )
+        XCTAssertTrue(
+            (bundle.healthChecksRepository as AnyObject) === healthChecksRepository
+        )
+    }
+}
+
+@MainActor
+private final class TrackerHealthChecksRepositoryStub: HealthChecksRepository {
+    func fetchReminders() async throws -> [HealthCheckReminderSnapshot] { [] }
+
+    func createReminder(
+        _ input: HealthCheckReminderInput
+    ) async throws -> HealthCheckReminderSnapshot {
+        throw StubFailure.unexpectedMutation
+    }
+
+    func updateReminder(
+        id: UUID,
+        expectedUpdatedAt: Date,
+        input: HealthCheckReminderInput
+    ) async throws -> HealthCheckReminderSnapshot {
+        throw StubFailure.unexpectedMutation
+    }
+
+    func deleteReminder(id: UUID, expectedUpdatedAt: Date) async throws {
+        throw StubFailure.unexpectedMutation
+    }
+
+    func completeReminder(
+        id: UUID,
+        expectedUpdatedAt: Date
+    ) async throws -> HealthCheckCompletionMutation {
+        throw StubFailure.unexpectedMutation
+    }
+
+    private enum StubFailure: Error {
+        case unexpectedMutation
     }
 }
 

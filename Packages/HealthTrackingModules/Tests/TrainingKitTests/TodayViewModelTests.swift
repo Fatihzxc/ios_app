@@ -634,9 +634,6 @@ private final class TodayRepositorySpy: TrainingRepository {
     func fetchCooldownItems(workoutDayID _: UUID) async throws -> [CooldownItem] {
         throw TodayTestError.unexpectedCall
     }
-    func fetchHealthCheckReminders() async throws -> [HealthCheckReminder] {
-        throw TodayTestError.unexpectedCall
-    }
     func fetchProgramState(programID _: UUID) async throws -> ProgramState? {
         throw TodayTestError.unexpectedCall
     }

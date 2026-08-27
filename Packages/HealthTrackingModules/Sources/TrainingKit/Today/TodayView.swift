@@ -17,6 +17,7 @@ public struct TodayView: View {
     private let onOpenTrackers: @MainActor () -> Void
     private let onOpenLifestyle: @MainActor () -> Void
     private let onOpenPosture: @MainActor () -> Void
+    private let onOpenHealthChecks: @MainActor () -> Void
 
     public init(
         viewModel: TodayViewModel,
@@ -26,7 +27,8 @@ public struct TodayView: View {
         onAddMeal: @escaping @MainActor () -> Void = {},
         onOpenTrackers: @escaping @MainActor () -> Void = {},
         onOpenLifestyle: @escaping @MainActor () -> Void = {},
-        onOpenPosture: @escaping @MainActor () -> Void = {}
+        onOpenPosture: @escaping @MainActor () -> Void = {},
+        onOpenHealthChecks: @escaping @MainActor () -> Void = {}
     ) {
         self.viewModel = viewModel
         self.nutritionState = nutritionState
@@ -36,6 +38,7 @@ public struct TodayView: View {
         self.onOpenTrackers = onOpenTrackers
         self.onOpenLifestyle = onOpenLifestyle
         self.onOpenPosture = onOpenPosture
+        self.onOpenHealthChecks = onOpenHealthChecks
     }
 
     public var body: some View {
@@ -129,6 +132,10 @@ public struct TodayView: View {
                 alertCard(alert, additionalCount: presentation.additionalAlertCount)
             }
 
+            if case let .some(.bloodwork(title, dueDate)) = presentation.alert {
+                healthCheckCard(title: title, dueDate: dueDate)
+            }
+
             PrimaryActionButton(
                 title: actionTitle(presentation.mainAction),
                 accessibilityLabel: actionTitle(presentation.mainAction)
@@ -220,6 +227,35 @@ public struct TodayView: View {
             }
             #endif
         }
+    }
+
+    private func healthCheckCard(title: String, dueDate: Date) -> some View {
+        AppCard {
+            VStack(alignment: .leading, spacing: AppSpacing.small) {
+                Text(text("today.health-check.heading"))
+                    .font(AppTypography.titleMedium)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(title)
+                    .font(AppTypography.body)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(dueDate.formatted(date: .abbreviated, time: .omitted))
+                    .font(AppTypography.caption)
+                Button(action: onOpenHealthChecks) {
+                    Label(
+                        text("today.health-check.action"),
+                        systemImage: "cross.case.fill"
+                    )
+                    .font(AppTypography.label)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("today.health-check.action")
+                .accessibilityHint(text("today.health-check.action.hint"))
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("today.health-check.summary")
     }
 
     private func directiveCard(_ directive: TodayDirectivePresentation) -> some View {

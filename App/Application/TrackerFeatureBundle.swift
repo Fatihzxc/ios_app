@@ -1,4 +1,5 @@
 import Foundation
+import HealthChecksKit
 import MetricsKit
 import PersistenceKit
 import SleepMoodKit
@@ -9,22 +10,27 @@ import SwiftUI
 final class TrackerFeatureBundle: TrackerFeatureRouting {
     let repository: any MetricsRepository
     let lifestyleRepository: any LifestyleRepository
+    let healthChecksRepository: any HealthChecksRepository
     let bodyMetricViewModel: BodyMetricViewModel
     let postureViewModel: PostureViewModel
     let lifestyleViewModel: LifestyleViewModel
+    let healthChecksViewModel: HealthChecksViewModel
     private let now: @MainActor () -> Date
 
     init(
         metricsRepository: any MetricsRepository,
         lifestyleRepository: any LifestyleRepository,
+        healthChecksRepository: any HealthChecksRepository,
         now: @escaping @MainActor () -> Date = { .now }
     ) {
         repository = metricsRepository
         self.lifestyleRepository = lifestyleRepository
+        self.healthChecksRepository = healthChecksRepository
         self.now = now
         bodyMetricViewModel = BodyMetricViewModel(repository: metricsRepository)
         postureViewModel = PostureViewModel(repository: metricsRepository)
         lifestyleViewModel = LifestyleViewModel(repository: lifestyleRepository)
+        healthChecksViewModel = HealthChecksViewModel(repository: healthChecksRepository)
     }
 
     func makeBodyMetricEntryView(
@@ -62,6 +68,18 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         )
     }
 
+    func makeHealthCheckListView(
+        onClose: @escaping @MainActor () -> Void
+    ) -> AnyView {
+        AnyView(
+            HealthCheckListView(
+                viewModel: healthChecksViewModel,
+                now: now,
+                onClose: onClose
+            )
+        )
+    }
+
     func makeProgressView() -> AnyView {
         AnyView(
             BodyMetricProgressView(viewModel: bodyMetricViewModel) {
@@ -71,6 +89,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
                         date: now()
                     )
                     PostureProgressSection(viewModel: postureViewModel)
+                    HealthCheckProgressSection(viewModel: healthChecksViewModel)
                 }
             }
         )
@@ -85,6 +104,9 @@ enum DefaultTrackerFeatureFactory {
     ) -> any TrackerFeatureRouting {
         let metricsRepository = SwiftDataMetricsRepository(modelContext: modelContext)
         let lifestyleRepository = SwiftDataLifestyleRepository(modelContext: modelContext)
+        let healthChecksRepository = SwiftDataHealthChecksRepository(
+            modelContext: modelContext
+        )
         #if DEBUG
         if environment == .uiTesting,
            let scenario = AppUITestLaunchConfiguration.resolve()?.scenario {
@@ -94,7 +116,8 @@ enum DefaultTrackerFeatureFactory {
                         repository: metricsRepository,
                         failsFirstCreate: true
                     ),
-                    lifestyleRepository: lifestyleRepository
+                    lifestyleRepository: lifestyleRepository,
+                    healthChecksRepository: healthChecksRepository
                 )
             }
             if scenario == .m3SleepMood {
@@ -103,7 +126,8 @@ enum DefaultTrackerFeatureFactory {
                     lifestyleRepository: UITestLifestyleRepository(
                         repository: lifestyleRepository,
                         failsFirstUpsert: true
-                    )
+                    ),
+                    healthChecksRepository: healthChecksRepository
                 )
             }
             if scenario == .m3Posture {
@@ -113,14 +137,26 @@ enum DefaultTrackerFeatureFactory {
                         failsFirstCreate: false,
                         failsFirstPostureCreate: true
                     ),
-                    lifestyleRepository: lifestyleRepository
+                    lifestyleRepository: lifestyleRepository,
+                    healthChecksRepository: healthChecksRepository
+                )
+            }
+            if scenario == .m3HealthChecks {
+                return TrackerFeatureBundle(
+                    metricsRepository: metricsRepository,
+                    lifestyleRepository: lifestyleRepository,
+                    healthChecksRepository: UITestHealthChecksRepository(
+                        repository: healthChecksRepository,
+                        failsFirstCompletion: true
+                    )
                 )
             }
         }
         #endif
         return TrackerFeatureBundle(
             metricsRepository: metricsRepository,
-            lifestyleRepository: lifestyleRepository
+            lifestyleRepository: lifestyleRepository,
+            healthChecksRepository: healthChecksRepository
         )
     }
 }
@@ -156,6 +192,69 @@ private final class UITestLifestyleRepository: LifestyleRepository {
             throw FixtureFailure.upsert
         }
         return try await repository.upsertLifestyleDay(input, expected: expected)
+    }
+}
+#endif
+
+#if DEBUG
+@MainActor
+private final class UITestHealthChecksRepository: HealthChecksRepository {
+    private enum FixtureFailure: Error {
+        case completion
+    }
+
+    private let repository: any HealthChecksRepository
+    private var failsNextCompletion: Bool
+
+    init(
+        repository: any HealthChecksRepository,
+        failsFirstCompletion: Bool
+    ) {
+        self.repository = repository
+        failsNextCompletion = failsFirstCompletion
+    }
+
+    func fetchReminders() async throws -> [HealthCheckReminderSnapshot] {
+        try await repository.fetchReminders()
+    }
+
+    func createReminder(
+        _ input: HealthCheckReminderInput
+    ) async throws -> HealthCheckReminderSnapshot {
+        try await repository.createReminder(input)
+    }
+
+    func updateReminder(
+        id: UUID,
+        expectedUpdatedAt: Date,
+        input: HealthCheckReminderInput
+    ) async throws -> HealthCheckReminderSnapshot {
+        try await repository.updateReminder(
+            id: id,
+            expectedUpdatedAt: expectedUpdatedAt,
+            input: input
+        )
+    }
+
+    func deleteReminder(id: UUID, expectedUpdatedAt: Date) async throws {
+        try await repository.deleteReminder(
+            id: id,
+            expectedUpdatedAt: expectedUpdatedAt
+        )
+    }
+
+    func completeReminder(
+        id: UUID,
+        expectedUpdatedAt: Date
+    ) async throws -> HealthCheckCompletionMutation {
+        if failsNextCompletion {
+            failsNextCompletion = false
+            throw FixtureFailure.completion
+        }
+        return try await repository.completeReminder(
+            id: id,
+            expectedUpdatedAt: expectedUpdatedAt
+        )
     }
 }
 #endif

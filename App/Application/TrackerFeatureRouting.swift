@@ -14,5 +14,9 @@ protocol TrackerFeatureRouting: AnyObject {
         onClose: @escaping @MainActor () -> Void
     ) -> AnyView
 
+    func makeHealthCheckListView(
+        onClose: @escaping @MainActor () -> Void
+    ) -> AnyView
+
     func makeProgressView() -> AnyView
 }

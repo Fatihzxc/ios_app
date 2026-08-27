@@ -1,0 +1,20 @@
+{
+  "sourceLanguage" : "tr",
+  "strings" : {
+    "health-check.close" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Kapat" } } } },
+    "health-check.detail.back" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Kontrollere dön" } } } },
+    "health-check.detail.complete" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Kontrolü tamamla" } } } },
+    "health-check.detail.complete.error" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Kontrol tamamlanamadı. Aynı işlem güvenle tekrar denenebilir." } } } },
+    "health-check.detail.completed" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Kontrol tamamlandı." } } } },
+    "health-check.detail.retry" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Aynı tamamlamayı tekrar dene" } } } },
+    "health-check.detail.successor.heading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Sonraki kontrol oluşturuldu" } } } },
+    "health-check.empty" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Henüz sağlık kontrolü yok." } } } },
+    "health-check.history.heading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Sağlık kontrolü geçmişi" } } } },
+    "health-check.list.loaded" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Sağlık kontrolleri yüklendi." } } } },
+    "health-check.load.error" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Sağlık kontrolleri yüklenemedi." } } } },
+    "health-check.status.done" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yapıldı" } } } },
+    "health-check.status.pending" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Bekliyor" } } } },
+    "health-check.title" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Sağlık kontrolleri" } } } }
+  },
+  "version" : "1.0"
+}
