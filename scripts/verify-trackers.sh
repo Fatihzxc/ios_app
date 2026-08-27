@@ -1490,6 +1490,101 @@ for forbidden_payload in ("date", "pose", "note", "filePath", "tracker", "health
             f"M3.9 CKAsset record must not contain {forbidden_payload}"
         )
 
+m310_tests = {
+    "Packages/HealthTrackingModules/Tests/HealthSafetyKitTests/MedicalSafetyPresentationTests.swift": {
+        "testOHPAndExplicitWorseningPublishTheRequiredGeneralStopNotice",
+        "kalıcı veya kötüleşen",
+        "testExplicitCervicalRedFlagPublishesQualifiedUrgentInformationWithoutDiagnosis",
+        "yeni veya belirgin şekilde kötüleşen",
+    },
+    "Packages/HealthTrackingModules/Tests/MetricsKitTests/PostureViewModelTests.swift": {
+        "testLoadOrdersHistoryAndMissingCurrentSymptomFailsClosed",
+        "missingAnswerNotice",
+        "kol veya bacakta güçsüzlük ya da uyuşma",
+    },
+    "HealthTrackingAppUITests/MedicalSafetyFlowUITests.swift": {
+        "testFirstUseExplanationPersistsIndependentlyFromPermanentReminderDisclaimer",
+        "medical.explanation.l0",
+        "medical.explanation.l0.acknowledge",
+        "firstLaunch.terminate()",
+        "medical.disclaimer.l1",
+    },
+    "HealthTrackingAppUITests/OHPSafetyFlowUITests.swift": {
+        "medical.safety.l2.heading",
+        "hasFocus",
+        "-UIAccessibilityReduceMotionEnabled",
+    },
+}
+
+for relative_path, tokens in m310_tests.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.10 RED test file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.10 RED contracts: {absent}")
+
+m310_support = {
+    ".github/workflows/ios.yml": {
+        "Targeted M3.10 medical safety tests",
+        "scripts/test-ios.sh --only-testing HealthSafetyKitTests",
+    },
+}
+
+for relative_path, tokens in m310_support.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.10 support file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.10 test wiring: {absent}")
+
+medical_safety_source = (
+    root / "Packages/HealthTrackingModules/Sources/HealthSafetyKit/HealthSafetyKitModule.swift"
+)
+medical_safety_text = medical_safety_source.read_text(encoding="utf-8")
+frozen_l1_copy = "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir."
+if frozen_l1_copy not in medical_safety_text:
+    raise SystemExit("M3.10 frozen L1 Turkish safety copy changed or is missing")
+
+for prohibited in (
+    "diagnosis", "diagnose", "diagnostic", "disease", "condition",
+    "normal", "abnormal", "threshold", "tanı", "teşhis", "hastalık",
+    "durumunuz",
+):
+    if prohibited.casefold() in medical_safety_text.casefold():
+        raise SystemExit(
+            "M3.10 safety presentation must not diagnose, classify, or interpret: "
+            f"{prohibited}"
+        )
+
+m310_safety_ui_sources = [
+    source
+    for source_root in (
+        root / "App",
+        root / "Packages/HealthTrackingModules/Sources/MetricsKit",
+        root / "Packages/HealthTrackingModules/Sources/HealthChecksKit",
+        root / "Packages/HealthTrackingModules/Sources/TrainingKit",
+    )
+    if source_root.is_dir()
+    for source in source_root.rglob("*.swift")
+    if "medical.safety.l2.heading" in source.read_text(encoding="utf-8")
+]
+
+for source in m310_safety_ui_sources:
+    text = source.read_text(encoding="utf-8")
+    if "accessibilityReduceMotion" not in text or ".identity" not in text:
+        raise SystemExit(
+            f"{source.relative_to(root)} must use identity-only L2 transitions when Reduce Motion is enabled"
+        )
+    for prohibited_transition in (".move(", ".slide", ".scale", "scaleEffect", ".offset("):
+        if prohibited_transition in text:
+            raise SystemExit(
+                f"{source.relative_to(root)} must not slide, scale, or move an L2 safety notice"
+            )
+
 m32_production = {
     "Packages/HealthTrackingModules/Sources/MetricsKit/Domain/BodyMetricDomain.swift": {
         "value.isFinite, value > 0",
@@ -2185,6 +2280,8 @@ fixture_files = {
             "Targeted M3.7-M3.9 photo lifecycle, gallery, and cloud asset tests",
             "scripts/test-ios.sh --only-testing ProgressPhotosKitTests",
             '"ProgressPhotoLifecycleUITests"',
+            "Targeted M3.10 medical safety tests",
+            "scripts/test-ios.sh --only-testing HealthSafetyKitTests",
         ]
     ),
     "project.yml": "\n".join(
@@ -2381,6 +2478,10 @@ fixture_files = {
             "cervicalRedFlags",
             "urgentAssessmentInformation",
             "Hareketi durdur.",
+            "testOHPAndExplicitWorseningPublishTheRequiredGeneralStopNotice",
+            "kalıcı veya kötüleşen",
+            "testExplicitCervicalRedFlagPublishesQualifiedUrgentInformationWithoutDiagnosis",
+            "yeni veya belirgin şekilde kötüleşen",
         ]
     ),
     "Packages/HealthTrackingModules/Tests/MetricsKitTests/PostureMetricInputTests.swift": " ".join(
@@ -2400,6 +2501,9 @@ fixture_files = {
             "previousExplicitSymptomScore",
             "expectedUpdatedAt",
             "posture.validation.empty",
+            "testLoadOrdersHistoryAndMissingCurrentSymptomFailsClosed",
+            "missingAnswerNotice",
+            "kol veya bacakta güçsüzlük ya da uyuşma",
         ]
     ),
     "Packages/HealthTrackingModules/Tests/PersistenceKitTests/PostureRepositoryTests.swift": " ".join(
@@ -2459,6 +2563,18 @@ fixture_files = {
             "session.ohp.journal.recorded",
             "medical.disclaimer.l1",
             "medical.safety.l2",
+            "medical.safety.l2.heading",
+            "hasFocus",
+            "-UIAccessibilityReduceMotionEnabled",
+        ]
+    ),
+    "HealthTrackingAppUITests/MedicalSafetyFlowUITests.swift": " ".join(
+        [
+            "testFirstUseExplanationPersistsIndependentlyFromPermanentReminderDisclaimer",
+            "medical.explanation.l0",
+            "medical.explanation.l0.acknowledge",
+            "firstLaunch.terminate()",
+            "medical.disclaimer.l1",
         ]
     ),
     "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/HealthCheckRecurrenceEngineTests.swift": " ".join(
@@ -4091,6 +4207,22 @@ with tempfile.TemporaryDirectory() as temporary:
     )
     run(root, "must remain dependency-neutral")
     health_safety_source.write_text(original_health_safety_source, encoding="utf-8")
+
+    health_safety_source.write_text(
+        original_health_safety_source + "\nlet forbiddenSafetyDiagnosis = \\\"tanı\\\"\n",
+        encoding="utf-8",
+    )
+    run(root, "M3.10 safety presentation must not diagnose")
+    health_safety_source.write_text(original_health_safety_source, encoding="utf-8")
+
+    safety_ui_source = root / "App/Application/MedicalSafetyLayerView.swift"
+    safety_ui_source.parent.mkdir(parents=True, exist_ok=True)
+    safety_ui_source.write_text(
+        'let heading = "medical.safety.l2.heading"\n.scaleEffect(1.2)\n',
+        encoding="utf-8",
+    )
+    run(root, "must use identity-only L2 transitions")
+    safety_ui_source.unlink()
 
     training_source = root / "Packages/HealthTrackingModules/Sources/TrainingKit/Forbidden.swift"
     training_source.parent.mkdir(parents=True, exist_ok=True)

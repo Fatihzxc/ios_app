@@ -21,7 +21,9 @@ final class MedicalSafetyPresentationTests: XCTestCase {
         XCTAssertNil(presentation.levelTwo)
     }
 
-    func testOHPAndExplicitWorseningPublishOnlyTheGeneralStopNotice() throws {
+    // Mutation caught: replacing the safety notice with a vague warning would omit
+    // the required stop, persistent/worsening, or professional-assessment guidance.
+    func testOHPAndExplicitWorseningPublishTheRequiredGeneralStopNotice() throws {
         for trigger in [
             MedicalSafetyTrigger.overheadPressSymptom,
             .increasingSymptom,
@@ -32,13 +34,16 @@ final class MedicalSafetyPresentationTests: XCTestCase {
 
             XCTAssertEqual(notice.kind, .stopAndProfessionalAssessment)
             XCTAssertTrue(notice.message.hasPrefix("Hareketi durdur."))
+            XCTAssertTrue(notice.message.contains("kalıcı veya kötüleşen"))
             XCTAssertTrue(notice.message.contains("sağlık profesyoneli"))
             XCTAssertFalse(notice.requiresUrgentAssessment)
             assertContainsNoDiagnosticLanguage(notice.message)
         }
     }
 
-    func testExplicitCervicalRedFlagPublishesUrgentInformationWithoutDiagnosis() throws {
+    // Mutation caught: dropping the new/significantly-worsening qualification or
+    // any cervical red flag would turn an urgent-information notice into a vague one.
+    func testExplicitCervicalRedFlagPublishesQualifiedUrgentInformationWithoutDiagnosis() throws {
         let flags = Set(CervicalRedFlag.allCases)
         let notice = try XCTUnwrap(
             MedicalSafetyPresentation.resolve(
@@ -49,6 +54,7 @@ final class MedicalSafetyPresentationTests: XCTestCase {
         XCTAssertEqual(notice.kind, .urgentAssessmentInformation)
         XCTAssertTrue(notice.message.hasPrefix("Hareketi durdur."))
         XCTAssertTrue(notice.requiresUrgentAssessment)
+        XCTAssertTrue(notice.message.contains("yeni veya belirgin şekilde kötüleşen"))
         XCTAssertTrue(notice.message.contains("kol veya bacakta güçsüzlük ya da uyuşma"))
         XCTAssertTrue(notice.message.contains("el becerisinde kayıp"))
         XCTAssertTrue(notice.message.contains("denge veya yürümede değişiklik"))

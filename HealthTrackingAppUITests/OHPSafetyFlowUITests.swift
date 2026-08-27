@@ -13,6 +13,7 @@ final class OHPSafetyFlowUITests: XCTestCase {
             "-ui-test-appearance", "light",
             "-AppleLanguages", "(tr)",
             "-AppleLocale", "tr_TR",
+            "-UIAccessibilityReduceMotionEnabled", "YES",
         ]
         app.launch()
 
@@ -77,10 +78,15 @@ final class OHPSafetyFlowUITests: XCTestCase {
             ).label,
             "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir."
         )
-        let levelTwo = require(
-            app.staticTexts["medical.safety.l2"],
-            "The current OHP symptom must publish the event-triggered stop notice."
-        ).label
+        let levelTwoHeading = require(
+            app.staticTexts["medical.safety.l2.heading"],
+            "The current OHP symptom must move VoiceOver focus to a stable L2 heading."
+        )
+        XCTAssertTrue(
+            levelTwoHeading.hasFocus,
+            "The visible L2 heading must receive programmatic VoiceOver focus."
+        )
+        let levelTwo = levelTwoHeading.label
         XCTAssertTrue(levelTwo.hasPrefix("Hareketi durdur."))
         XCTAssertTrue(levelTwo.lowercased().contains("sağlık profesyoneli"))
         require(

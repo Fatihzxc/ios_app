@@ -106,7 +106,9 @@ final class PostureViewModelTests: XCTestCase {
         XCTAssertEqual(repository.createdInputs[1].date, originalDate)
     }
 
-    func testLoadOrdersHistoryAndSafetyUsesOnlyThePreviousExplicitScore() async {
+    // Mutation caught: treating an unanswered current symptom as benign would
+    // suppress the required fail-closed stop notice after a prior explicit score.
+    func testLoadOrdersHistoryAndMissingCurrentSymptomFailsClosed() async throws {
         let noScore = snapshot(
             id: uuid("00000000-0000-4000-8000-000000000424"),
             score: nil,
@@ -124,7 +126,15 @@ final class PostureViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.snapshots.map(\.id), [noScore.id, explicit.id])
         XCTAssertEqual(viewModel.loadPhase, .loaded)
-        XCTAssertNil(viewModel.safetyPresentation.levelTwo)
+        let missingAnswerNotice = try XCTUnwrap(viewModel.safetyPresentation.levelTwo)
+        XCTAssertEqual(missingAnswerNotice.kind, .stopAndProfessionalAssessment)
+        XCTAssertTrue(missingAnswerNotice.message.hasPrefix("Hareketi durdur."))
+        XCTAssertTrue(missingAnswerNotice.message.contains("kalıcı veya kötüleşen"))
+        XCTAssertTrue(missingAnswerNotice.message.contains("sağlık profesyoneli"))
+        XCTAssertTrue(
+            missingAnswerNotice.message.contains("kol veya bacakta güçsüzlük ya da uyuşma")
+        )
+        XCTAssertFalse(missingAnswerNotice.requiresUrgentAssessment)
 
         viewModel.symptomScore = 5
         viewModel.refreshSafetyPresentation()
