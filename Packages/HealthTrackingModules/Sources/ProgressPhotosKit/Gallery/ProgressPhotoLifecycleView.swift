@@ -56,6 +56,7 @@ public struct ProgressPhotoLifecycleView: View {
     @Bindable private var galleryViewModel: ProgressPhotoGalleryViewModel
     private let assetSyncLifecycle: ProgressPhotoAssetSyncLifecycle
     private let fixtureImageData: Data?
+    private let broaderPhotoLibraryAccessState: PhotoLibraryAccessState
     private let onClose: @MainActor () -> Void
     @State private var pendingDelete: ProgressPhotoSnapshot?
     @State private var isConfirmingDelete = false
@@ -65,6 +66,7 @@ public struct ProgressPhotoLifecycleView: View {
         galleryViewModel: ProgressPhotoGalleryViewModel,
         assetSynchronizer: any CloudPhotoAssetSynchronizing = NoOpCloudPhotoAssetCoordinator.shared,
         fixtureImageData: Data? = nil,
+        broaderPhotoLibraryAccessState: PhotoLibraryAccessState = .authorized,
         onClose: @escaping @MainActor () -> Void
     ) {
         self.viewModel = viewModel
@@ -74,6 +76,7 @@ public struct ProgressPhotoLifecycleView: View {
             galleryViewModel: galleryViewModel
         )
         self.fixtureImageData = fixtureImageData
+        self.broaderPhotoLibraryAccessState = broaderPhotoLibraryAccessState
         self.onClose = onClose
     }
 
@@ -117,7 +120,10 @@ public struct ProgressPhotoLifecycleView: View {
                         .disabled(viewModel.isMutationInFlight)
                         .accessibilityIdentifier("photos.note")
 
-                    SystemPhotosPickerView(title: localized("photos.picker")) { selection in
+                    SystemPhotosPickerView(
+                        title: localized("photos.picker"),
+                        accessState: broaderPhotoLibraryAccessState
+                    ) { selection in
                         Task {
                             if await viewModel.importSelection(selection) {
                                 await galleryViewModel.load()

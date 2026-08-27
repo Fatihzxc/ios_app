@@ -72,6 +72,7 @@ public struct LifestyleProgressSection: View {
             } else {
                 if let sleep = viewModel.day?.sleep {
                     summaryCard(
+                        identifier: "lifestyle.progress.sleep.summary",
                         title: localized("lifestyle.progress.sleep"),
                         lines: [
                             format(
@@ -87,6 +88,7 @@ public struct LifestyleProgressSection: View {
                 }
                 if let mood = viewModel.day?.mood {
                     summaryCard(
+                        identifier: "lifestyle.progress.mood.summary",
                         title: localized("lifestyle.progress.mood"),
                         lines: moodLines(mood)
                     )
@@ -95,7 +97,11 @@ public struct LifestyleProgressSection: View {
         }
     }
 
-    private func summaryCard(title: String, lines: [String]) -> some View {
+    private func summaryCard(
+        identifier: String,
+        title: String,
+        lines: [String]
+    ) -> some View {
         AppCard {
             VStack(alignment: .leading, spacing: AppSpacing.small) {
                 Text(title)
@@ -112,6 +118,10 @@ public struct LifestyleProgressSection: View {
                 }
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityValue(lines.joined(separator: ", "))
+        .accessibilityIdentifier(identifier)
     }
 
     private func moodLines(_ mood: MoodLogSnapshot) -> [String] {

@@ -800,8 +800,9 @@ private enum UITestSessionFixture {
         reminder.status == .pending else {
             return
         }
-        reminder.dueDate = Date.now.addingTimeInterval(-60)
-        reminder.updatedAt = Date.now
+        let now = AppDomainContext.now()
+        reminder.dueDate = now.addingTimeInterval(-60)
+        reminder.updatedAt = now
         try modelContext.save()
     }
 

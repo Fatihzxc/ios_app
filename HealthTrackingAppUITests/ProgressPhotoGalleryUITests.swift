@@ -20,11 +20,14 @@ final class ProgressPhotoGalleryUITests: XCTestCase {
 
         require(app.descendants(matching: .any)["tab.progress"]).tap()
         require(app.descendants(matching: .any)["root.progress"])
-        let open = require(app.descendants(matching: .any)["photos.open"])
+        let open = require(
+            app.descendants(matching: .any)["progress.photos.action"]
+        )
         makeHittable(open, in: app)
         open.tap()
 
         require(app.descendants(matching: .any)["photos.gallery.content"])
+        attachScreenshot(named: "m3-photo-gallery-light")
 
         let first = require(
             app.buttons[
@@ -111,5 +114,12 @@ final class ProgressPhotoGalleryUITests: XCTestCase {
     ) -> XCUIElement {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), message)
         return element
+    }
+
+    private func attachScreenshot(named name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }

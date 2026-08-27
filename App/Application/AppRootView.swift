@@ -19,6 +19,7 @@ struct AppRootView: View {
     let nutritionManualEntryViewModel: NutritionManualEntryViewModel
     let makeSessionViewModel: @MainActor () -> SessionViewModel
     let makeTrackerFeatureRouter: @MainActor () -> any TrackerFeatureRouting
+    let trackerFeatureRouterInstantiationCount: @MainActor () -> Int
     let trainingHapticController: TrainingHapticController?
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
@@ -37,6 +38,7 @@ struct AppRootView: View {
         nutritionManualEntryViewModel: NutritionManualEntryViewModel,
         makeSessionViewModel: @escaping @MainActor () -> SessionViewModel,
         makeTrackerFeatureRouter: @escaping @MainActor () -> any TrackerFeatureRouting,
+        trackerFeatureRouterInstantiationCount: @escaping @MainActor () -> Int = { 0 },
         trainingHapticController: TrainingHapticController?,
         shouldLoadFoundation: Bool,
         persistencePresentation: FoundationPersistencePresentation,
@@ -54,6 +56,8 @@ struct AppRootView: View {
         self.nutritionManualEntryViewModel = nutritionManualEntryViewModel
         self.makeSessionViewModel = makeSessionViewModel
         self.makeTrackerFeatureRouter = makeTrackerFeatureRouter
+        self.trackerFeatureRouterInstantiationCount =
+            trackerFeatureRouterInstantiationCount
         self.trainingHapticController = trainingHapticController
         self.shouldLoadFoundation = shouldLoadFoundation
         self.persistencePresentation = persistencePresentation
@@ -106,6 +110,28 @@ struct AppRootView: View {
                     .accessibilityIdentifier(
                         "health-check.notifications.permission.request-count"
                     )
+                    .allowsHitTesting(false)
+            }
+            if exposesTrackerFeatureRouterEvidence {
+                Text(String(trackerFeatureRouterInstantiationCount()))
+                    .font(.system(size: 1))
+                    .foregroundStyle(.clear)
+                    .frame(width: 1, height: 1)
+                    .accessibilityIdentifier("m3.tracker-router.instantiation-count")
+                    .accessibilityValue(
+                        String(trackerFeatureRouterInstantiationCount())
+                    )
+                    .allowsHitTesting(false)
+            }
+            if exposesTrackerFeatureRouterEvidence,
+               AppUITestLaunchConfiguration.resolve()?.fixedNow != nil {
+                let fixedNowEvidence = ISO8601DateFormatter().string(from: AppDomainContext.now())
+                Text(fixedNowEvidence)
+                    .font(.system(size: 1))
+                    .foregroundStyle(.clear)
+                    .frame(width: 1, height: 1)
+                    .accessibilityIdentifier("m3.fixed-now")
+                    .accessibilityValue(fixedNowEvidence)
                     .allowsHitTesting(false)
             }
             #endif
@@ -250,7 +276,8 @@ struct AppRootView: View {
                 onOpenTrackers: performTodayTrackerAction,
                 onOpenLifestyle: performTodayLifestyleAction,
                 onOpenPosture: performTodayPostureAction,
-                onOpenHealthChecks: performTodayHealthCheckAction
+                onOpenHealthChecks: performTodayHealthCheckAction,
+                onOpenBloodwork: performTodayBloodworkAction
             )
         case .training:
             FoundationProgramView(
@@ -272,6 +299,10 @@ struct AppRootView: View {
         case .progress:
             if let trackerFeatureRouter {
                 trackerFeatureRouter.makeProgressView(
+                    onOpenBodyMetric: { trackerEntryRoute = .bodyMetric },
+                    onOpenLifestyle: { trackerEntryRoute = .lifestyle },
+                    onOpenPosture: { trackerEntryRoute = .posture },
+                    onOpenHealthChecks: { trackerEntryRoute = .healthChecks },
                     onOpenBloodwork: {
                         trackerEntryRoute = .bloodwork
                     },
@@ -347,6 +378,11 @@ struct AppRootView: View {
         trackerEntryRoute = .healthChecks
     }
 
+    private func performTodayBloodworkAction() {
+        resolveTrackerFeatureBundle()
+        trackerEntryRoute = .bloodwork
+    }
+
     private func resolveTrackerFeatureBundle() {
         guard trackerFeatureRouter == nil else { return }
         trackerFeatureRouter = makeTrackerFeatureRouter()
@@ -368,6 +404,14 @@ struct AppRootView: View {
     }
 
     private var exposesNotificationAuthorizationEvidence: Bool {
+        #if DEBUG
+        AppUITestLaunchConfiguration.resolve()?.scenario == .m3HealthChecks
+        #else
+        false
+        #endif
+    }
+
+    private var exposesTrackerFeatureRouterEvidence: Bool {
         #if DEBUG
         AppUITestLaunchConfiguration.resolve()?.scenario == .m3HealthChecks
         #else

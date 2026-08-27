@@ -18,6 +18,7 @@ public struct TodayView: View {
     private let onOpenLifestyle: @MainActor () -> Void
     private let onOpenPosture: @MainActor () -> Void
     private let onOpenHealthChecks: @MainActor () -> Void
+    private let onOpenBloodwork: @MainActor () -> Void
 
     public init(
         viewModel: TodayViewModel,
@@ -28,7 +29,8 @@ public struct TodayView: View {
         onOpenTrackers: @escaping @MainActor () -> Void = {},
         onOpenLifestyle: @escaping @MainActor () -> Void = {},
         onOpenPosture: @escaping @MainActor () -> Void = {},
-        onOpenHealthChecks: @escaping @MainActor () -> Void = {}
+        onOpenHealthChecks: @escaping @MainActor () -> Void = {},
+        onOpenBloodwork: @escaping @MainActor () -> Void = {}
     ) {
         self.viewModel = viewModel
         self.nutritionState = nutritionState
@@ -39,6 +41,7 @@ public struct TodayView: View {
         self.onOpenLifestyle = onOpenLifestyle
         self.onOpenPosture = onOpenPosture
         self.onOpenHealthChecks = onOpenHealthChecks
+        self.onOpenBloodwork = onOpenBloodwork
     }
 
     public var body: some View {
@@ -272,6 +275,19 @@ public struct TodayView: View {
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("today.health-check.action")
                 .accessibilityHint(text("today.health-check.action.hint"))
+
+                Button(action: onOpenBloodwork) {
+                    Label(
+                        text("today.bloodwork.action"),
+                        systemImage: "testtube.2"
+                    )
+                    .font(AppTypography.label)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("today.bloodwork.action")
+                .accessibilityHint(text("today.bloodwork.action.hint"))
             }
         }
         .accessibilityElement(children: .contain)

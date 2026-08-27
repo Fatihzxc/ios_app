@@ -24,7 +24,7 @@ public enum PhotoAssetCleanupPhase: Equatable, Sendable {
     case pending
 }
 
-public enum PhotoLibraryAccessState: Equatable, Sendable {
+public enum PhotoLibraryAccessState: String, Equatable, Sendable {
     case denied
     case limited
     case notDetermined

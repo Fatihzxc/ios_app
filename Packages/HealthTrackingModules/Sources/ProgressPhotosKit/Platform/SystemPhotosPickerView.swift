@@ -245,13 +245,16 @@ public final class CappedPhotoStagingStore: @unchecked Sendable {
 public struct SystemPhotosPickerView: View {
     @State private var selection: PhotosPickerItem?
     private let title: String
+    private let accessState: PhotoLibraryAccessState
     private let onSelection: @MainActor ((any PhotoSelectionLoading)?) -> Void
 
     public init(
         title: String,
+        accessState: PhotoLibraryAccessState = .authorized,
         onSelection: @escaping @MainActor ((any PhotoSelectionLoading)?) -> Void
     ) {
         self.title = title
+        self.accessState = accessState
         self.onSelection = onSelection
     }
 
@@ -265,6 +268,8 @@ public struct SystemPhotosPickerView: View {
         }
         .buttonStyle(.borderedProminent)
         .accessibilityIdentifier("photos.picker")
+        .photoLibraryAccessEvidence(accessState)
+        .disabled(!SystemPhotoPickerAvailability.isEnabled(for: accessState))
         .onChange(of: selection) { _, item in
             guard let item else { return }
             onSelection(
@@ -278,6 +283,17 @@ public struct SystemPhotosPickerView: View {
         .task {
             await ImportedPhotoFile.prepareStaging()
         }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func photoLibraryAccessEvidence(_ accessState: PhotoLibraryAccessState) -> some View {
+        #if DEBUG
+        accessibilityValue(accessState.rawValue)
+        #else
+        self
+        #endif
     }
 }
 

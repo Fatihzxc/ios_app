@@ -6,6 +6,7 @@ import SwiftUI
 @MainActor
 public struct BodyMetricEntryView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Bindable private var viewModel: BodyMetricViewModel
     private let editingSnapshot: BodyMetricSnapshot?
     private let onClose: @MainActor () -> Void
@@ -88,7 +89,9 @@ public struct BodyMetricEntryView: View {
                             text: $customName
                         )
                         .textFieldStyle(.roundedBorder)
+                        .metricEntryTouchTarget()
                         .focused(focus)
+                        .accessibilityLabel(localized("metrics.entry.custom.name"))
                         .accessibilityIdentifier("metrics.entry.custom.name")
                         TextField(
                             localized("metrics.entry.custom.value"),
@@ -96,18 +99,30 @@ public struct BodyMetricEntryView: View {
                         )
                         .keyboardType(.decimalPad)
                         .textFieldStyle(.roundedBorder)
+                        .metricEntryTouchTarget()
                         .focused(focus)
+                        .accessibilityLabel(localized("metrics.entry.custom.value"))
                         .accessibilityIdentifier("metrics.entry.custom.value")
                         TextField(
                             localized("metrics.entry.custom.unit"),
                             text: $customUnit
                         )
                         .textFieldStyle(.roundedBorder)
+                        .metricEntryTouchTarget()
                         .focused(focus)
+                        .accessibilityLabel(localized("metrics.entry.custom.unit"))
                         .accessibilityIdentifier("metrics.entry.custom.unit")
                     }
 
                     statePresentation
+                }
+            }
+            .toolbar {
+                if shouldOfferToolbarDraftClose {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(localized("metrics.entry.close"), action: onClose)
+                            .accessibilityIdentifier("metrics.entry.close")
+                    }
                 }
             }
         }
@@ -131,6 +146,7 @@ public struct BodyMetricEntryView: View {
                 TextField(title, text: text)
                     .keyboardType(.decimalPad)
                     .textFieldStyle(.roundedBorder)
+                    .metricEntryTouchTarget()
                     .focused(focus)
                     .accessibilityLabel(title)
                     .accessibilityIdentifier(identifier)
@@ -185,20 +201,43 @@ public struct BodyMetricEntryView: View {
     }
 
     private var secondaryTitle: String? {
-        guard editingSnapshot == nil,
-              case .saved = viewModel.mutationPhase else { return nil }
-        return localized("metrics.entry.undo")
+        if shouldOfferUndo { return localized("metrics.entry.undo") }
+        if shouldOfferSecondaryDraftClose { return localized("metrics.entry.close") }
+        return nil
     }
 
     private var secondaryIdentifier: String? {
-        secondaryTitle == nil ? nil : "metrics.entry.undo"
+        if shouldOfferUndo { return "metrics.entry.undo" }
+        if shouldOfferSecondaryDraftClose { return "metrics.entry.close" }
+        return nil
     }
 
     private var secondaryAction: (() -> Void)? {
-        guard secondaryTitle != nil else { return nil }
-        return {
-            Task { await viewModel.undoLastSave() }
+        if shouldOfferUndo {
+            return {
+                Task { await viewModel.undoLastSave() }
+            }
         }
+        guard shouldOfferSecondaryDraftClose else { return nil }
+        return { onClose() }
+    }
+
+    private var shouldOfferUndo: Bool {
+        guard editingSnapshot == nil,
+              case .saved = viewModel.mutationPhase else { return false }
+        return true
+    }
+
+    private var shouldOfferDraftClose: Bool {
+        !isSaving && !isSaved
+    }
+
+    private var shouldOfferSecondaryDraftClose: Bool {
+        shouldOfferDraftClose && !dynamicTypeSize.isAccessibilitySize
+    }
+
+    private var shouldOfferToolbarDraftClose: Bool {
+        shouldOfferDraftClose && dynamicTypeSize.isAccessibilitySize
     }
 
     private var isSaving: Bool {
@@ -340,6 +379,13 @@ public struct BodyMetricEntryView: View {
 
     private func localized(_ key: String.LocalizationValue) -> String {
         String(localized: key, bundle: .module)
+    }
+}
+
+private extension View {
+    func metricEntryTouchTarget() -> some View {
+        frame(minHeight: 52)
+            .contentShape(.interaction, Rectangle())
     }
 }
 

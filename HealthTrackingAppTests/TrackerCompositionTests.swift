@@ -8,6 +8,56 @@ import XCTest
 
 @MainActor
 final class TrackerCompositionTests: XCTestCase {
+    func testUITestPhotoLibraryAccessStateParsesDeniedAndLimitedAndRejectsAmbiguity() {
+        let fixedNowValue = "2026-08-27T10:00:00Z"
+        let expectedNow = ISO8601DateFormatter().date(from: fixedNowValue)
+        for expected in ["denied", "limited"] {
+            let configuration = AppUITestLaunchConfiguration.resolve(arguments: [
+                "HealthTrackingApp",
+                "-ui-testing",
+                "-ui-test-scenario", "m3-health-checks",
+                "-ui-test-appearance", "light",
+                "-ui-test-photo-library-access", expected,
+                "-ui-test-now", fixedNowValue,
+            ])
+
+            XCTAssertEqual(
+                configuration?.broaderPhotoLibraryAccessState.rawValue,
+                expected
+            )
+            XCTAssertEqual(configuration?.fixedNow, expectedNow)
+        }
+
+        XCTAssertNil(
+            AppUITestLaunchConfiguration.resolve(arguments: [
+                "HealthTrackingApp",
+                "-ui-testing",
+                "-ui-test-scenario", "m3-health-checks",
+                "-ui-test-appearance", "light",
+                "-ui-test-photo-library-access", "denied",
+                "-ui-test-photo-library-access", "limited",
+            ])
+        )
+        XCTAssertNil(
+            AppUITestLaunchConfiguration.resolve(arguments: [
+                "HealthTrackingApp",
+                "-ui-testing",
+                "-ui-test-scenario", "m3-health-checks",
+                "-ui-test-appearance", "light",
+                "-ui-test-photo-library-access", "unsupported",
+            ])
+        )
+        XCTAssertNil(
+            AppUITestLaunchConfiguration.resolve(arguments: [
+                "HealthTrackingApp",
+                "-ui-testing",
+                "-ui-test-scenario", "m3-health-checks",
+                "-ui-test-appearance", "light",
+                "-ui-test-now", "not-a-date",
+            ])
+        )
+    }
+
     func testBootstrapAndRootConstructionDoNotInvokeTrackerFactoryAndFirstRouteCachesOnce() async throws {
         var factoryCalls = 0
         let repository = TrackerMetricsRepositoryStub()

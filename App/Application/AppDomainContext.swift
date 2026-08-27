@@ -10,6 +10,12 @@ enum AppDomainContext {
 
     @MainActor
     static func now() -> Date {
-        .now
+        #if DEBUG
+        if let configuration = AppUITestLaunchConfiguration.resolve(),
+           let fixedNow = configuration.fixedNow {
+            return fixedNow
+        }
+        #endif
+        return .now
     }
 }

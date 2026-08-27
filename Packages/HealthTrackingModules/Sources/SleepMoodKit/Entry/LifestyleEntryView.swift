@@ -38,7 +38,11 @@ public struct LifestyleEntryView: View {
                 primaryActionAccessibilityIdentifier: primaryIdentifier,
                 isPrimaryActionLoading: isSaving,
                 isPrimaryActionEnabled: viewModel.loadPhase == .loaded && !isSaving,
-                primaryAction: primaryAction
+                secondaryActionTitle: draftCloseTitle,
+                secondaryActionAccessibilityLabel: draftCloseTitle,
+                secondaryActionAccessibilityIdentifier: draftCloseIdentifier,
+                primaryAction: primaryAction,
+                secondaryAction: draftCloseAction
             ) { focus in
                 VStack(alignment: .leading, spacing: AppSpacing.comfortable) {
                     loadMarker
@@ -238,6 +242,20 @@ public struct LifestyleEntryView: View {
         if isSaved { return "lifestyle.entry.close" }
         if isFailure { return "lifestyle.entry.retry" }
         return "lifestyle.entry.save"
+    }
+
+    private var draftCloseTitle: String? {
+        guard !isSaving, !isSaved else { return nil }
+        return localized("lifestyle.entry.close")
+    }
+
+    private var draftCloseIdentifier: String? {
+        draftCloseTitle == nil ? nil : "lifestyle.entry.close"
+    }
+
+    private var draftCloseAction: (() -> Void)? {
+        guard draftCloseTitle != nil else { return nil }
+        return { onClose() }
     }
 
     private var isSaving: Bool {

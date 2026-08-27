@@ -34,6 +34,9 @@ struct AppBootstrapView: View {
                     nutritionManualEntryViewModel: dependencies.nutritionManualEntryViewModel,
                     makeSessionViewModel: dependencies.makeSessionViewModel,
                     makeTrackerFeatureRouter: dependencies.makeTrackerFeatureRouter,
+                    trackerFeatureRouterInstantiationCount: {
+                        dependencies.trackerFeatureRouterInstantiationCount
+                    },
                     trainingHapticController: dependencies.trainingHapticController,
                     shouldLoadFoundation: dependencies.shouldLoadFoundation,
                     persistencePresentation: dependencies.persistencePresentation,

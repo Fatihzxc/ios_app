@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 import HealthChecksKit
 import MetricsKit
@@ -59,6 +60,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
     private let calendar: Calendar
     private let now: @MainActor () -> Date
     private let progressPhotoFixtureData: Data?
+    private let broaderPhotoLibraryAccessState: PhotoLibraryAccessState
 
     init(
         metricsRepository: any MetricsRepository,
@@ -68,6 +70,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         progressPhotoRepository: any ProgressPhotoRepository = NoOpProgressPhotoRepository.shared,
         progressPhotoAssetSynchronizer: any CloudPhotoAssetSynchronizing = NoOpCloudPhotoAssetCoordinator.shared,
         progressPhotoFixtureData: Data? = nil,
+        broaderPhotoLibraryAccessState: PhotoLibraryAccessState = .authorized,
         notificationCenter: any NotificationCenterClient =
             SystemNotificationCenterAdapter(),
         healthCheckNotificationComposition: HealthCheckNotificationComposition? = nil,
@@ -111,6 +114,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         self.progressPhotoRepository = progressPhotoRepository
         self.progressPhotoAssetSynchronizer = progressPhotoAssetSynchronizer
         self.progressPhotoFixtureData = progressPhotoFixtureData
+        self.broaderPhotoLibraryAccessState = broaderPhotoLibraryAccessState
         self.calendar = calendar
         self.now = now
         bodyMetricViewModel = BodyMetricViewModel(repository: metricsRepository)
@@ -234,19 +238,31 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
                 galleryViewModel: progressPhotoGalleryViewModel,
                 assetSynchronizer: progressPhotoAssetSynchronizer,
                 fixtureImageData: progressPhotoFixtureData,
+                broaderPhotoLibraryAccessState: broaderPhotoLibraryAccessState,
                 onClose: onClose
             )
         )
     }
 
     func makeProgressView(
+        onOpenBodyMetric: @escaping @MainActor () -> Void,
+        onOpenLifestyle: @escaping @MainActor () -> Void,
+        onOpenPosture: @escaping @MainActor () -> Void,
+        onOpenHealthChecks: @escaping @MainActor () -> Void,
         onOpenBloodwork: @escaping @MainActor () -> Void,
         onOpenProgressPhotos: @escaping @MainActor () -> Void
     ) -> AnyView {
         AnyView(
             BodyMetricProgressView(viewModel: bodyMetricViewModel) {
                 VStack(alignment: .leading, spacing: 24) {
-                    ProgressPhotoAccessButton(action: onOpenProgressPhotos)
+                    ProgressTrackerQuickActions(
+                        onOpenBodyMetric: onOpenBodyMetric,
+                        onOpenLifestyle: onOpenLifestyle,
+                        onOpenPosture: onOpenPosture,
+                        onOpenHealthChecks: onOpenHealthChecks,
+                        onOpenBloodwork: onOpenBloodwork,
+                        onOpenProgressPhotos: onOpenProgressPhotos
+                    )
                     LifestyleProgressSection(
                         viewModel: lifestyleViewModel,
                         date: now()
@@ -261,6 +277,81 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
                 }
             }
         )
+    }
+}
+
+@MainActor
+private struct ProgressTrackerQuickActions: View {
+    let onOpenBodyMetric: @MainActor () -> Void
+    let onOpenLifestyle: @MainActor () -> Void
+    let onOpenPosture: @MainActor () -> Void
+    let onOpenHealthChecks: @MainActor () -> Void
+    let onOpenBloodwork: @MainActor () -> Void
+    let onOpenProgressPhotos: @MainActor () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.standard) {
+            Text(localized("progress.quick-actions.heading"))
+                .font(AppTypography.titleMedium)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+
+            quickAction(
+                "progress.metrics.action",
+                systemImage: "scalemass",
+                action: onOpenBodyMetric
+            )
+            .accessibilityIdentifier("progress.metrics.action")
+            quickAction(
+                "progress.lifestyle.action",
+                systemImage: "bed.double",
+                action: onOpenLifestyle
+            )
+            .accessibilityIdentifier("progress.lifestyle.action")
+            quickAction(
+                "progress.posture.action",
+                systemImage: "figure.stand",
+                action: onOpenPosture
+            )
+            .accessibilityIdentifier("progress.posture.action")
+            quickAction(
+                "progress.health-check.action",
+                systemImage: "cross.case.fill",
+                action: onOpenHealthChecks
+            )
+            .accessibilityIdentifier("progress.health-check.action")
+            quickAction(
+                "progress.bloodwork.action",
+                systemImage: "testtube.2",
+                action: onOpenBloodwork
+            )
+            .accessibilityIdentifier("progress.bloodwork.action")
+            quickAction(
+                "progress.photos.action",
+                systemImage: "photo.stack",
+                action: onOpenProgressPhotos
+            )
+            .accessibilityIdentifier("progress.photos.action")
+        }
+    }
+
+    private func quickAction(
+        _ titleKey: String.LocalizationValue,
+        systemImage: String,
+        action: @escaping @MainActor () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(localized(titleKey), systemImage: systemImage)
+                .font(AppTypography.label)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+    }
+
+    private func localized(_ key: String.LocalizationValue) -> String {
+        String(localized: key)
     }
 }
 
@@ -447,6 +538,9 @@ enum DefaultTrackerFeatureFactory {
                     progressPhotoFixtureData: Data(
                         base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2Z7sAAAAASUVORK5CYII="
                     ),
+                    broaderPhotoLibraryAccessState:
+                        AppUITestLaunchConfiguration.resolve()?
+                            .broaderPhotoLibraryAccessState ?? .authorized,
                     healthCheckNotificationComposition:
                         resolvedHealthCheckNotificationComposition,
                     calendar: calendar,

@@ -13,9 +13,10 @@ xcodebuild_test_arguments=(
 cloud_compile_only=false
 bootstrap_idempotence_only=false
 m311_red_only=false
+m312_red_only=false
 
 usage() {
-    echo "Usage: $0 [--only-testing TestBundleName|--skip-testing TestIdentifier|--cloud-compile-only|--verify-bootstrap-idempotence|--m311-red-only]" >&2
+    echo "Usage: $0 [--only-testing TestBundleName|--skip-testing TestIdentifier|--cloud-compile-only|--verify-bootstrap-idempotence|--m311-red-only|--m312-red-only]" >&2
 }
 
 if (( $# > 0 )); then
@@ -56,6 +57,16 @@ if (( $# > 0 )); then
             m311_red_only=true
             xcodebuild_test_arguments+=("-only-testing:NotificationsKitTests")
             ;;
+        --m312-red-only)
+            if (( $# != 1 )); then
+                usage
+                exit 2
+            fi
+            m312_red_only=true
+            xcodebuild_test_arguments+=(
+                "-only-testing:HealthTrackingAppUITests/M3AcceptanceUITests/testTodayAndProgressExposeEveryM3TrackerEntryThroughOneLazyRouter"
+            )
+            ;;
         *)
             usage
             exit 2
@@ -78,6 +89,14 @@ if [[ "$m311_red_only" == true ]]; then
     "$script_dir/verify-trackers.sh" --m311-red
 else
     "$script_dir/verify-trackers.sh"
+fi
+if [[ "$m311_red_only" != true ]]; then
+    "$script_dir/verify-m3-acceptance.sh" --self-test
+    if [[ "$m312_red_only" == true ]]; then
+        "$script_dir/verify-m3-acceptance.sh" --red
+    else
+        "$script_dir/verify-m3-acceptance.sh"
+    fi
 fi
 
 if [[ "$bootstrap_idempotence_only" == true ]]; then

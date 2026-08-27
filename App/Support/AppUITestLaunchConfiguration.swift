@@ -1,4 +1,5 @@
 import Foundation
+import ProgressPhotosKit
 import SwiftUI
 
 #if DEBUG
@@ -60,6 +61,8 @@ struct AppUITestLaunchConfiguration {
         "-ui-test-medical-safety-first-use-evidence"
     static let notificationAuthorizationRequestCountIdentifier =
         "health-check.notifications.permission.request-count"
+    static let photoLibraryAccessFlag = "-ui-test-photo-library-access"
+    static let fixedNowFlag = "-ui-test-now"
     @MainActor static let notificationAuthorizationEvidence =
         NotificationAuthorizationUITestEvidence()
     @MainActor static var notificationAuthorizationRequestCount: Int {
@@ -88,6 +91,8 @@ struct AppUITestLaunchConfiguration {
     let persistentStoreIdentifier: UUID?
     let exposesLaunchPerformanceEvidence: Bool
     let exposesMedicalSafetyFirstUseEvidence: Bool
+    let broaderPhotoLibraryAccessState: PhotoLibraryAccessState
+    let fixedNow: Date?
 
     static func resolve(arguments: [String] = ProcessInfo.processInfo.arguments) -> Self? {
         guard arguments.filter({ $0 == "-ui-testing" }).count == 1,
@@ -113,6 +118,28 @@ struct AppUITestLaunchConfiguration {
             persistentStoreIdentifier = nil
         }
 
+        let broaderPhotoLibraryAccessState: PhotoLibraryAccessState
+        if arguments.contains(photoLibraryAccessFlag) {
+            guard let value = uniqueValue(after: photoLibraryAccessFlag, in: arguments),
+                  let state = PhotoLibraryAccessState(rawValue: value) else {
+                return nil
+            }
+            broaderPhotoLibraryAccessState = state
+        } else {
+            broaderPhotoLibraryAccessState = .authorized
+        }
+
+        let fixedNow: Date?
+        if arguments.contains(fixedNowFlag) {
+            guard let value = uniqueValue(after: fixedNowFlag, in: arguments),
+                  let date = ISO8601DateFormatter().date(from: value) else {
+                return nil
+            }
+            fixedNow = date
+        } else {
+            fixedNow = nil
+        }
+
         return Self(
             scenario: scenario,
             appearance: appearance,
@@ -122,7 +149,9 @@ struct AppUITestLaunchConfiguration {
             ),
             exposesMedicalSafetyFirstUseEvidence: arguments.contains(
                 medicalSafetyFirstUseEvidenceFlag
-            )
+            ),
+            broaderPhotoLibraryAccessState: broaderPhotoLibraryAccessState,
+            fixedNow: fixedNow
         )
     }
 

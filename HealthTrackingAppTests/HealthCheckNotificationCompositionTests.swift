@@ -1716,10 +1716,21 @@ private final class NotificationTrackerRouterSpy: TrackerFeatureRouting {
     }
 
     func makeProgressView(
+        onOpenBodyMetric: @escaping @MainActor () -> Void,
+        onOpenLifestyle: @escaping @MainActor () -> Void,
+        onOpenPosture: @escaping @MainActor () -> Void,
+        onOpenHealthChecks: @escaping @MainActor () -> Void,
         onOpenBloodwork: @escaping @MainActor () -> Void,
         onOpenProgressPhotos: @escaping @MainActor () -> Void
     ) -> AnyView {
-        _ = (onOpenBloodwork, onOpenProgressPhotos)
+        _ = (
+            onOpenBodyMetric,
+            onOpenLifestyle,
+            onOpenPosture,
+            onOpenHealthChecks,
+            onOpenBloodwork,
+            onOpenProgressPhotos
+        )
         return AnyView(EmptyView())
     }
 }

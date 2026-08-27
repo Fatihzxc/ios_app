@@ -33,6 +33,10 @@ protocol TrackerFeatureRouting: AnyObject {
     ) -> AnyView
 
     func makeProgressView(
+        onOpenBodyMetric: @escaping @MainActor () -> Void,
+        onOpenLifestyle: @escaping @MainActor () -> Void,
+        onOpenPosture: @escaping @MainActor () -> Void,
+        onOpenHealthChecks: @escaping @MainActor () -> Void,
         onOpenBloodwork: @escaping @MainActor () -> Void,
         onOpenProgressPhotos: @escaping @MainActor () -> Void
     ) -> AnyView

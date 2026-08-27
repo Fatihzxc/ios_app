@@ -17,6 +17,7 @@ final class ProgressPhotoLifecycleUITests: XCTestCase {
         XCTAssertTrue(picker.isEnabled)
         require(identified("photos.import.fixture", in: app)).tap()
         require(identified("photos.list.content", in: app))
+        attachScreenshot(named: "m3-photo-local-lifecycle-light")
         let imported = require(firstIdentified(prefix: "photos.row.", in: app))
         XCTAssertFalse(imported.label.contains("/private/"))
         XCTAssertFalse(imported.label.contains("file:"))
@@ -48,7 +49,39 @@ final class ProgressPhotoLifecycleUITests: XCTestCase {
         XCTAssertFalse(identified("photos.import.undo", in: app).exists)
     }
 
-    private func launch(storeIdentifier: UUID) -> XCUIApplication {
+    func testDeniedAndLimitedBroaderAccessKeepActualSystemPickerOperable() {
+        for accessState in ["denied", "limited"] {
+            let app = launch(
+                storeIdentifier: UUID(),
+                broaderPhotoLibraryAccessState: accessState
+            )
+            openProgressPhotos(in: app)
+
+            let picker = require(identified("photos.picker", in: app))
+            makeHittable(picker, in: app)
+            XCTAssertTrue(
+                picker.isEnabled,
+                "The system picker must remain enabled for broader access state \(accessState)."
+            )
+            XCTAssertEqual(
+                picker.value as? String,
+                accessState,
+                "The shipped picker must consume the exact injected broader-access state."
+            )
+            XCTAssertTrue(picker.isHittable)
+            XCTAssertGreaterThanOrEqual(
+                picker.frame.height + 0.01,
+                52,
+                "The actual system picker must retain its accessible touch target."
+            )
+            app.terminate()
+        }
+    }
+
+    private func launch(
+        storeIdentifier: UUID,
+        broaderPhotoLibraryAccessState: String? = nil
+    ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
             "-ui-testing",
@@ -58,6 +91,12 @@ final class ProgressPhotoLifecycleUITests: XCTestCase {
             "-AppleLanguages", "(tr)",
             "-AppleLocale", "tr_TR",
         ]
+        if let broaderPhotoLibraryAccessState {
+            app.launchArguments += [
+                "-ui-test-photo-library-access",
+                broaderPhotoLibraryAccessState,
+            ]
+        }
         app.launch()
         return app
     }
@@ -65,7 +104,7 @@ final class ProgressPhotoLifecycleUITests: XCTestCase {
     private func openProgressPhotos(in app: XCUIApplication) {
         require(identified("tab.progress", in: app)).tap()
         require(identified("root.progress", in: app))
-        let open = require(identified("photos.open", in: app))
+        let open = require(identified("progress.photos.action", in: app))
         makeHittable(open, in: app)
         open.tap()
         require(identified("photos.lifecycle.content", in: app))
@@ -106,5 +145,12 @@ final class ProgressPhotoLifecycleUITests: XCTestCase {
     ) -> XCUIElement {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), message)
         return element
+    }
+
+    private func attachScreenshot(named name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }
