@@ -378,6 +378,71 @@ final class ProgressPhotoGalleryViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.comparison?.after.assetState, .available(Data([33])))
     }
 
+    func testSuccessfulSyncReloadsExactMissingAndCorruptGalleryStatesInOpenLifecycle() async throws {
+        let missing = fixtureSnapshot(
+            id: "00000000-0000-0000-0000-000000000065",
+            date: Date(timeIntervalSince1970: 12_400),
+            pose: .front,
+            assetID: "00000000-0000-0000-0000-000000000165"
+        )
+        let corrupt = fixtureSnapshot(
+            id: "00000000-0000-0000-0000-000000000066",
+            date: Date(timeIntervalSince1970: 12_500),
+            pose: .side,
+            assetID: "00000000-0000-0000-0000-000000000166"
+        )
+        let alreadyAvailable = fixtureSnapshot(
+            id: "00000000-0000-0000-0000-000000000067",
+            date: Date(timeIntervalSince1970: 12_600),
+            pose: .back,
+            assetID: "00000000-0000-0000-0000-000000000167"
+        )
+        let repository = ProgressPhotoGalleryRepositoryFake(
+            photos: [missing, corrupt, alreadyAvailable],
+            thumbnails: [
+                missing.imageRef: .missing,
+                corrupt.imageRef: .corrupt,
+                alreadyAvailable.imageRef: .available(Data([7])),
+            ]
+        )
+        let viewModel = ProgressPhotoGalleryViewModel(repository: repository)
+        await viewModel.load()
+        await viewModel.loadThumbnail(id: missing.id)
+        await viewModel.loadThumbnail(id: corrupt.id)
+        await viewModel.loadThumbnail(id: alreadyAvailable.id)
+        XCTAssertEqual(viewModel.items.map(\.assetState), [
+            .available(Data([7])),
+            .corrupt,
+            .missing,
+        ])
+
+        repository.thumbnails[missing.imageRef] = .available(Data([5]))
+        repository.thumbnails[corrupt.imageRef] = .available(Data([6]))
+        let synchronizer = CloudPhotoAssetSynchronizerFake(outcome: .synchronized)
+        let lifecycle = ProgressPhotoAssetSyncLifecycle(
+            synchronizer: synchronizer,
+            galleryViewModel: viewModel
+        )
+
+        let outcome = try await lifecycle.synchronize()
+        let synchronizationCalls = await synchronizer.calls
+
+        XCTAssertEqual(outcome, .synchronized)
+        XCTAssertEqual(synchronizationCalls, 1)
+        XCTAssertEqual(viewModel.items.map(\.assetState), [
+            .available(Data([7])),
+            .available(Data([6])),
+            .available(Data([5])),
+        ])
+        XCTAssertEqual(repository.thumbnailRequests, [
+            missing.imageRef,
+            corrupt.imageRef,
+            alreadyAvailable.imageRef,
+            corrupt.imageRef,
+            missing.imageRef,
+        ])
+    }
+
     func testThumbnailCacheEvictsLeastRecentUnselectedAsset() async {
         let snapshots = (0..<3).map { offset in
             fixtureSnapshot(
@@ -414,6 +479,20 @@ final class ProgressPhotoGalleryViewModelTests: XCTestCase {
             Set(viewModel.items.filter { $0.assetState.isAvailable }.map(\.id)),
             Set([snapshots[1].id, snapshots[2].id])
         )
+    }
+}
+
+private actor CloudPhotoAssetSynchronizerFake: CloudPhotoAssetSynchronizing {
+    private let outcome: CloudPhotoAssetSyncOutcome
+    private(set) var calls = 0
+
+    init(outcome: CloudPhotoAssetSyncOutcome) {
+        self.outcome = outcome
+    }
+
+    func synchronize() async throws -> CloudPhotoAssetSyncOutcome {
+        calls += 1
+        return outcome
     }
 }
 

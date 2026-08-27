@@ -15,6 +15,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
     let healthChecksRepository: any HealthChecksRepository
     let bloodworkRepository: any BloodworkRepository
     let progressPhotoRepository: any ProgressPhotoRepository
+    let progressPhotoAssetSynchronizer: any CloudPhotoAssetSynchronizing
     let bodyMetricViewModel: BodyMetricViewModel
     let postureViewModel: PostureViewModel
     let lifestyleViewModel: LifestyleViewModel
@@ -32,6 +33,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         healthChecksRepository: any HealthChecksRepository,
         bloodworkRepository: any BloodworkRepository,
         progressPhotoRepository: any ProgressPhotoRepository = NoOpProgressPhotoRepository.shared,
+        progressPhotoAssetSynchronizer: any CloudPhotoAssetSynchronizing = NoOpCloudPhotoAssetCoordinator.shared,
         progressPhotoFixtureData: Data? = nil,
         calendar: Calendar,
         now: @escaping @MainActor () -> Date = { .now }
@@ -41,6 +43,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         self.healthChecksRepository = healthChecksRepository
         self.bloodworkRepository = bloodworkRepository
         self.progressPhotoRepository = progressPhotoRepository
+        self.progressPhotoAssetSynchronizer = progressPhotoAssetSynchronizer
         self.progressPhotoFixtureData = progressPhotoFixtureData
         self.calendar = calendar
         self.now = now
@@ -129,6 +132,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
             ProgressPhotoLifecycleView(
                 viewModel: progressPhotoImportViewModel,
                 galleryViewModel: progressPhotoGalleryViewModel,
+                assetSynchronizer: progressPhotoAssetSynchronizer,
                 fixtureImageData: progressPhotoFixtureData,
                 onClose: onClose
             )
@@ -187,6 +191,10 @@ enum DefaultTrackerFeatureFactory {
             assetStore: progressPhotoAssetStore,
             cleanupJournal: FilePhotoAssetCleanupJournal(),
             now: now
+        )
+        let progressPhotoAssetSynchronizer = makeProgressPhotoAssetSynchronizer(
+            environment: environment,
+            assetStore: progressPhotoAssetStore
         )
         #if DEBUG
         if environment == .uiTesting,
@@ -295,8 +303,33 @@ enum DefaultTrackerFeatureFactory {
             healthChecksRepository: healthChecksRepository,
             bloodworkRepository: bloodworkRepository,
             progressPhotoRepository: progressPhotoRepository,
+            progressPhotoAssetSynchronizer: progressPhotoAssetSynchronizer,
             calendar: calendar,
             now: now
+        )
+    }
+
+    private static func makeProgressPhotoAssetSynchronizer(
+        environment: AppEnvironment,
+        assetStore: LocalPhotoAssetStore
+    ) -> any CloudPhotoAssetSynchronizing {
+        guard case let .cloud(containerIdentifier, storeURL) = environment else {
+            return NoOpCloudPhotoAssetCoordinator.shared
+        }
+        let root = storeURL.deletingLastPathComponent()
+            .appendingPathComponent("ProgressPhotos", isDirectory: true)
+            .appendingPathComponent("CloudSync", isDirectory: true)
+        return CloudPhotoAssetCoordinator(
+            database: CloudKitPrivatePhotoAssetDatabase(
+                containerIdentifier: containerIdentifier
+            ),
+            localStore: assetStore,
+            stateStore: FileCloudPhotoAssetSyncStateStore(
+                fileURL: root.appendingPathComponent("state.json")
+            ),
+            temporaryStore: FileCloudPhotoAssetTemporaryStore(
+                directory: root.appendingPathComponent("Transfers", isDirectory: true)
+            )
         )
     }
 }

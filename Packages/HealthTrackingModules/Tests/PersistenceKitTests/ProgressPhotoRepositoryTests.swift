@@ -310,6 +310,67 @@ final class ProgressPhotoRepositoryTests: XCTestCase {
         XCTAssertEqual(persistedAfterReconciliation, [])
     }
 
+    func testInboundCloudAssetSurvivesOrphanCleanupAcrossMetadataCrashRelaunch() async throws {
+        let context = try makeContext()
+        let assetID = "00000000-0000-0000-0000-000000000068"
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let journalURL = directory.appendingPathComponent("cloud-inbound.json")
+        let firstInboundJournal = FileCloudPhotoAssetInboundJournal(fileURL: journalURL)
+        try await firstInboundJournal.recordInboundAssetID(assetID)
+        let assetStore = ProgressPhotoAssetStoreFake(localAssetIDs: [assetID])
+        let beforeMetadataRepository = SwiftDataProgressPhotoRepository(
+            modelContext: context,
+            assetStore: assetStore,
+            cleanupJournal: PhotoAssetCleanupJournalFake(),
+            inboundAssetJournal: firstInboundJournal
+        )
+
+        let beforeMetadata = try await beforeMetadataRepository.fetchPhotos()
+        let pendingBeforeMetadata = try await firstInboundJournal.loadInboundAssetIDs()
+
+        XCTAssertTrue(beforeMetadata.isEmpty)
+        XCTAssertTrue(assetStore.deleteRequests.isEmpty)
+        XCTAssertEqual(assetStore.localAssetIDs, [assetID])
+        XCTAssertEqual(pendingBeforeMetadata, [assetID])
+
+        let timestamp = Date(timeIntervalSince1970: 680)
+        context.insert(
+            ProgressPhoto(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000074")!,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                date: timestamp,
+                imageRef: assetID,
+                pose: .front,
+                note: nil
+            )
+        )
+        try context.save()
+        let recreatedInboundJournal = FileCloudPhotoAssetInboundJournal(fileURL: journalURL)
+        let afterMetadataRepository = SwiftDataProgressPhotoRepository(
+            modelContext: context,
+            assetStore: assetStore,
+            cleanupJournal: PhotoAssetCleanupJournalFake(),
+            inboundAssetJournal: recreatedInboundJournal
+        )
+
+        let afterMetadata = try await afterMetadataRepository.fetchPhotos()
+        let pendingAfterMetadata = try await recreatedInboundJournal.loadInboundAssetIDs()
+
+        XCTAssertEqual(afterMetadata.map(\.imageRef), [assetID])
+        XCTAssertTrue(assetStore.deleteRequests.isEmpty)
+        XCTAssertEqual(assetStore.localAssetIDs, [assetID])
+        XCTAssertTrue(pendingAfterMetadata.isEmpty)
+    }
+
     func testDuplicateImageReferenceFailsClosedBeforeEitherOwnerCanDelete() async throws {
         let context = try makeContext()
         let assetID = "00000000-0000-0000-0000-000000000064"
