@@ -80,7 +80,7 @@ jobs:
         timeout-minutes: 20
         run: scripts/test-ios.sh --only-testing HealthChecksKitTests
 
-      - name: Targeted M3.7 local photo lifecycle tests
+      - name: Targeted M3.7-M3.8 photo lifecycle and gallery tests
         timeout-minutes: 20
         # ProgressPhotoLifecycleUITests remains in the complete app suite below.
         run: scripts/test-ios.sh --only-testing ProgressPhotosKitTests

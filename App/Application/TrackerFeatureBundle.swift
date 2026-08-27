@@ -1,3 +1,4 @@
+import CoreModels
 import Foundation
 import HealthChecksKit
 import MetricsKit
@@ -20,6 +21,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
     let healthChecksViewModel: HealthChecksViewModel
     let bloodworkViewModel: BloodworkViewModel
     let progressPhotoImportViewModel: ProgressPhotoImportViewModel
+    let progressPhotoGalleryViewModel: ProgressPhotoGalleryViewModel
     private let calendar: Calendar
     private let now: @MainActor () -> Date
     private let progressPhotoFixtureData: Data?
@@ -50,6 +52,9 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         progressPhotoImportViewModel = ProgressPhotoImportViewModel(
             repository: progressPhotoRepository,
             date: now()
+        )
+        progressPhotoGalleryViewModel = ProgressPhotoGalleryViewModel(
+            repository: progressPhotoRepository
         )
     }
 
@@ -123,6 +128,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         AnyView(
             ProgressPhotoLifecycleView(
                 viewModel: progressPhotoImportViewModel,
+                galleryViewModel: progressPhotoGalleryViewModel,
                 fixtureImageData: progressPhotoFixtureData,
                 onClose: onClose
             )
@@ -270,6 +276,17 @@ enum DefaultTrackerFeatureFactory {
                     now: now
                 )
             }
+            if scenario == .m3PhotoGallery {
+                return TrackerFeatureBundle(
+                    metricsRepository: metricsRepository,
+                    lifestyleRepository: lifestyleRepository,
+                    healthChecksRepository: healthChecksRepository,
+                    bloodworkRepository: bloodworkRepository,
+                    progressPhotoRepository: UITestProgressPhotoGalleryRepository(),
+                    calendar: calendar,
+                    now: now
+                )
+            }
         }
         #endif
         return TrackerFeatureBundle(
@@ -283,6 +300,115 @@ enum DefaultTrackerFeatureFactory {
         )
     }
 }
+
+#if DEBUG
+@MainActor
+private final class UITestProgressPhotoGalleryRepository:
+    ProgressPhotoRepository {
+    private enum FixtureFailure: Error {
+        case unsupportedImport
+    }
+
+    private var photos: [ProgressPhotoSnapshot]
+    private let thumbnails: [String: PhotoAssetLoadResult]
+
+    var pendingAssetCleanupIDs: [String] { [] }
+
+    init() {
+        let availableBytes = Data(
+            base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2Z7sAAAAASUVORK5CYII="
+        )!
+        let comparisonDate = Date(timeIntervalSince1970: 6_000)
+        let missingDate = Date(timeIntervalSince1970: 5_000)
+        let corruptDate = Date(timeIntervalSince1970: 4_000)
+        photos = [
+            Self.snapshot(
+                id: "00000000-0000-0000-0000-000000000201",
+                assetID: "00000000-0000-0000-0000-000000000301",
+                date: comparisonDate,
+                pose: .front
+            ),
+            Self.snapshot(
+                id: "00000000-0000-0000-0000-000000000202",
+                assetID: "00000000-0000-0000-0000-000000000302",
+                date: comparisonDate,
+                pose: .side
+            ),
+            Self.snapshot(
+                id: "00000000-0000-0000-0000-000000000203",
+                assetID: "00000000-0000-0000-0000-000000000303",
+                date: comparisonDate,
+                pose: .back
+            ),
+            Self.snapshot(
+                id: "00000000-0000-0000-0000-000000000204",
+                assetID: "00000000-0000-0000-0000-000000000304",
+                date: missingDate,
+                pose: .front
+            ),
+            Self.snapshot(
+                id: "00000000-0000-0000-0000-000000000205",
+                assetID: "00000000-0000-0000-0000-000000000305",
+                date: corruptDate,
+                pose: .side
+            ),
+        ]
+        thumbnails = [
+            "00000000-0000-0000-0000-000000000301": .available(availableBytes),
+            "00000000-0000-0000-0000-000000000302": .available(availableBytes),
+            "00000000-0000-0000-0000-000000000303": .available(availableBytes),
+            "00000000-0000-0000-0000-000000000304": .missing,
+            "00000000-0000-0000-0000-000000000305": .corrupt,
+        ]
+    }
+
+    func fetchPhotos() async throws -> [ProgressPhotoSnapshot] {
+        photos
+    }
+
+    func importPhoto(
+        _ input: ProgressPhotoInput,
+        bytes: Data
+    ) async throws -> ProgressPhotoSnapshot {
+        _ = input
+        _ = bytes
+        throw FixtureFailure.unsupportedImport
+    }
+
+    func thumbnail(assetID: String) async throws -> PhotoAssetLoadResult {
+        thumbnails[assetID] ?? .missing
+    }
+
+    func fullImage(assetID: String) async throws -> PhotoAssetLoadResult {
+        thumbnails[assetID] ?? .missing
+    }
+
+    func deletePhoto(id: UUID, expectedUpdatedAt: Date) async throws {
+        photos.removeAll { snapshot in
+            snapshot.id == id && snapshot.updatedAt == expectedUpdatedAt
+        }
+    }
+
+    func retryPendingAssetCleanup() async throws {}
+
+    private static func snapshot(
+        id: String,
+        assetID: String,
+        date: Date,
+        pose: ProgressPhotoPose
+    ) -> ProgressPhotoSnapshot {
+        ProgressPhotoSnapshot(
+            id: UUID(uuidString: id)!,
+            createdAt: date,
+            updatedAt: date,
+            date: date,
+            imageRef: assetID,
+            pose: pose,
+            note: nil
+        )
+    }
+}
+#endif
 
 #if DEBUG
 @MainActor

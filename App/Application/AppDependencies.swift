@@ -208,7 +208,7 @@ final class AppDependencies: AppDependencyLoading {
                 trainingRepository = repository
                 shouldLoadFoundation = true
             case .m3BodyMetrics, .m3SleepMood, .m3Posture, .m3HealthChecks,
-                 .m3Bloodwork, .m3ProgressPhotos:
+                 .m3Bloodwork, .m3ProgressPhotos, .m3PhotoGallery:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -703,7 +703,7 @@ private enum UITestSessionFixture {
             try installM3HealthChecks(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow,
              .todayEmptyOnce, .todayErrorOnce, .nutritionEmpty, .m3BodyMetrics,
-             .m3SleepMood, .m3Bloodwork, .m3ProgressPhotos:
+             .m3SleepMood, .m3Bloodwork, .m3ProgressPhotos, .m3PhotoGallery:
             return
         }
     }
