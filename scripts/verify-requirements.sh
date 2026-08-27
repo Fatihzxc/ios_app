@@ -28,7 +28,8 @@ if package.is_file():
     products = re.findall(r'\.([A-Za-z][A-Za-z0-9_]*)\s*\(\s*name:\s*"([^"]+)"', products_block.group(1) if products_block else "")
     expected_products = [
         "CoreModels", "TrainingKit", "GuidanceKit", "PersistenceKit", "DesignSystem",
-        "NutritionKit", "HealthSafetyKit", "HealthChecksKit", "ProgressPhotosKit", "MetricsKit",
+        "NutritionKit", "HealthSafetyKit", "HealthChecksKit", "NotificationsKit",
+        "ProgressPhotosKit", "MetricsKit",
         "SleepMoodKit", "ReportsKit", "SettingsKit",
     ]
     expected_product_declarations = [("library", name) for name in expected_products]
@@ -49,6 +50,8 @@ if package.is_file():
         ("testTarget", "HealthSafetyKitTests"),
         ("target", "HealthChecksKit"),
         ("testTarget", "HealthChecksKitTests"),
+        ("target", "NotificationsKit"),
+        ("testTarget", "NotificationsKitTests"),
         ("target", "ProgressPhotosKit"),
         ("testTarget", "ProgressPhotosKitTests"),
         ("target", "MetricsKit"),
@@ -63,7 +66,7 @@ if package.is_file():
     ]
     if missing_module_targets:
         errors.append(
-            f"Package must declare GuidanceKit, NutritionKit, HealthSafetyKit, HealthChecksKit, ProgressPhotosKit, MetricsKit and SleepMoodKit library/test targets; "
+            f"Package must declare GuidanceKit, NutritionKit, HealthSafetyKit, HealthChecksKit, NotificationsKit, ProgressPhotosKit, MetricsKit and SleepMoodKit library/test targets; "
             f"missing {missing_module_targets}"
         )
 
@@ -182,7 +185,8 @@ if project.is_file():
     expected_package_test_targets = [
         "CoreModelsTests", "GuidanceKitTests", "PersistenceKitTests", "TrainingKitTests",
         "DesignSystemTests", "NutritionKitTests", "HealthSafetyKitTests",
-        "HealthChecksKitTests", "ProgressPhotosKitTests", "MetricsKitTests", "SleepMoodKitTests",
+        "HealthChecksKitTests", "NotificationsKitTests", "ProgressPhotosKitTests",
+        "MetricsKitTests", "SleepMoodKitTests",
     ]
     if local_package_test_targets != expected_package_test_targets:
         errors.append(
@@ -684,6 +688,22 @@ PY
     fi
     grep -Fq 'Package products must be exactly' "$fixture/product.out"
     cp "$repo_root/Packages/HealthTrackingModules/Package.swift" "$fixture/Packages/HealthTrackingModules/Package.swift"
+    python3 - "$fixture/Packages/HealthTrackingModules/Package.swift" <<'PY'
+from pathlib import Path
+path = Path(__import__('sys').argv[1])
+target = '''        .target(
+            name: "NotificationsKit",
+            swiftSettings: strictConcurrency
+        ),
+'''
+path.write_text(path.read_text().replace(target, '', 1))
+PY
+    if verify_repo "$fixture" >"$fixture/notifications-target.out" 2>&1; then
+        echo "Requirements self-test expected a missing NotificationsKit target failure." >&2
+        return 1
+    fi
+    grep -Fq 'Package must declare GuidanceKit, NutritionKit, HealthSafetyKit, HealthChecksKit, NotificationsKit' "$fixture/notifications-target.out"
+    cp "$repo_root/Packages/HealthTrackingModules/Package.swift" "$fixture/Packages/HealthTrackingModules/Package.swift"
     python3 - "$fixture/project.yml" <<'PY'
 from pathlib import Path
 path = Path(__import__('sys').argv[1])
@@ -734,6 +754,17 @@ PY
         return 1
     fi
     grep -Fq 'Local scheme package tests must be exactly' "$fixture/guidance-test-target.out"
+    cp "$repo_root/project.yml" "$fixture/project.yml"
+    python3 - "$fixture/project.yml" <<'PY'
+from pathlib import Path
+path = Path(__import__('sys').argv[1])
+path.write_text(path.read_text().replace('        - package: HealthTrackingModules/NotificationsKitTests\n', '', 1))
+PY
+    if verify_repo "$fixture" >"$fixture/notifications-test-target.out" 2>&1; then
+        echo "Requirements self-test expected a missing NotificationsKit scheme test target failure." >&2
+        return 1
+    fi
+    grep -Fq 'Local scheme package tests must be exactly' "$fixture/notifications-test-target.out"
     cp "$repo_root/project.yml" "$fixture/project.yml"
     python3 - "$fixture/project.yml" <<'PY'
 from pathlib import Path

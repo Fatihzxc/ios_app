@@ -72,7 +72,7 @@ final class TrackerCompositionTests: XCTestCase {
 }
 
 @MainActor
-private final class TrackerBloodworkRepositoryStub: BloodworkRepository {
+final class TrackerBloodworkRepositoryStub: BloodworkRepository {
     func fetchResults() async throws -> [BloodworkResultSnapshot] { [] }
 
     func createResult(
@@ -143,7 +143,7 @@ private final class TrackerHealthChecksRepositoryStub: HealthChecksRepository {
 }
 
 @MainActor
-private final class TrackerLifestyleRepositoryStub: LifestyleRepository {
+final class TrackerLifestyleRepositoryStub: LifestyleRepository {
     func fetchLifestyleDay(containing date: Date) async throws -> LifestyleDaySnapshot {
         throw StubFailure.unexpectedLoad
     }
@@ -162,7 +162,7 @@ private final class TrackerLifestyleRepositoryStub: LifestyleRepository {
 }
 
 @MainActor
-private final class TrackerMetricsRepositoryStub: MetricsRepository {
+final class TrackerMetricsRepositoryStub: MetricsRepository {
     func fetchPostureMetrics() async throws -> [PostureMetricSnapshot] { [] }
 
     func createPostureMetric(

@@ -12,9 +12,10 @@ xcodebuild_test_arguments=(
 )
 cloud_compile_only=false
 bootstrap_idempotence_only=false
+m311_red_only=false
 
 usage() {
-    echo "Usage: $0 [--only-testing TestBundleName|--skip-testing TestIdentifier|--cloud-compile-only|--verify-bootstrap-idempotence]" >&2
+    echo "Usage: $0 [--only-testing TestBundleName|--skip-testing TestIdentifier|--cloud-compile-only|--verify-bootstrap-idempotence|--m311-red-only]" >&2
 }
 
 if (( $# > 0 )); then
@@ -47,6 +48,14 @@ if (( $# > 0 )); then
             fi
             bootstrap_idempotence_only=true
             ;;
+        --m311-red-only)
+            if (( $# != 1 )); then
+                usage
+                exit 2
+            fi
+            m311_red_only=true
+            xcodebuild_test_arguments+=("-only-testing:NotificationsKitTests")
+            ;;
         *)
             usage
             exit 2
@@ -65,7 +74,11 @@ fi
 "$script_dir/verify-nutrition.sh" --self-test
 "$script_dir/verify-nutrition.sh"
 "$script_dir/verify-trackers.sh" --self-test
-"$script_dir/verify-trackers.sh"
+if [[ "$m311_red_only" == true ]]; then
+    "$script_dir/verify-trackers.sh" --m311-red
+else
+    "$script_dir/verify-trackers.sh"
+fi
 
 if [[ "$bootstrap_idempotence_only" == true ]]; then
     "$script_dir/verify-bootstrap-idempotence.sh"

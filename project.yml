@@ -36,6 +36,8 @@ targets:
       - package: HealthTrackingModules
         product: HealthChecksKit
       - package: HealthTrackingModules
+        product: NotificationsKit
+      - package: HealthTrackingModules
         product: ProgressPhotosKit
       - package: HealthTrackingModules
         product: MetricsKit
@@ -94,6 +96,7 @@ schemes:
         - package: HealthTrackingModules/NutritionKitTests
         - package: HealthTrackingModules/HealthSafetyKitTests
         - package: HealthTrackingModules/HealthChecksKitTests
+        - package: HealthTrackingModules/NotificationsKitTests
         - package: HealthTrackingModules/ProgressPhotosKitTests
         - package: HealthTrackingModules/MetricsKitTests
         - package: HealthTrackingModules/SleepMoodKitTests

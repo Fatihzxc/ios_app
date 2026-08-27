@@ -12,13 +12,21 @@ final class TodayViewModelTests: XCTestCase {
 
     func testApplyingPreloadedSnapshotPublishesContentWithoutRepositoryFetch() {
         let repository = TodayRepositorySpy()
-        let viewModel = makeViewModel(repository: repository)
+        var callbackCount = 0
+        let viewModel = makeViewModel(
+            repository: repository,
+            launchStartedAt: 100,
+            uptime: { 100.25 },
+            onFirstMeaningfulContent: { _ in callbackCount += 1 }
+        )
 
+        viewModel.applyInitialSnapshot(makeSnapshot(), evaluatedAt: now)
         viewModel.applyInitialSnapshot(makeSnapshot(), evaluatedAt: now)
 
         guard case .content = viewModel.state else {
             return XCTFail("A real preloaded snapshot must publish Today content.")
         }
+        XCTAssertEqual(callbackCount, 1)
         XCTAssertEqual(repository.fetchTodaySnapshotCallCount, 0)
     }
 
@@ -384,6 +392,34 @@ final class TodayViewModelTests: XCTestCase {
         XCTAssertEqual(repository.fetchTodaySnapshotCallCount, 2)
     }
 
+    func testFirstMeaningfulCallbackSkipsErrorAndEmptyThenPublishesExactlyOnce() async {
+        let repository = TodayRepositorySpy()
+        repository.responses = [
+            .failure(TodayTestError.load),
+            .success(nil),
+            .success(makeSnapshot()),
+            .success(makeSnapshot()),
+        ]
+        var callbackCount = 0
+        let viewModel = makeViewModel(
+            repository: repository,
+            launchStartedAt: 100,
+            uptime: { 100.25 },
+            onFirstMeaningfulContent: { _ in callbackCount += 1 }
+        )
+
+        await viewModel.load(at: now)
+        XCTAssertEqual(callbackCount, 0)
+        await viewModel.retry(at: now)
+        XCTAssertEqual(callbackCount, 0)
+        await viewModel.retry(at: now)
+        XCTAssertEqual(callbackCount, 1)
+        await viewModel.retry(at: now)
+
+        XCTAssertEqual(callbackCount, 1)
+        XCTAssertEqual(repository.fetchTodaySnapshotCallCount, 4)
+    }
+
     func testRepositoryFailureIsRecoverableErrorAndPreservesNoFabricatedContent() async {
         let repository = TodayRepositorySpy()
         repository.responses = [.failure(TodayTestError.load), .success(makeSnapshot())]
@@ -457,13 +493,15 @@ final class TodayViewModelTests: XCTestCase {
     private func makeViewModel(
         repository: TodayRepositorySpy,
         launchStartedAt: TimeInterval? = nil,
-        uptime: @escaping @MainActor () -> TimeInterval = { 0 }
+        uptime: @escaping @MainActor () -> TimeInterval = { 0 },
+        onFirstMeaningfulContent: @escaping @MainActor (TimeInterval) -> Void = { _ in }
     ) -> TodayViewModel {
         TodayViewModel(
             repository: repository,
             calendar: calendar,
             launchStartedAt: launchStartedAt,
-            uptime: uptime
+            uptime: uptime,
+            onFirstMeaningfulContent: onFirstMeaningfulContent
         )
     }
 

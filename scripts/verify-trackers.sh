@@ -6,12 +6,14 @@ repo_root="$(cd "$script_dir/.." && pwd)"
 
 verify_repo() {
     local target_root="$1"
-    python3 - "$target_root" <<'PY'
+    local verification_mode="${2:-production}"
+    python3 - "$target_root" "$verification_mode" <<'PY'
 import sys
 import re
 from pathlib import Path
 
 root = Path(sys.argv[1])
+m311_red_mode = sys.argv[2] == "m311-red"
 
 XCTEST_SYNC_AUTOCLOSURE_NAMES = (
     "XCTAssert",
@@ -3427,6 +3429,88 @@ def swift_braced_declaration(source: str, name: str) -> str | None:
     return None
 
 
+def swift_braced_region_after(source: str, marker: str) -> str | None:
+    marker_index = source.find(marker)
+    if marker_index < 0:
+        return None
+    opening = source.find("{", marker_index + len(marker))
+    if opening < 0:
+        return None
+    depth = 0
+    for index in range(opening, len(source)):
+        character = source[index]
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0:
+                return source[opening:index + 1]
+    return None
+
+
+def swift_braced_type_declaration(source: str, name: str) -> str | None:
+    declaration = re.search(
+        rf"\b(?:actor|class|enum|struct)\s+{re.escape(name)}\b[^{{]*{{",
+        source,
+    )
+    if declaration is None:
+        return None
+    opening = declaration.end() - 1
+    depth = 0
+    for index in range(opening, len(source)):
+        character = source[index]
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0:
+                return source[opening:index + 1]
+    return None
+
+
+def swift_braced_initializer(
+    source: str,
+    parameter_label: str,
+    *,
+    require_public: bool = False,
+) -> str | None:
+    for declaration in re.finditer(r"\b(?:public\s+)?init\s*\(", source):
+        opening_parenthesis = declaration.end() - 1
+        parenthesis_depth = 0
+        closing_parenthesis = None
+        for index in range(opening_parenthesis, len(source)):
+            character = source[index]
+            if character == "(":
+                parenthesis_depth += 1
+            elif character == ")":
+                parenthesis_depth -= 1
+                if parenthesis_depth == 0:
+                    closing_parenthesis = index
+                    break
+        if closing_parenthesis is None:
+            continue
+        opening = closing_parenthesis + 1
+        while opening < len(source) and source[opening].isspace():
+            opening += 1
+        if opening >= len(source) or source[opening] != "{":
+            continue
+        signature = source[declaration.start():closing_parenthesis + 1]
+        if f"{parameter_label}:" not in re.sub(r"\s+", "", signature):
+            continue
+        if require_public and not re.match(r"\bpublic\s+init", signature):
+            continue
+        depth = 0
+        for index in range(opening, len(source)):
+            character = source[index]
+            if character == "{":
+                depth += 1
+            elif character == "}":
+                depth -= 1
+                if depth == 0:
+                    return source[opening:index + 1]
+    return None
+
+
 if "case missingSymptomAnswer" in medical_safety_text:
     ui_test_launch_configuration_text = (
         root / "App/Support/AppUITestLaunchConfiguration.swift"
@@ -4679,6 +4763,1286 @@ if '.frame(minWidth: 52, minHeight: 52, alignment: .leading)' not in body_metric
         "BodyMetricProgressView must expand the delete label to a 52-point touch target"
     )
 
+m311_tests = {
+    "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationPlanningTests.swift": {
+        "testStableIdentityGenericContentAndRouteDoNotDependOnInputOrder",
+        "testDuplicateAndIneligibleDescriptorsProduceAtMostOneStableRequest",
+        "testRepositoryEdgeDatesReachRequestsExactlyWithoutRecurrenceArithmetic",
+        "testFractionalDueDateRoundsUpToStableSystemSecondWithoutRecurrenceArithmetic",
+        "testRequestSerializationContainsOnlyGenericCopyAndCanonicalRoutePayload",
+        "HealthCheckNotificationDescriptor",
+        "HealthCheckNotificationPlanner",
+        "HealthCheckNotificationRouteCodec.decode",
+        "Hatırlatma",
+        "Planladığınız hatırlatmayı uygulamada görüntüleyin.",
+        "HIV pozitif",
+        "HbA1c 13.2",
+        "MR sonucu",
+        "quarterly",
+        'Locale(identifier: "tr_TR")',
+        'Locale(identifier: "en_US")',
+        'XCTAssertEqual(englishRequest.title, "Reminder")',
+        '"View your scheduled reminder in the app."',
+        "XCTAssertEqual(request.deliveryDate, dueDate)",
+        "Date(timeIntervalSince1970: 1_804_060_801)",
+        "XCTAssertGreaterThanOrEqual(request.deliveryDate, fractionalDueDate)",
+    },
+    "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationReconciliationTests.swift": {
+        "testReconciliationUsesDeterministicCleanupBeforeReplacementAndConverges",
+        "testFailureAtEverySystemOperationBoundaryThrowsAndRetryConvergesExactly",
+        "testDeniedAndNotDeterminedPerformCleanupWithoutAddingPromptingOrMutatingInput",
+        "testCancellationAfterSuspendedSystemReadPreventsCleanupAndAdds",
+        "testRecurringOwnedRequestIsReplacedByCanonicalNonRepeatingRequest",
+        "failingOrdinal in 1...operationBoundaryCount",
+        "reconciliation.cancel()",
+        "resumeSuspendedOperation(ordinal: 2)",
+        "catch is CancellationError",
+        ".authorizationStatus",
+        ".pendingRequests",
+        ".deliveredRequestIdentifiers",
+        ".removePending(fixture.removedPendingIDs)",
+        ".removeDelivered(fixture.removedDeliveredIDs)",
+        ".add(fixture.replacementRequest)",
+        ".add(fixture.newRequest)",
+        "XCTAssertEqual(descriptors, fixture.descriptors)",
+        "XCTAssertEqual(snapshot.authorizationRequestCount, 0)",
+        "snapshot.pending.values.sorted",
+        "XCTAssertEqual(snapshot.operations, [",
+        "fixture.replacementRequest.identifier",
+        "XCTAssertEqual(snapshot.pending, [",
+        "XCTAssertEqual(snapshot.delivered, [fixture.foreignRequest.identifier])",
+        "PendingNotificationRequestValue",
+        "unprojectablePendingIdentifiers",
+        "foreignUnprojectablePendingID",
+        "initialUnprojectablePendingIdentifiers",
+        "repeats: true",
+        "XCTAssertFalse(try XCTUnwrap(snapshot.pending[desired.identifier]).repeats)",
+    },
+    "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationAuthorizationTests.swift": {
+        "testConstructionPresentationDismissAndRelaunchNeverPromptAutomatically",
+        "testRepeatedExplicitTapWhileRequestIsInFlightStartsOnlyOneRequest",
+        "testDismissedOlderCallbackCannotOverwriteNewerPresentationGeneration",
+        "testExplicitRequestFailureIsRetryableAndUsesANewGeneration",
+        "requestFromExplicitUserAction",
+        "waitUntilAuthorizationRequest(call: 1)",
+        "waitUntilAuthorizationRequest(call: 2)",
+        "controller.dismiss()",
+        "controller.beginPresentation()",
+        "The stale denied callback must not overwrite the newer authorization.",
+    },
+    "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationRouteCodecTests.swift": {
+        "testCanonicalHealthCheckDetailRouteRoundTrips",
+        "testDecoderRejectsMalformedUnknownAndSensitivePayloads",
+        '"version": "2"',
+        '"route": "unknown"',
+        '"name": "HIV pozitif"',
+        '"result": "HbA1c 13.2"',
+        '"recurrence": "quarterly"',
+        ".uppercased()",
+        "XCTAssertNil(HealthCheckNotificationRouteCodec.decode(payload))",
+    },
+    "Packages/HealthTrackingModules/Tests/NotificationsKitTests/SystemNotificationCenterAdapterTests.swift": {
+        "testAdapterDelegatesEveryNotificationCenterOperationWithoutLiveCenter",
+        "testPureSystemProjectionPreservesExactCalendarInstantContentAndNonRepeatingPolicy",
+        "testDefaultBackendBuilderCopiesProjectionIntoActualSystemRequestWithoutLiveCenter",
+        "testDefaultBackendMapsAuthorizationAndRoundTripsPendingRequestWithoutLiveCenter",
+        "testPendingSystemProjectionPreservesIdentifierWhenRawRequestIsUnprojectable",
+        "testDefaultAdapterExecutesLiveDriverOperationsAcrossAllOperationsWithoutLiveCenter",
+        "testPublicDefaultAdapterConstructsWithoutTouchingLiveCenter",
+        "testInjectedCenterProviderRemainsDeferredAcrossLiveDriverAndAdapterConstruction",
+        "testLiveDriverAndDefaultAdapterPropagateEverySystemOperationError",
+        "SystemNotificationCenterAdapter(backend: backend)",
+        "DefaultNotificationCenterSystemBackend",
+        ".makeUserNotificationRequest(from: request, calendar: calendar)",
+        "NotificationSystemRequest(",
+        "adapter.authorizationStatus()",
+        "adapter.pendingRequests()",
+        "adapter.deliveredRequestIdentifiers()",
+        "adapter.removePendingRequests(withIdentifiers:",
+        "adapter.removeDeliveredRequests(withIdentifiers:",
+        "adapter.requestAuthorization()",
+        "userNotificationProjection(calendar: calendar)",
+        "calendar.dateComponents(",
+        "repeats: false",
+        "XCTAssertFalse(projection.repeats)",
+        "XCTAssertEqual(systemRequest.content.title, request.title)",
+        "XCTAssertEqual(systemRequest.content.body, request.body)",
+        "XCTAssertEqual(systemRequest.trigger?.repeats, false)",
+        "pendingSystemRequest(",
+        "PendingNotificationSystemRequest",
+        "PendingNotificationRequestValue",
+        "XCTAssertNil(pending.request)",
+        "repeats: true",
+        "notificationAuthorizationStatus(",
+        "from: .provisional",
+        "XCTAssertEqual(pendingRoundTrip.request, request)",
+        "DefaultNotificationCenterSystemBackend.LiveOperations(",
+        ".live(operations: operations)",
+        "for failingOrdinal in 1...7",
+        "catch let failure as DefaultSystemDriverFailure",
+        "await recorder.recordAuthorizationStatus()",
+        "await recorder.recordPendingRequests()",
+        "await recorder.recordDeliveredRequests()",
+        "SystemNotificationCenterAdapter(",
+        "systemDriver: .live(operations: operations)",
+        "try await adapter.add(added)",
+        "XCTAssertEqual(snapshot.authorizationStatusCount, 1)",
+        "XCTAssertEqual(snapshot.authorizationRequestCount, 1)",
+        "health-check-detail.v1.legacy-live-unprojectable",
+        "return [systemPending, unprojectableSystemPending]",
+        "identifier: unprojectableSystemPending.identifier",
+        "DeferredNotificationCenterProviderProbe",
+        "XCTAssertEqual(probe.callCount, 0)",
+    },
+    "Packages/HealthTrackingModules/Tests/TrainingKitTests/TodayViewModelTests.swift": {
+        "testApplyingPreloadedSnapshotPublishesContentWithoutRepositoryFetch",
+        "testFirstMeaningfulCallbackSkipsErrorAndEmptyThenPublishesExactlyOnce",
+        "onFirstMeaningfulContent: { _ in callbackCount += 1 }",
+        "XCTAssertEqual(callbackCount, 0)",
+        "XCTAssertEqual(callbackCount, 1)",
+        "XCTAssertEqual(repository.fetchTodaySnapshotCallCount, 4)",
+        "viewModel.applyInitialSnapshot(makeSnapshot(), evaluatedAt: now)",
+        "XCTAssertEqual(repository.fetchTodaySnapshotCallCount, 0)",
+    },
+    "HealthTrackingAppTests/HealthCheckNotificationCompositionTests.swift": {
+        "testRealMapperExposesOnlyOpaqueIdentityDueDateAndPendingEligibility",
+        "testFirstMeaningfulTodayContentRunsOnceThenEveryCommittedMutationRefetchesAndRemaps",
+        "testNewerMutationGenerationIgnoresOlderSuspendedLaunchFetch",
+        "testNewerMutationCancelsOlderReconciliationAlreadySuspendedAtSystemSeam",
+        "testNewerMutationWaitsForNonCancellableInFlightEffectAndConvergesNewestLast",
+        "testThreeGenerationsSkipMiddleWorkAndCommitOnlyNewestAfterOldNonCancellableEffect",
+        "testStaleSuccessfulLaunchCannotCloseGateWhenNewestMutationFailsAndLaunchRetries",
+        "testLaunchGateRetriesSupersededOutcomeAndClosesOnlyAfterConvergence",
+        "testFailedFirstMeaningfulReconciliationCanRetryAfterFailure",
+        "testDeniedAndNotDeterminedReconciliationNeverMutateRepositoryRemindersOrPrompt",
+        "testConcreteBundleMutationRepositoryDrivesLaunchEditCompleteDeleteAndExplicitPermissionThroughSystemAdapter",
+        "testConcretePermissionActionsBindPresentationDismissalAndRejectStaleCallback",
+        "testFailedConcreteMutationDoesNotRefetchOrReconcile",
+        "testCommittedMutationReturnsSuccessAndRetriesNotificationFailureWithoutRepeatingRepositoryWrite",
+        "testRealTypeErasedTrackerEntryPointsExposeLaunchMutationAndExplicitPermissionActions",
+        "testRealAppDependenciesUseDedicatedLaunchCallbackWithoutInstantiatingLazyTrackerFactory",
+        "testRealAppDependenciesTodayRetryAfterInitialEmptyTriggersOwnedNotificationCallbackOnce",
+        "testDefaultAppDependenciesLaunchFactoryRunsRealLifecycleWithoutInstantiatingTrackerFactory",
+        "testShippedDefaultPrewarmerCenterSerializesLaunchWithLazyBundleMutation",
+        "testAppDependenciesRetriesFailedMeaningfulLaunchReconciliationWithinSingleBootstrapLoad",
+        "testDefaultAppDependenciesSharesLaunchCompositionWithLazyBundleMutationRepository",
+        "testShippedPrewarmerSerializesPreloadedLaunchWithLazyBundleMutationOnSharedComposition",
+        "HealthCheckNotificationMapper.descriptors(from:",
+        "reconcileAfterFirstMeaningfulTodayContent",
+        "reconcileAfterHealthCheckMutation",
+        "Sensitive edited name",
+        "HIV pozitif; HbA1c 13.2; MR sonucu; marker=CA-125",
+        "repository.snapshots = []",
+        "XCTAssertEqual(repository.mutationCount, 0)",
+        "XCTAssertEqual(centerSnapshot.authorizationRequestCount, 0)",
+        "reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent",
+        "reconcileHealthCheckNotificationsAfterCommittedMutation",
+        "requestHealthCheckNotificationAuthorizationFromExplicitUserAction",
+        "SystemNotificationCenterAdapter(backend: backend)",
+        "makeHealthCheckListNotificationActions",
+        "bundle.healthChecksRepository.updateReminder(",
+        "bundle.healthChecksRepository.completeReminder(",
+        "bundle.healthChecksRepository.deleteReminder(",
+        "waitUntilMutationIsSuspended(.update)",
+        "waitUntilMutationIsSuspended(.complete)",
+        "The first delete failure must propagate without reconciliation.",
+        "await actions.onRequestNotificationAuthorization()",
+        "XCTAssertEqual(repository.fetchCount, 4)",
+        "actions.onPresentation()",
+        "actions.onDismissal()",
+        "XCTAssertEqual(actions.authorizationState, .authorized)",
+        "waitUntilCancellation(call: 1)",
+        "attemptsBeforeOldEffectFinishes",
+        "committedDescriptors",
+        "reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent: {",
+        "XCTAssertEqual(trackerFactoryCalls, 0)",
+        "XCTAssertEqual(router.launchReconciliationCount, 0)",
+        "healthCheckNotificationCenter: center",
+        "XCTAssertEqual(afterLoad.authorizationStatusCount, 1)",
+        "throw HealthCheckNotificationLaunchFailure.injected",
+        "XCTAssertEqual(notificationAttemptCount, 2)",
+        "XCTAssertEqual(repository.mutationOperations, [.update])",
+        "healthCheckNotificationComposition: composition",
+        "bundle.healthCheckNotificationComposition === composition",
+        "XCTAssertEqual(dependencies.trackerFeatureRouterInstantiationCount, 0)",
+        "XCTAssertEqual(dependencies.trackerFeatureRouterInstantiationCount, 1)",
+        "Only the first meaningful Today callback may start launch reconciliation.",
+        "await dependencies.todayViewModel.load()",
+        "XCTAssertEqual(dependencies.todayViewModel.state, .empty)",
+        "await dependencies.todayViewModel.retry()",
+        "await fulfillment(of: [launchReconciliation], timeout: 1)",
+        "Later retries must not reopen the completed first-meaningful launch gate.",
+        "let dependencies = try await prewarmer.makeDependencies()",
+        "The shipped prewarmer must bind launch and lazy tracker mutations to one composition.",
+        "The shipped sync-preloaded Today callback must mark the launch gate.",
+        "attemptsBeforePreloadedLaunchFinishes",
+        "waitForCancellationOrSecondAuthorizationStatus",
+        "A second composition must not run around the suspended launch owner.",
+        "_ = await middleMutation.result",
+        "newestGenerationEntered",
+        "await fulfillment(of: [newestGenerationEntered], timeout: 1)",
+        "The stale successful launch must not close the launch retry gate.",
+        "let staleLaunchConverged = try await oldLaunch.value",
+        "XCTAssertFalse(staleLaunchConverged)",
+        "let supersededFetchLaunchConverged = try await launch.value",
+        "XCTAssertFalse(supersededFetchLaunchConverged)",
+        "let supersededEffectConverged = try await oldLaunch.value",
+        "XCTAssertFalse(supersededEffectConverged)",
+        "let retryConverged = try await lifecycle",
+        "XCTAssertTrue(retryConverged)",
+        "var outcomes = [false, true]",
+        "invocations.dropFirst().allSatisfy",
+    },
+    "HealthTrackingAppUITests/HealthCheckNotificationFlowUITests.swift": {
+        "testPermissionRequestOccursOnlyAfterExplicitHealthCheckActionAndNeverOnRelaunch",
+        '"health-check.notifications.permission"',
+        '"health-check.notifications.permission.request-count"',
+        "assertRequestCount(\"0\", in: app)",
+        "assertRequestCount(\"1\", in: app)",
+        "acknowledgeFirstUseMedicalExplanation(in: app)",
+        '"medical.explanation.l0"',
+        '"medical.explanation.l0.acknowledge"',
+        '"-ui-test-medical-safety-first-use-evidence"',
+        "makeHittable(acknowledgement, in: app)",
+        "acknowledgement.frame.height + 0.01",
+        "acknowledgement.tap()",
+        "explicitPermissionAction.frame.height + 0.01",
+        "app.terminate()",
+        "assertRequestCount(\"0\", in: relaunched)",
+        "XCTNSPredicateExpectation(",
+        "NSPredicate(format: \"label == %@\", expected)",
+        "NSPredicate(format: \"isEnabled == false\")",
+        "XCTWaiter.wait(for: [disabledExpectation], timeout: 5)",
+    },
+}
+
+for relative_path, tokens in m311_tests.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.11 RED test file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.11 RED contracts: {absent}")
+    async_autoclosure_lines = async_xctest_autoclosure_lines(text)
+    if async_autoclosure_lines:
+        locations = ", ".join(
+            f"{relative_path}:{line}" for line in async_autoclosure_lines
+        )
+        raise SystemExit(
+            "M3.11 XCTest autoclosures must evaluate async values first: "
+            f"{locations}"
+        )
+
+m311_adapter_test_text = (
+    root
+    / "Packages/HealthTrackingModules/Tests/NotificationsKitTests/SystemNotificationCenterAdapterTests.swift"
+).read_text(encoding="utf-8")
+m311_live_driver_success_test = swift_braced_declaration(
+    m311_adapter_test_text,
+    "testDefaultAdapterExecutesLiveDriverOperationsAcrossAllOperationsWithoutLiveCenter",
+) or ""
+for live_success_contract in (
+    "DefaultNotificationCenterSystemBackend.LiveOperations(",
+    "await recorder.recordAuthorizationStatus()",
+    "await recorder.recordPendingRequests()",
+    "await recorder.recordDeliveredRequests()",
+    "await recorder.recordRemovedPending(identifiers)",
+    "await recorder.recordRemovedDelivered(identifiers)",
+    "await recorder.recordAdded(",
+    "await recorder.recordAuthorizationRequest()",
+    "systemDriver: .live(operations: operations)",
+    "try await adapter.authorizationStatus()",
+    "try await adapter.pendingRequests()",
+    "try await adapter.deliveredRequestIdentifiers()",
+    "try await adapter.removePendingRequests(withIdentifiers:",
+    "try await adapter.removeDeliveredRequests(withIdentifiers:",
+    "try await adapter.add(added)",
+    "try await adapter.requestAuthorization()",
+    "XCTAssertEqual(snapshot.authorizationStatusCount, 1)",
+    "XCTAssertEqual(snapshot.authorizationRequestCount, 1)",
+    "let unprojectableSystemPending = UNNotificationRequest(",
+    "return [systemPending, unprojectableSystemPending]",
+    "identifier: unprojectableSystemPending.identifier",
+    "request: nil",
+):
+    if live_success_contract not in m311_live_driver_success_test:
+        raise SystemExit(
+            "M3.11 live-driver success test must execute and observe all seven injected "
+            f"operations in its own body: {live_success_contract}"
+        )
+
+m311_public_adapter_test = swift_braced_declaration(
+    m311_adapter_test_text,
+    "testPublicDefaultAdapterConstructsWithoutTouchingLiveCenter",
+) or ""
+for public_adapter_contract in (
+    "let adapter = SystemNotificationCenterAdapter()",
+    "withExtendedLifetime(adapter)",
+):
+    if public_adapter_contract not in m311_public_adapter_test:
+        raise SystemExit(
+            "M3.11 public adapter test must instantiate the shipped no-argument path "
+            f"without invoking a live operation: {public_adapter_contract}"
+        )
+
+m311_deferred_provider_test = swift_braced_declaration(
+    m311_adapter_test_text,
+    "testInjectedCenterProviderRemainsDeferredAcrossLiveDriverAndAdapterConstruction",
+) or ""
+for deferred_provider_contract in (
+    "DefaultNotificationCenterSystemBackend.LiveOperations.system(",
+    "centerProvider: { probe.resolve() }",
+    "DefaultNotificationCenterSystemBackend.Driver.live(",
+    "SystemNotificationCenterAdapter(",
+    "XCTAssertEqual(probe.callCount, 0)",
+):
+    if deferred_provider_contract not in m311_deferred_provider_test:
+        raise SystemExit(
+            "M3.11 injected center-provider test must prove construction stays deferred "
+            f"through the live driver and adapter: {deferred_provider_contract}"
+        )
+
+m311_live_driver_error_test = swift_braced_declaration(
+    m311_adapter_test_text,
+    "testLiveDriverAndDefaultAdapterPropagateEverySystemOperationError",
+) or ""
+for live_error_contract in (
+    "for failingOrdinal in 1...7",
+    "DefaultNotificationCenterSystemBackend.LiveOperations(",
+    "if failingOrdinal == 1 { throw expectedFailure }",
+    "if failingOrdinal == 2 { throw expectedFailure }",
+    "if failingOrdinal == 3 { throw expectedFailure }",
+    "if failingOrdinal == 4 { throw expectedFailure }",
+    "if failingOrdinal == 5 { throw expectedFailure }",
+    "if failingOrdinal == 6 { throw expectedFailure }",
+    "if failingOrdinal == 7 { throw expectedFailure }",
+    "systemDriver: .live(operations: operations)",
+    "try await adapter.authorizationStatus()",
+    "try await adapter.pendingRequests()",
+    "try await adapter.deliveredRequestIdentifiers()",
+    "try await adapter.removePendingRequests(withIdentifiers:",
+    "try await adapter.removeDeliveredRequests(withIdentifiers:",
+    "try await adapter.add(request)",
+    "try await adapter.requestAuthorization()",
+    "catch let failure as DefaultSystemDriverFailure",
+    "XCTAssertEqual(failure, expectedFailure)",
+):
+    if live_error_contract not in m311_live_driver_error_test:
+        raise SystemExit(
+            "M3.11 live-driver error test must inject and prove exact propagation at "
+            f"all seven operation boundaries in its own body: {live_error_contract}"
+        )
+
+m311_reconciliation_test_text = (
+    root
+    / "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationReconciliationTests.swift"
+).read_text(encoding="utf-8")
+m311_unauthorized_cleanup_test = swift_braced_declaration(
+    m311_reconciliation_test_text,
+    "testDeniedAndNotDeterminedPerformCleanupWithoutAddingPromptingOrMutatingInput",
+) or ""
+for unauthorized_cleanup_contract in (
+    ".removePending(fixture.removedPendingIDs)",
+    ".removeDelivered(fixture.removedDeliveredIDs)",
+    "snapshot.pending.keys.contains(fixture.replacementRequest.identifier)",
+    "snapshot.delivered.contains(fixture.replacementRequest.identifier)",
+    "XCTAssertEqual(snapshot.pending, [",
+    "XCTAssertEqual(snapshot.delivered, [fixture.foreignRequest.identifier])",
+    "fixture.initialUnprojectablePendingIdentifiers",
+    "fixture.foreignUnprojectablePendingID",
+    "snapshot.unprojectablePendingIdentifiers",
+):
+    if unauthorized_cleanup_contract not in m311_unauthorized_cleanup_test:
+        raise SystemExit(
+            "M3.11 unauthorized reconciliation must remove the outdated eligible "
+            f"replacement from pending and delivered state: {unauthorized_cleanup_contract}"
+        )
+
+m311_authorized_reconciliation_test = swift_braced_declaration(
+    m311_reconciliation_test_text,
+    "testReconciliationUsesDeterministicCleanupBeforeReplacementAndConverges",
+) or ""
+for authorized_unprojectable_contract in (
+    "unprojectablePendingIdentifiers:",
+    "fixture.initialUnprojectablePendingIdentifiers",
+    "firstSnapshot.unprojectablePendingIdentifiers",
+    "fixture.foreignUnprojectablePendingID",
+):
+    if authorized_unprojectable_contract not in m311_authorized_reconciliation_test:
+        raise SystemExit(
+            "M3.11 authorized reconciliation must clean owned unprojectable pending "
+            "requests while preserving foreign identifiers: "
+            f"{authorized_unprojectable_contract}"
+        )
+
+m311_app_test_text = (
+    root / "HealthTrackingAppTests/HealthCheckNotificationCompositionTests.swift"
+).read_text(encoding="utf-8")
+m311_three_generation_test = swift_braced_declaration(
+    m311_app_test_text,
+    "testThreeGenerationsSkipMiddleWorkAndCommitOnlyNewestAfterOldNonCancellableEffect",
+) or ""
+if "waitUntilFetch(call: 3)" in m311_three_generation_test:
+    raise SystemExit(
+        "M3.11 three-generation test must not require a third fetch before releasing "
+        "the old non-cancellable effect"
+    )
+for three_generation_contract in (
+    "let newestGenerationEntered = expectation(",
+    "await fulfillment(of: [newestGenerationEntered], timeout: 1)",
+    "await reconciler.resumeReconciliation(call: 1)",
+    "_ = await middleMutation.result",
+    "try await newestMutation.value",
+):
+    if three_generation_contract not in m311_three_generation_test:
+        raise SystemExit(
+            "M3.11 three-generation test must use a bounded newest-entry signal and "
+            f"release old work before awaiting final convergence: {three_generation_contract}"
+        )
+
+m311_retry_callback_test = swift_braced_declaration(
+    m311_app_test_text,
+    "testRealAppDependenciesTodayRetryAfterInitialEmptyTriggersOwnedNotificationCallbackOnce",
+) or ""
+retry_callback_tokens = (
+    "await dependencies.todayViewModel.load()",
+    "XCTAssertEqual(dependencies.todayViewModel.state, .empty)",
+    "XCTAssertEqual(launchReconciliationCount, 0)",
+    "try dependencies.load()",
+    "await dependencies.todayViewModel.retry()",
+    "await fulfillment(of: [launchReconciliation], timeout: 1)",
+    "Later retries must not reopen the completed first-meaningful launch gate.",
+)
+retry_callback_positions = [
+    m311_retry_callback_test.find(token) for token in retry_callback_tokens
+]
+if (
+    any(position < 0 for position in retry_callback_positions)
+    or retry_callback_positions != sorted(retry_callback_positions)
+    or m311_retry_callback_test.count("await dependencies.todayViewModel.retry()") != 2
+):
+    raise SystemExit(
+        "M3.11 AppDependencies retry integration must prove empty state, zero attempts, "
+        "seed, real Today retry, bounded reconciliation, and exact-once completion in order"
+    )
+
+m311_ui_flow_text = (
+    root / "HealthTrackingAppUITests/HealthCheckNotificationFlowUITests.swift"
+).read_text(encoding="utf-8")
+m311_ui_launch_body = swift_braced_declaration(m311_ui_flow_text, "launch") or ""
+if '"-ui-test-medical-safety-first-use-evidence"' not in m311_ui_launch_body:
+    raise SystemExit(
+        "M3.11 explicit L0 notification UI flow must opt into medical-safety first-use evidence"
+    )
+if "-ui-test-launch-performance-evidence" in m311_ui_launch_body:
+    raise SystemExit(
+        "M3.11 notification UI flow must not opt into unrelated launch-performance evidence"
+    )
+if (
+    'acknowledgement.tap()\n        assertRequestCount("0", in: app)'
+    not in m311_ui_flow_text
+):
+    raise SystemExit(
+        "M3.11 L0 acknowledgement must immediately prove permission count remains zero"
+    )
+for ui_contract, failure in (
+    (
+        'require(app.descendants(matching: .any)["root.today.content"])\n'
+        '        assertRequestCount("0", in: app)',
+        "M3.11 initial Today publication must prove permission count remains zero",
+    ),
+    (
+        'require(app.descendants(matching: .any)["health-check.list.loaded"])\n'
+        '        assertRequestCount("0", in: app)',
+        "M3.11 health-check navigation must prove permission count remains zero",
+    ),
+    (
+        "acknowledgement.frame.height + 0.01,\n            52,",
+        "M3.11 L0 acknowledgement must retain the exact 52-point target",
+    ),
+    (
+        "explicitPermissionAction.frame.height + 0.01,\n            44,",
+        "M3.11 explicit permission action must retain the exact 44-point target",
+    ),
+):
+    if ui_contract not in m311_ui_flow_text:
+        raise SystemExit(failure)
+
+m311_support = {
+    "Packages/HealthTrackingModules/Package.swift": {
+        '.library(name: "NotificationsKit", targets: ["NotificationsKit"])',
+        'name: "NotificationsKit"',
+        'name: "NotificationsKitTests"',
+        'dependencies: ["NotificationsKit"]',
+    },
+    "project.yml": {
+        "product: NotificationsKit",
+        "HealthTrackingModules/NotificationsKitTests",
+    },
+    ".github/workflows/ios.yml": {
+        "Qualifying M3.11 behavior RED",
+        "scripts/test-ios.sh --m311-red-only",
+        "M0 acceptance gates",
+        "Targeted M3.11 notification planning and routing tests",
+        "scripts/test-ios.sh --only-testing NotificationsKitTests",
+        "Targeted M3.11 app notification lifecycle tests",
+        "scripts/test-ios.sh --only-testing HealthTrackingAppTests/HealthCheckNotificationCompositionTests",
+        "Targeted M3.11 explicit notification permission UI test",
+        "scripts/test-ios.sh --only-testing HealthTrackingAppUITests/HealthCheckNotificationFlowUITests",
+    },
+    "scripts/test-ios.sh": {
+        "--m311-red-only",
+        '"$script_dir/verify-trackers.sh" --m311-red',
+        'xcodebuild_test_arguments+=("-only-testing:NotificationsKitTests")',
+    },
+    "Packages/HealthTrackingModules/Sources/NotificationsKit/NotificationsKitModule.swift": {
+        "M3.11 RED module marker",
+        "intentionally behaviorless",
+        "public-API-free",
+    },
+}
+
+for relative_path, tokens in m311_support.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.11 support file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.11 wiring: {absent}")
+
+m311_workflow_text = (root / ".github/workflows/ios.yml").read_text(encoding="utf-8")
+if m311_workflow_text.index("Qualifying M3.11 behavior RED") > m311_workflow_text.index(
+    "M0 acceptance gates"
+):
+    raise SystemExit("M3.11 qualifying RED must run before the M0 acceptance gates")
+
+m311_source_root = root / "Packages/HealthTrackingModules/Sources/NotificationsKit"
+m311_marker_path = m311_source_root / "NotificationsKitModule.swift"
+m311_values_path = m311_source_root / "Domain/NotificationValues.swift"
+m311_has_marker_only_layout = m311_marker_path.is_file() and not m311_values_path.exists()
+m311_is_marker_only_red = m311_has_marker_only_layout and m311_red_mode
+
+m311_package_text = (
+    root / "Packages/HealthTrackingModules/Package.swift"
+).read_text(encoding="utf-8")
+m311_compact_package = re.sub(r"\s+", "", m311_package_text)
+red_target_contract = '.target(name:"NotificationsKit",swiftSettings:strictConcurrency)'
+green_target_contract = (
+    '.target(name:"NotificationsKit",resources:[.process("Resources")],'
+    'swiftSettings:strictConcurrency)'
+)
+expected_target_contract = (
+    red_target_contract if m311_has_marker_only_layout else green_target_contract
+)
+if expected_target_contract not in m311_compact_package:
+    raise SystemExit(
+        "M3.11 NotificationsKit target must remain dependency-neutral, localized, "
+        "and strict-concurrency checked"
+    )
+if (
+    '.testTarget(name:"NotificationsKitTests",dependencies:["NotificationsKit"],'
+    'swiftSettings:strictConcurrency)'
+    not in m311_compact_package
+):
+    raise SystemExit("M3.11 NotificationsKitTests target wiring is incomplete")
+
+for source in (
+    m311_source_root.rglob("*.swift") if m311_source_root.is_dir() else ()
+):
+    relative = source.relative_to(m311_source_root).as_posix()
+    text = source.read_text(encoding="utf-8")
+    if "import UserNotifications" in text and not relative.startswith("SystemAdapter/"):
+        raise SystemExit(
+            "M3.11 only the dedicated NotificationsKit/SystemAdapter source may import UserNotifications"
+        )
+    for forbidden in (
+        "import HealthChecksKit",
+        "import CoreModels",
+        "import SwiftData",
+        "import MetricsKit",
+        "import SleepMoodKit",
+        "import ProgressPhotosKit",
+        "HealthCheckReminderSnapshot",
+    ):
+        if forbidden in text:
+            raise SystemExit(
+                f"M3.11 NotificationsKit must remain tracker- and persistence-neutral: {relative}: {forbidden}"
+            )
+    for recurrence_arithmetic in (
+        "HealthCheckRecurrence",
+        "date(byAdding:",
+        ".addingTimeInterval(",
+        "case .monthly",
+        "case .quarterly",
+        "case .yearly",
+    ):
+        if recurrence_arithmetic in text:
+            raise SystemExit(
+                "M3.11 NotificationsKit must avoid recurrence arithmetic while normalizing "
+                "delivery instants only to system-supported precision "
+                f"without recurrence arithmetic: {relative}: {recurrence_arithmetic}"
+            )
+
+for test_source in (
+    root / "Packages/HealthTrackingModules/Tests/NotificationsKitTests"
+).glob("*.swift"):
+    test_text = test_source.read_text(encoding="utf-8")
+    if (
+        "import UserNotifications" in test_text
+        and test_source.name != "SystemNotificationCenterAdapterTests.swift"
+    ):
+        raise SystemExit(
+            "M3.11 only the system-adapter boundary test may import UserNotifications"
+        )
+    if (
+        test_source.name == "SystemNotificationCenterAdapterTests.swift"
+        and "import UserNotifications" in test_text
+        and "@preconcurrency import UserNotifications" not in test_text
+    ):
+        raise SystemExit(
+            "M3.11 system-adapter boundary test must use a preconcurrency UserNotifications import"
+        )
+
+if m311_is_marker_only_red:
+    marker_only_sources = sorted(
+        source.relative_to(m311_source_root).as_posix()
+        for source in m311_source_root.rglob("*.swift")
+    )
+    if marker_only_sources != ["NotificationsKitModule.swift"]:
+        raise SystemExit(
+            "M3.11 RED marker exemption permits exactly one behaviorless module source"
+        )
+    if m311_marker_path.read_text(encoding="utf-8").strip() != (
+        "// M3.11 RED module marker: intentionally behaviorless and public-API-free."
+    ):
+        raise SystemExit(
+            "M3.11 RED module marker must remain behaviorless and public-API-free"
+        )
+
+m311_production = {
+    "Packages/HealthTrackingModules/Sources/NotificationsKit/Domain/NotificationValues.swift": {
+        "public struct HealthCheckNotificationDescriptor",
+        "public let reminderID: UUID",
+        "public let dueDate: Date",
+        "public let isEligible: Bool",
+        "public struct NotificationRequestValue",
+        "public let repeats: Bool",
+        "public struct PendingNotificationRequestValue",
+        "public let request: NotificationRequestValue?",
+        "public enum NotificationAuthorizationStatus",
+        "public protocol NotificationCenterClient",
+        "public protocol HealthCheckNotificationReconciling",
+    },
+    "Packages/HealthTrackingModules/Sources/NotificationsKit/Routing/HealthCheckNotificationRouteCodec.swift": {
+        "public enum HealthCheckNotificationRoute",
+        "case healthCheckDetail(reminderID: UUID)",
+        "public enum HealthCheckNotificationRouteCodec",
+        '"version"',
+        '"route"',
+        '"reminderID"',
+        '"health-check-detail"',
+        "payload.keys",
+        "uuidString.lowercased()",
+    },
+    "Packages/HealthTrackingModules/Sources/NotificationsKit/Planner/HealthCheckNotificationPlanner.swift": {
+        "public struct HealthCheckNotificationPlanner",
+        "public init(locale: Locale",
+        "public static func requestIdentifier",
+        '"health-check-detail.v1.',
+        'localized("notifications.health-check.title")',
+        'localized("notifications.health-check.body")',
+        "Bundle.module.path(",
+        "locale.language.languageCode",
+        "descriptor.dueDate.timeIntervalSince1970.rounded(.up)",
+        "HealthCheckNotificationRouteCodec.encode",
+    },
+    "Packages/HealthTrackingModules/Sources/NotificationsKit/Resources/Localizable.xcstrings": {
+        '"notifications.health-check.title"',
+        '"notifications.health-check.body"',
+        '"Hatırlatma"',
+        '"Reminder"',
+        '"Planladığınız hatırlatmayı uygulamada görüntüleyin."',
+        '"View your scheduled reminder in the app."',
+    },
+    "Packages/HealthTrackingModules/Sources/NotificationsKit/Planner/HealthCheckNotificationReconciler.swift": {
+        "public actor HealthCheckNotificationReconciler",
+        "center.authorizationStatus()",
+        "center.pendingRequests()",
+        "center.deliveredRequestIdentifiers()",
+        "center.removePendingRequests(withIdentifiers:",
+        "center.removeDeliveredRequests(withIdentifiers:",
+        "center.add(",
+        "Task.checkCancellation()",
+        "case .denied, .notDetermined",
+        "request.deliveryDate <= now()",
+        "pending.request",
+        "pending.identifier",
+    },
+    "Packages/HealthTrackingModules/Sources/NotificationsKit/Authorization/HealthCheckNotificationAuthorizationController.swift": {
+        "public final class HealthCheckNotificationAuthorizationController",
+        "public func beginPresentation()",
+        "public func dismiss()",
+        "public func requestFromExplicitUserAction() async",
+        "guard !isRequestInFlight",
+        "generation += 1",
+        "guard generation == requestGeneration",
+        "center.requestAuthorization()",
+    },
+    "Packages/HealthTrackingModules/Sources/NotificationsKit/SystemAdapter/SystemNotificationCenterAdapter.swift": {
+        "@preconcurrency import UserNotifications",
+        "public actor SystemNotificationCenterAdapter",
+        "NotificationCenterSystemBackend",
+        "NotificationSystemRequest",
+        "PendingNotificationSystemRequest",
+        "struct LiveOperations",
+        "struct Driver",
+        "static let currentCenter:",
+        "static func system(",
+        "centerProvider:",
+        "let center = centerProvider()",
+        "static func live(operations:",
+        "driver: Driver = .live()",
+        "driver.authorizationStatus()",
+        "driver.pendingRequests()",
+        "driver.deliveredRequestIdentifiers()",
+        "driver.removePendingRequests(",
+        "driver.removeDeliveredRequests(",
+        "driver.add(",
+        "driver.requestAuthorization()",
+        "public init(calendar: Calendar = .current)",
+        "init(calendar: Calendar, systemDriver:",
+        "userNotificationProjection(calendar:",
+        "calendar.dateComponents(",
+        "UNMutableNotificationContent",
+        "UNCalendarNotificationTrigger",
+        "let projection = request.userNotificationProjection",
+        "static func makeUserNotificationRequest(",
+        "static func pendingSystemRequest(",
+        "static func notificationAuthorizationStatus(",
+        "content.title = projection.title",
+        "content.body = projection.body",
+        "UNNotificationRequest",
+        "content.userInfo",
+        "repeats: projection.repeats",
+        "center.notificationSettings()",
+        "settings.authorizationStatus",
+        "center.pendingNotificationRequests()",
+        "pending.map",
+        "center.deliveredNotifications()",
+        "delivered.map { $0.request.identifier }",
+        "center.removePendingNotificationRequests(withIdentifiers:",
+        "center.removeDeliveredNotifications(withIdentifiers:",
+        "try await center.add(systemRequest)",
+        "center.requestAuthorization(options:",
+        "calendar.date(from: calendarTrigger.dateComponents)",
+        "repeats: calendarTrigger.repeats",
+    },
+    "App/Application/HealthCheckNotificationCoordinator.swift": {
+        "import HealthChecksKit",
+        "import NotificationsKit",
+        "enum HealthCheckNotificationMapper",
+        "static func descriptors(",
+        "reminderID: snapshot.id",
+        "dueDate: snapshot.dueDate",
+        "isEligible: snapshot.status == .pending",
+        "final class HealthCheckNotificationLifecycleCoordinator",
+        "reconcileAfterFirstMeaningfulTodayContent",
+        "reconcileAfterHealthCheckMutation",
+        "generation += 1",
+        "guard generation == currentGeneration",
+        "repository.fetchReminders()",
+        "HealthCheckNotificationMapper.descriptors(from:",
+        "reconciler.reconcile(",
+        "guard !didCompleteLaunchReconciliation",
+        "didCompleteLaunchReconciliation = true",
+        "async throws -> Bool",
+        "return false",
+        "guard converged else",
+        "final class HealthCheckNotificationComposition",
+        "final class NotificationReconcilingHealthChecksRepository",
+        "repository.createReminder(",
+        "repository.updateReminder(",
+        "repository.deleteReminder(",
+        "repository.completeReminder(",
+        "repository.undoCompletion(",
+        "reconcileAfterHealthCheckMutation",
+        "func reconcileAfterCommittedMutation() async",
+        "await reconcileAfterCommittedMutation()",
+        "catch",
+        "final class HealthCheckNotificationLaunchGate",
+        "markTodayContentMeaningful",
+        "reconcileIfNeeded",
+        "enum DefaultHealthCheckNotificationFactory",
+        "static func make(",
+    },
+}
+
+if not m311_is_marker_only_red:
+    for relative_path, tokens in m311_production.items():
+        path = root / relative_path
+        if not path.is_file():
+            raise SystemExit(f"Missing M3.11 production contract: {relative_path}")
+        text = path.read_text(encoding="utf-8")
+        absent = sorted(token for token in tokens if token not in text)
+        if absent:
+            raise SystemExit(
+                f"{relative_path} is missing M3.11 production contracts: {absent}"
+            )
+
+    m311_reconciler_text = (
+        root
+        / "Packages/HealthTrackingModules/Sources/NotificationsKit/Planner/HealthCheckNotificationReconciler.swift"
+    ).read_text(encoding="utf-8")
+    ordered_reconciliation_tokens = (
+        "center.authorizationStatus()",
+        "center.pendingRequests()",
+        "center.deliveredRequestIdentifiers()",
+        "center.removePendingRequests(withIdentifiers:",
+        "center.removeDeliveredRequests(withIdentifiers:",
+        "center.add(",
+    )
+    ordered_positions = [
+        m311_reconciler_text.find(token) for token in ordered_reconciliation_tokens
+    ]
+    if any(position < 0 for position in ordered_positions) or ordered_positions != sorted(
+        ordered_positions
+    ):
+        raise SystemExit(
+            "M3.11 reconciliation must preserve deterministic status/read/cleanup/add operation order"
+        )
+    if "center.requestAuthorization(" in m311_reconciler_text:
+        raise SystemExit(
+            "M3.11 reconciliation must never request notification authorization"
+        )
+
+    m311_system_text = (
+        root
+        / "Packages/HealthTrackingModules/Sources/NotificationsKit/SystemAdapter/SystemNotificationCenterAdapter.swift"
+    ).read_text(encoding="utf-8")
+    m311_default_backend_body = swift_braced_type_declaration(
+        m311_system_text,
+        "DefaultNotificationCenterSystemBackend",
+    )
+    if m311_default_backend_body is None:
+        raise SystemExit(
+            "M3.11 default system backend must expose an inspectable implementation body"
+        )
+    if "driver:Driver=.live()" not in re.sub(r"\s+", "", m311_default_backend_body):
+        raise SystemExit(
+            "M3.11 default system backend must use the live system driver by default"
+        )
+    m311_live_operations_body = swift_braced_type_declaration(
+        m311_default_backend_body,
+        "LiveOperations",
+    ) or ""
+    if re.search(
+        r"static\s+let\s+currentCenter\s*:\s*@Sendable\s*\(\s*\)\s*->\s*"
+        r"UNUserNotificationCenter\s*=\s*\{\s*\.current\(\)\s*\}",
+        m311_live_operations_body,
+    ) is None:
+        raise SystemExit(
+            "M3.11 live operations must defer UNUserNotificationCenter.current() "
+            "behind a provider closure"
+        )
+    if re.search(
+        r"static\s+func\s+system\s*\(\s*centerProvider\s*:\s*@escaping\s+"
+        r"@Sendable\s*\(\s*\)\s*->\s*UNUserNotificationCenter\s*=\s*"
+        r"currentCenter\s*\)",
+        m311_live_operations_body,
+    ) is None:
+        raise SystemExit(
+            "M3.11 LiveOperations.system must accept the deferred current-center "
+            "provider without resolving it during adapter construction"
+        )
+    m311_live_system_body = swift_braced_declaration(
+        m311_live_operations_body,
+        "system",
+    ) or ""
+    if m311_live_system_body.count("centerProvider()") != 7:
+        raise SystemExit(
+            "M3.11 LiveOperations.system must resolve the center provider only inside "
+            "its seven deferred operation closures"
+        )
+    m311_live_system_field_contracts = {
+        "authorizationStatus": (
+            "let center = centerProvider()",
+            "let settings = await center.notificationSettings()",
+            "return settings.authorizationStatus",
+        ),
+        "pendingRequests": (
+            "let center = centerProvider()",
+            "let pending = await center.pendingNotificationRequests()",
+            "return pending",
+        ),
+        "deliveredRequestIdentifiers": (
+            "let center = centerProvider()",
+            "let delivered = await center.deliveredNotifications()",
+            "return delivered.map { $0.request.identifier }",
+        ),
+        "removePendingRequests": (
+            "let center = centerProvider()",
+            "center.removePendingNotificationRequests(withIdentifiers:",
+        ),
+        "removeDeliveredRequests": (
+            "let center = centerProvider()",
+            "center.removeDeliveredNotifications(withIdentifiers:",
+        ),
+        "add": (
+            "let center = centerProvider()",
+            "try await center.add(",
+        ),
+        "requestAuthorization": (
+            "let center = centerProvider()",
+            "let granted = try await center.requestAuthorization(",
+            "options:",
+            "return granted",
+        ),
+    }
+    m311_directly_propagating_field_bodies = {
+        "add": (
+            "{systemRequestinletcenter=centerProvider()"
+            "tryawaitcenter.add(systemRequest)}"
+        ),
+        "requestAuthorization": (
+            "{letcenter=centerProvider()"
+            "letgranted=tryawaitcenter.requestAuthorization("
+            "options:[.alert,.sound])returngranted}"
+        ),
+    }
+    for field_name, field_contracts in m311_live_system_field_contracts.items():
+        field_body = swift_braced_region_after(
+            m311_live_system_body,
+            f"{field_name}:",
+        ) or ""
+        missing_field_contracts = [
+            token for token in field_contracts if token not in field_body
+        ]
+        compact_field_body = re.sub(r"[\s;]+", "", field_body)
+        if field_name in m311_directly_propagating_field_bodies and (
+            "try?awaitcenter." in compact_field_body
+            or "try!awaitcenter." in compact_field_body
+        ):
+            raise SystemExit(
+                "M3.11 LiveOperations.system must propagate add/authorization "
+                "errors without swallowing catch or detached work: "
+                f"{field_name}"
+            )
+        if missing_field_contracts:
+            raise SystemExit(
+                "M3.11 LiveOperations.system must bind each returned field to its "
+                "matching real notification-center operation: "
+                f"{field_name}: {missing_field_contracts}"
+            )
+        expected_propagating_body = m311_directly_propagating_field_bodies.get(
+            field_name
+        )
+        if (
+            expected_propagating_body is not None
+            and compact_field_body != expected_propagating_body
+        ):
+            raise SystemExit(
+                "M3.11 LiveOperations.system must propagate add/authorization "
+                "errors without swallowing catch or detached work: "
+                f"{field_name}"
+            )
+
+    m311_driver_body = swift_braced_type_declaration(
+        m311_default_backend_body,
+        "Driver",
+    ) or ""
+    m311_driver_live_body = swift_braced_declaration(m311_driver_body, "live") or ""
+    for live_driver_token in (
+        "operations.authorizationStatus",
+        "operations.pendingRequests",
+        "operations.deliveredRequestIdentifiers",
+        "operations.removePendingRequests",
+        "operations.removeDeliveredRequests",
+        "operations.add",
+        "operations.requestAuthorization",
+    ):
+        if live_driver_token not in m311_driver_live_body:
+            raise SystemExit(
+                "M3.11 Driver.live must forward every injected live operation inside "
+                f"its own body: {live_driver_token}"
+            )
+    m311_default_backend_method_contracts = {
+        "authorizationStatus": (
+            "try await driver.authorizationStatus()",
+            "notificationAuthorizationStatus(",
+        ),
+        "pendingRequests": (
+            "try await driver.pendingRequests()",
+            "pending.map",
+            "pendingSystemRequest(",
+        ),
+        "deliveredRequestIdentifiers": (
+            "try await driver.deliveredRequestIdentifiers()",
+        ),
+        "removePendingRequests": ("try await driver.removePendingRequests(",),
+        "removeDeliveredRequests": ("try await driver.removeDeliveredRequests(",),
+        "add": (
+            "makeUserNotificationRequest(",
+            "try await driver.add(",
+        ),
+        "requestAuthorization": ("try await driver.requestAuthorization()",),
+    }
+    for method_name, method_tokens in m311_default_backend_method_contracts.items():
+        method_body = swift_braced_declaration(
+            m311_default_backend_body,
+            method_name,
+        ) or ""
+        missing_method_tokens = [
+            token for token in method_tokens if token not in method_body
+        ]
+        if missing_method_tokens:
+            raise SystemExit(
+                "M3.11 default system backend "
+                f"{method_name} must execute its injected driver/conversion path: "
+                f"{missing_method_tokens}"
+            )
+
+    m311_system_adapter_body = swift_braced_type_declaration(
+        m311_system_text,
+        "SystemNotificationCenterAdapter",
+    ) or ""
+    m311_system_adapter_public_init = swift_braced_initializer(
+        m311_system_adapter_body,
+        "calendar",
+        require_public=True,
+    ) or ""
+    m311_compact_public_init = re.sub(r"\s+", "", m311_system_adapter_public_init)
+    if (
+        "backend=DefaultNotificationCenterSystemBackend(calendar:calendar)"
+        not in m311_compact_public_init
+    ):
+        raise SystemExit(
+            "M3.11 shipped no-argument system adapter must store the default live backend"
+        )
+    m311_system_adapter_driver_init = swift_braced_initializer(
+        m311_system_adapter_body,
+        "systemDriver",
+    ) or ""
+    m311_compact_driver_init = re.sub(r"\s+", "", m311_system_adapter_driver_init)
+    if (
+        "backend=DefaultNotificationCenterSystemBackend("
+        "calendar:calendar,driver:systemDriver)"
+        not in m311_compact_driver_init
+    ):
+        raise SystemExit(
+            "M3.11 injectable system adapter initializer must store the same default backend path"
+        )
+    m311_system_adapter_backend_init = swift_braced_initializer(
+        m311_system_adapter_body,
+        "backend",
+    ) or ""
+    if "self.backend=backend" not in re.sub(
+        r"\s+", "", m311_system_adapter_backend_init
+    ):
+        raise SystemExit(
+            "M3.11 injected backend initializer must store its exact backend"
+        )
+    for adapter_method, adapter_call in (
+        ("authorizationStatus", "try await backend.authorizationStatus()"),
+        ("pendingRequests", "try await backend.pendingRequests()"),
+        (
+            "deliveredRequestIdentifiers",
+            "try await backend.deliveredRequestIdentifiers()",
+        ),
+        (
+            "removePendingRequests",
+            "try await backend.removePendingRequests(withIdentifiers:",
+        ),
+        (
+            "removeDeliveredRequests",
+            "try await backend.removeDeliveredRequests(withIdentifiers:",
+        ),
+        ("add", "try await backend.add("),
+        ("requestAuthorization", "try await backend.requestAuthorization()"),
+    ):
+        adapter_method_body = swift_braced_declaration(
+            m311_system_adapter_body,
+            adapter_method,
+        ) or ""
+        if adapter_call not in adapter_method_body:
+            raise SystemExit(
+                "M3.11 system adapter must delegate and propagate errors through its "
+                f"stored backend: {adapter_method}: {adapter_call}"
+            )
+
+    m311_mapper_text = (
+        root / "App/Application/HealthCheckNotificationCoordinator.swift"
+    ).read_text(encoding="utf-8")
+    m311_mapper_body = swift_braced_declaration(m311_mapper_text, "descriptors") or ""
+    for sensitive_mapping in (
+        "snapshot.name",
+        "snapshot.recurrence",
+        "snapshot.marker",
+        "snapshot.result",
+    ):
+        if sensitive_mapping in m311_mapper_body:
+            raise SystemExit(
+                "M3.11 app mapper must expose only opaque ID, due date, and eligibility: "
+                f"{sensitive_mapping}"
+            )
+
+    for mutation_method, repository_call in (
+        ("createReminder", "repository.createReminder("),
+        ("updateReminder", "repository.updateReminder("),
+        ("deleteReminder", "repository.deleteReminder("),
+        ("completeReminder", "repository.completeReminder("),
+        ("undoCompletion", "repository.undoCompletion("),
+    ):
+        mutation_body = swift_braced_declaration(m311_mapper_text, mutation_method) or ""
+        commit_position = mutation_body.find(repository_call)
+        reconciliation_position = mutation_body.find("await reconcileAfterCommittedMutation()")
+        if (
+            commit_position < 0
+            or reconciliation_position < 0
+            or commit_position > reconciliation_position
+        ):
+            raise SystemExit(
+                "M3.11 notification-aware repository must reconcile exactly after a successful "
+                f"{mutation_method} commit"
+            )
+
+m311_app_wiring = {
+    "App/Application/AppDependencies.swift": {
+        "onFirstMeaningfulContent",
+        "reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent",
+        "healthCheckNotificationCenter",
+        "healthCheckNotificationComposition",
+        "trackerFeatureRouterInstantiationCount",
+        "notificationLaunchGate.markTodayContentMeaningful()",
+        "await notificationLaunchGate.reconcileIfNeeded()",
+        "Task { await notificationLaunchGate.reconcileIfNeeded() }",
+        "healthCheckNotificationComposition:",
+        "trackerFeatureRouterInstantiationCount",
+        "DefaultHealthCheckNotificationFactory.make(",
+    },
+    "App/Application/TrackerFeatureRouting.swift": {
+        "reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent",
+        "reconcileHealthCheckNotificationsAfterCommittedMutation",
+        "requestHealthCheckNotificationAuthorizationFromExplicitUserAction",
+    },
+    "App/Application/TrackerFeatureBundle.swift": {
+        "HealthCheckNotificationLifecycleCoordinator",
+        "HealthCheckNotificationAuthorizationController",
+        "SystemNotificationCenterAdapter",
+        "reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent",
+        "reconcileHealthCheckNotificationsAfterCommittedMutation",
+        "requestHealthCheckNotificationAuthorizationFromExplicitUserAction",
+        "onRequestNotificationAuthorization",
+        "HealthCheckListNotificationActions",
+        "makeHealthCheckListNotificationActions",
+        "notificationCenter: any NotificationCenterClient",
+        "healthCheckNotificationComposition",
+        "NotificationReconcilingHealthChecksRepository",
+        "onNotificationPermissionPresentation",
+        "onNotificationPermissionDismissal",
+    },
+    "App/Application/AppRootView.swift": {
+        "reconcileHealthCheckNotificationsAfterCommittedMutation",
+        "onCommittedMutation",
+    },
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecks/HealthCheckListView.swift": {
+        "onRequestNotificationAuthorization",
+        "onNotificationPermissionPresentation",
+        "onNotificationPermissionDismissal",
+        ".onAppear(perform: onNotificationPermissionPresentation)",
+        ".onDisappear(perform: onNotificationPermissionDismissal)",
+        'accessibilityIdentifier("health-check.notifications.permission")',
+    },
+    "App/Support/AppUITestLaunchConfiguration.swift": {
+        "notificationAuthorizationRequestCount",
+        '"health-check.notifications.permission.request-count"',
+    },
+}
+
+if not m311_is_marker_only_red:
+    for relative_path, tokens in m311_app_wiring.items():
+        path = root / relative_path
+        if not path.is_file():
+            raise SystemExit(f"Missing M3.11 app entry-point source: {relative_path}")
+        text = path.read_text(encoding="utf-8")
+        absent = sorted(token for token in tokens if token not in text)
+        if absent:
+            raise SystemExit(
+                f"{relative_path} is missing M3.11 app entry-point wiring: {absent}"
+            )
+
+    m311_bundle_text = (
+        root / "App/Application/TrackerFeatureBundle.swift"
+    ).read_text(encoding="utf-8")
+    m311_compact_bundle = re.sub(r"\s+", "", m311_bundle_text)
+    for callback_contract in (
+        "notificationCenter:anyNotificationCenterClient=SystemNotificationCenterAdapter()",
+        "HealthCheckNotificationReconciler(center:notificationCenter",
+        "HealthCheckNotificationAuthorizationController(center:notificationCenter",
+        "healthChecksViewModel=HealthChecksViewModel(repository:healthChecksRepository)",
+        "letnotificationActions=makeHealthCheckListNotificationActions(",
+        "onNotificationPermissionPresentation:notificationActions.onPresentation",
+        "onNotificationPermissionDismissal:notificationActions.onDismissal",
+        "onRequestNotificationAuthorization:{Task{awaitnotificationActions.onRequestNotificationAuthorization()}}",
+    ):
+        if callback_contract not in m311_compact_bundle:
+            raise SystemExit(
+                "M3.11 HealthCheckListView must use the concrete bundle notification callbacks: "
+                f"{callback_contract}"
+            )
+
+    m311_dependencies_text = (
+        root / "App/Application/AppDependencies.swift"
+    ).read_text(encoding="utf-8")
+    m311_prepare_dependencies_body = swift_braced_declaration(
+        m311_dependencies_text,
+        "prepareDependencies",
+    ) or ""
+    if (
+        "healthCheckNotificationComposition:healthCheckNotificationComposition"
+        not in re.sub(r"\s+", "", m311_prepare_dependencies_body)
+    ):
+        raise SystemExit(
+            "M3.11 shipped AppDependencyPrewarmer must pass its shared notification "
+            "composition through the designated AppDependencies construction path"
+        )
+    if (
+        "healthCheckNotificationCenter:healthCheckNotificationCenter"
+        not in re.sub(r"\s+", "", m311_prepare_dependencies_body)
+    ):
+        raise SystemExit(
+            "M3.11 shipped AppDependencyPrewarmer must pass its default notification "
+            "center through the designated AppDependencies construction path"
+        )
+    m311_designated_dependencies_init = swift_braced_initializer(
+        m311_dependencies_text,
+        "persistence",
+    ) or ""
+    m311_meaningful_callback = swift_braced_region_after(
+        m311_designated_dependencies_init,
+        "onFirstMeaningfulContent:",
+    ) or ""
+    m311_compact_meaningful_callback = re.sub(r"\s+", "", m311_meaningful_callback)
+    meaningful_callback_contracts = (
+        "AppLaunchPerformance.finish(elapsed)",
+        "notificationLaunchGate.markTodayContentMeaningful()",
+        "Task{awaitnotificationLaunchGate.reconcileIfNeeded()}",
+    )
+    meaningful_callback_positions = [
+        m311_compact_meaningful_callback.find(contract)
+        for contract in meaningful_callback_contracts
+    ]
+    if (
+        any(position < 0 for position in meaningful_callback_positions)
+        or meaningful_callback_positions != sorted(meaningful_callback_positions)
+    ):
+        raise SystemExit(
+            "M3.11 AppDependencies onFirstMeaningfulContent closure must finish launch "
+            "evidence, mark the owned notification gate, and schedule its retryable "
+            "reconciliation in order"
+        )
+
 dependencies_source = (root / "App/Application/AppDependencies.swift").read_text(
     encoding="utf-8"
 )
@@ -4727,6 +6091,7 @@ PY
 
 self_test() {
     python3 - "$repo_root" <<'PY'
+import re
 import subprocess
 import sys
 import tempfile
@@ -4734,6 +6099,22 @@ from pathlib import Path
 
 repo = Path(sys.argv[1])
 script = repo / "scripts/verify-trackers.sh"
+
+
+def braced_declaration(source: str, pattern: str) -> tuple[int, int] | None:
+    declaration = re.search(pattern, source)
+    if declaration is None:
+        return None
+    opening = declaration.end() - 1
+    depth = 0
+    for index in range(opening, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return opening, index + 1
+    return None
 
 m310_safety_ui_fixture = "\n".join(
     [
@@ -7326,6 +8707,392 @@ fixture_files = {
     ),
 }
 
+for m311_test_path in (
+    "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationPlanningTests.swift",
+    "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationReconciliationTests.swift",
+    "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationAuthorizationTests.swift",
+    "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationRouteCodecTests.swift",
+    "Packages/HealthTrackingModules/Tests/NotificationsKitTests/SystemNotificationCenterAdapterTests.swift",
+    "Packages/HealthTrackingModules/Tests/TrainingKitTests/TodayViewModelTests.swift",
+    "HealthTrackingAppTests/HealthCheckNotificationCompositionTests.swift",
+    "HealthTrackingAppUITests/HealthCheckNotificationFlowUITests.swift",
+):
+    fixture_files[m311_test_path] = (repo / m311_test_path).read_text(encoding="utf-8")
+
+fixture_files[
+    "Packages/HealthTrackingModules/Sources/NotificationsKit/NotificationsKitModule.swift"
+] = "// M3.11 RED module marker: intentionally behaviorless and public-API-free."
+
+fixture_files["Packages/HealthTrackingModules/Package.swift"] += "\n" + "\n".join(
+    [
+        '.library(name: "NotificationsKit", targets: ["NotificationsKit"])',
+        '.target(name: "NotificationsKit", resources: [.process("Resources")], swiftSettings: strictConcurrency)',
+        '.testTarget(name: "NotificationsKitTests", dependencies: ["NotificationsKit"], swiftSettings: strictConcurrency)',
+    ]
+)
+fixture_files["project.yml"] += "\n" + "\n".join(
+    [
+        "product: NotificationsKit",
+        "HealthTrackingModules/NotificationsKitTests",
+    ]
+)
+fixture_files[".github/workflows/ios.yml"] += "\n" + "\n".join(
+    [
+        "Qualifying M3.11 behavior RED",
+        "scripts/test-ios.sh --m311-red-only",
+        "M0 acceptance gates",
+        "Targeted M3.11 notification planning and routing tests",
+        "scripts/test-ios.sh --only-testing NotificationsKitTests",
+        "Targeted M3.11 app notification lifecycle tests",
+        "scripts/test-ios.sh --only-testing HealthTrackingAppTests/HealthCheckNotificationCompositionTests",
+        "Targeted M3.11 explicit notification permission UI test",
+        "scripts/test-ios.sh --only-testing HealthTrackingAppUITests/HealthCheckNotificationFlowUITests",
+    ]
+)
+fixture_files["scripts/test-ios.sh"] += "\n" + "\n".join(
+    [
+        "--m311-red-only",
+        '"$script_dir/verify-trackers.sh" --m311-red',
+        'xcodebuild_test_arguments+=("-only-testing:NotificationsKitTests")',
+    ]
+)
+fixture_files.update(
+    {
+        "Packages/HealthTrackingModules/Sources/NotificationsKit/Domain/NotificationValues.swift": "\n".join(
+            [
+                "import Foundation",
+                "public struct HealthCheckNotificationDescriptor {",
+                "public let reminderID: UUID",
+                "public let dueDate: Date",
+                "public let isEligible: Bool",
+                "}",
+                "public struct NotificationRequestValue {",
+                "public let repeats: Bool",
+                "}",
+                "public struct PendingNotificationRequestValue {",
+                "public let request: NotificationRequestValue?",
+                "}",
+                "public enum NotificationAuthorizationStatus {}",
+                "public protocol NotificationCenterClient {}",
+                "public protocol HealthCheckNotificationReconciling {}",
+            ]
+        ),
+        "Packages/HealthTrackingModules/Sources/NotificationsKit/Routing/HealthCheckNotificationRouteCodec.swift": "\n".join(
+            [
+                "import Foundation",
+                "public enum HealthCheckNotificationRoute {",
+                "case healthCheckDetail(reminderID: UUID)",
+                "}",
+                "public enum HealthCheckNotificationRouteCodec {",
+                "let keys = payload.keys",
+                'let version = payload["version"]',
+                'let route = payload["route"]',
+                'let reminderID = payload["reminderID"]',
+                'let discriminator = "health-check-detail"',
+                "let canonical = id.uuidString.lowercased()",
+                "}",
+            ]
+        ),
+        "Packages/HealthTrackingModules/Sources/NotificationsKit/Planner/HealthCheckNotificationPlanner.swift": "\n".join(
+            [
+                "public struct HealthCheckNotificationPlanner {",
+                "public init(locale: Locale) {}",
+                "public static func requestIdentifier(for id: UUID) -> String {",
+                '"health-check-detail.v1.\\(id.uuidString.lowercased())"',
+                "}",
+                'let title = localized("notifications.health-check.title")',
+                'let body = localized("notifications.health-check.body")',
+                "let language = locale.language.languageCode",
+                "let path = Bundle.module.path(forResource: language, ofType: \"lproj\")",
+                "let date = descriptor.dueDate.timeIntervalSince1970.rounded(.up)",
+                "let route = HealthCheckNotificationRouteCodec.encode(value)",
+                "}",
+            ]
+        ),
+        "Packages/HealthTrackingModules/Sources/NotificationsKit/Resources/Localizable.xcstrings": " ".join(
+            [
+                '"notifications.health-check.title"',
+                '"notifications.health-check.body"',
+                '"Hatırlatma"',
+                '"Reminder"',
+                '"Planladığınız hatırlatmayı uygulamada görüntüleyin."',
+                '"View your scheduled reminder in the app."',
+            ]
+        ),
+        "Packages/HealthTrackingModules/Sources/NotificationsKit/Planner/HealthCheckNotificationReconciler.swift": "\n".join(
+            [
+                "public actor HealthCheckNotificationReconciler {",
+                "let status = try await center.authorizationStatus()",
+                "let pending = try await center.pendingRequests()",
+                "let delivered = try await center.deliveredRequestIdentifiers()",
+                "let identifier = pending.identifier",
+                "let request = pending.request",
+                "try Task.checkCancellation()",
+                "try await center.removePendingRequests(withIdentifiers: pendingIDs)",
+                "try await center.removeDeliveredRequests(withIdentifiers: deliveredIDs)",
+                "try await center.add(request)",
+                "switch status { case .denied, .notDetermined: break; default: break }",
+                "let overdue = request.deliveryDate <= now()",
+                "}",
+            ]
+        ),
+        "Packages/HealthTrackingModules/Sources/NotificationsKit/Authorization/HealthCheckNotificationAuthorizationController.swift": "\n".join(
+            [
+                "public final class HealthCheckNotificationAuthorizationController {",
+                "public func beginPresentation() {}",
+                "public func dismiss() {}",
+                "public func requestFromExplicitUserAction() async {",
+                "guard !isRequestInFlight else { return }",
+                "generation += 1",
+                "let requestGeneration = generation",
+                "_ = try? await center.requestAuthorization()",
+                "guard generation == requestGeneration else { return }",
+                "}",
+                "}",
+            ]
+        ),
+        "Packages/HealthTrackingModules/Sources/NotificationsKit/SystemAdapter/SystemNotificationCenterAdapter.swift": "\n".join(
+            [
+                "@preconcurrency import UserNotifications",
+                "struct NotificationSystemRequest {}",
+                "struct PendingNotificationSystemRequest {}",
+                "public actor SystemNotificationCenterAdapter {",
+                "let backend: NotificationCenterSystemBackend",
+                "public init(calendar: Calendar = .current) {",
+                "backend = DefaultNotificationCenterSystemBackend(calendar: calendar)",
+                "}",
+                "init(calendar: Calendar, systemDriver: DefaultNotificationCenterSystemBackend.Driver) {",
+                "backend = DefaultNotificationCenterSystemBackend(calendar: calendar, driver: systemDriver)",
+                "}",
+                "init(backend: NotificationCenterSystemBackend) { self.backend = backend }",
+                "func authorizationStatus() async throws { return try await backend.authorizationStatus() }",
+                "func pendingRequests() async throws { return try await backend.pendingRequests() }",
+                "func deliveredRequestIdentifiers() async throws { return try await backend.deliveredRequestIdentifiers() }",
+                "func removePendingRequests(withIdentifiers identifiers: [String]) async throws { try await backend.removePendingRequests(withIdentifiers: identifiers) }",
+                "func removeDeliveredRequests(withIdentifiers identifiers: [String]) async throws { try await backend.removeDeliveredRequests(withIdentifiers: identifiers) }",
+                "func add(_ request: NotificationSystemRequest) async throws { try await backend.add(request) }",
+                "func requestAuthorization() async throws { return try await backend.requestAuthorization() }",
+                "}",
+                "struct DefaultNotificationCenterSystemBackend {",
+                "struct LiveOperations {",
+                "static let currentCenter: @Sendable () -> UNUserNotificationCenter = { .current() }",
+                "static func system(centerProvider: @escaping @Sendable () -> UNUserNotificationCenter = currentCenter) -> LiveOperations {",
+                "return LiveOperations(",
+                "authorizationStatus: { let center = centerProvider(); let settings = await center.notificationSettings(); return settings.authorizationStatus },",
+                "pendingRequests: { let center = centerProvider(); let pending = await center.pendingNotificationRequests(); return pending },",
+                "deliveredRequestIdentifiers: { let center = centerProvider(); let delivered = await center.deliveredNotifications(); return delivered.map { $0.request.identifier } },",
+                "removePendingRequests: { identifiers in let center = centerProvider(); center.removePendingNotificationRequests(withIdentifiers: identifiers) },",
+                "removeDeliveredRequests: { identifiers in let center = centerProvider(); center.removeDeliveredNotifications(withIdentifiers: identifiers) },",
+                "add: { systemRequest in let center = centerProvider(); try await center.add(systemRequest) },",
+                "requestAuthorization: { let center = centerProvider(); let granted = try await center.requestAuthorization(options: [.alert, .sound]); return granted }",
+                ")",
+                "}",
+                "}",
+                "struct Driver {",
+                "static func live(operations: LiveOperations = .system()) -> Driver {",
+                "return Driver(",
+                "authorizationStatus: operations.authorizationStatus,",
+                "pendingRequests: operations.pendingRequests,",
+                "deliveredRequestIdentifiers: operations.deliveredRequestIdentifiers,",
+                "removePendingRequests: operations.removePendingRequests,",
+                "removeDeliveredRequests: operations.removeDeliveredRequests,",
+                "add: operations.add,",
+                "requestAuthorization: operations.requestAuthorization",
+                ")",
+                "}",
+                "}",
+                "let driver: Driver",
+                "let calendar: Calendar",
+                "init(calendar: Calendar = .current, driver: Driver = .live()) { self.calendar = calendar; self.driver = driver }",
+                "let request: NotificationSystemRequest",
+                "func userNotificationProjection(calendar: Calendar) {}",
+                "let components = calendar.dateComponents([], from: request.deliveryDate)",
+                "let projection = request.userNotificationProjection(calendar: calendar)",
+                "let content = UNMutableNotificationContent()",
+                "content.title = projection.title",
+                "content.body = projection.body",
+                "content.userInfo = projection.userInfo",
+                "let trigger = UNCalendarNotificationTrigger(dateMatching: projection.dateComponents, repeats: projection.repeats)",
+                "let systemRequest = UNNotificationRequest(identifier: projection.identifier, content: content, trigger: trigger)",
+                "static func makeUserNotificationRequest(from request: NotificationSystemRequest, calendar: Calendar) {}",
+                "static func pendingSystemRequest(from request: UNNotificationRequest, calendar: Calendar) {}",
+                "static func notificationAuthorizationStatus(from status: UNAuthorizationStatus) {}",
+                "let deliveryDate = calendar.date(from: calendarTrigger.dateComponents)",
+                "let projection = NotificationSystemRequest(repeats: calendarTrigger.repeats)",
+                "func authorizationStatus() async throws {",
+                "let rawStatus = try await driver.authorizationStatus()",
+                "return Self.notificationAuthorizationStatus(from: rawStatus)",
+                "}",
+                "func pendingRequests() async throws {",
+                "let pending = try await driver.pendingRequests()",
+                "return pending.map { Self.pendingSystemRequest(from: $0, calendar: calendar) }",
+                "}",
+                "func deliveredRequestIdentifiers() async throws {",
+                "return Set(try await driver.deliveredRequestIdentifiers())",
+                "}",
+                "func removePendingRequests(withIdentifiers identifiers: [String]) async throws {",
+                "try await driver.removePendingRequests(identifiers)",
+                "}",
+                "func removeDeliveredRequests(withIdentifiers identifiers: [String]) async throws {",
+                "try await driver.removeDeliveredRequests(identifiers)",
+                "}",
+                "func add(_ request: NotificationSystemRequest) async throws {",
+                "let systemRequest = Self.makeUserNotificationRequest(from: request, calendar: calendar)",
+                "try await driver.add(systemRequest)",
+                "}",
+                "func requestAuthorization() async throws {",
+                "return try await driver.requestAuthorization()",
+                "}",
+                "}",
+            ]
+        ),
+        "App/Application/HealthCheckNotificationCoordinator.swift": "\n".join(
+            [
+                "import HealthChecksKit",
+                "import NotificationsKit",
+                "enum HealthCheckNotificationMapper {",
+                "static func descriptors(from snapshots: [HealthCheckReminderSnapshot]) -> [HealthCheckNotificationDescriptor] {",
+                "snapshots.map { snapshot in",
+                "HealthCheckNotificationDescriptor(",
+                "reminderID: snapshot.id,",
+                "dueDate: snapshot.dueDate,",
+                "isEligible: snapshot.status == .pending",
+                ")",
+                "}",
+                "}",
+                "}",
+                "final class HealthCheckNotificationLifecycleCoordinator {",
+                "var didCompleteLaunchReconciliation = false",
+                "var activeReconciliationTask: Task<Void, Error>?",
+                "func reconcileAfterFirstMeaningfulTodayContent() async throws -> Bool { return false }",
+                "func reconcileAfterHealthCheckMutation() async throws {",
+                "guard !didCompleteLaunchReconciliation else { return }",
+                "generation += 1",
+                "let currentGeneration = generation",
+                "let previousReconciliationTask = activeReconciliationTask",
+                "previousReconciliationTask?.cancel()",
+                "try? await previousReconciliationTask?.value",
+                "activeReconciliationTask = Task { try await reconciler.reconcile([]); return () }",
+                "let snapshots = try await repository.fetchReminders()",
+                "guard generation == currentGeneration else { return }",
+                "let descriptors = HealthCheckNotificationMapper.descriptors(from: snapshots)",
+                "_ = try await reconciler.reconcile(descriptors)",
+                "didCompleteLaunchReconciliation = true",
+                "}",
+                "}",
+                "final class HealthCheckNotificationComposition {}",
+                "final class NotificationReconcilingHealthChecksRepository {",
+                "func createReminder() async throws { _ = try await repository.createReminder(input); await reconcileAfterCommittedMutation() }",
+                "func updateReminder() async throws { _ = try await repository.updateReminder(id: id); await reconcileAfterCommittedMutation() }",
+                "func deleteReminder() async throws { try await repository.deleteReminder(id: id); await reconcileAfterCommittedMutation() }",
+                "func completeReminder() async throws { _ = try await repository.completeReminder(id: id); await reconcileAfterCommittedMutation() }",
+                "func undoCompletion() async throws { _ = try await repository.undoCompletion(token); await reconcileAfterCommittedMutation() }",
+                "func reconcileAfterCommittedMutation() async { do { try await reconcileAfterHealthCheckMutation() } catch {} }",
+                "}",
+                "final class HealthCheckNotificationLaunchGate {",
+                "func markTodayContentMeaningful() {}",
+                "func reconcileIfNeeded() async { let converged = try? await reconcile(); guard converged else { return } }",
+                "}",
+                "enum DefaultHealthCheckNotificationFactory {",
+                "static func make(modelContext: ModelContext, notificationCenter: any NotificationCenterClient) {}",
+                "}",
+            ]
+        ),
+    }
+)
+if (
+    "healthCheckNotificationComposition: healthCheckNotificationComposition"
+    not in fixture_files["App/Application/AppDependencies.swift"]
+):
+    fixture_files["App/Application/AppDependencies.swift"] = fixture_files[
+        "App/Application/AppDependencies.swift"
+    ].replace(
+        "hapticClient: nil,\n            makeTrackerFeatureBundle:",
+        "hapticClient: nil,\n"
+        "            healthCheckNotificationComposition: "
+        "healthCheckNotificationComposition,\n"
+        "            makeTrackerFeatureBundle:",
+        1,
+    )
+
+fixture_files["App/Application/AppDependencies.swift"] += (
+    "\nprivate static func prepareDependencies("
+    "healthCheckNotificationComposition: HealthCheckNotificationComposition, "
+    "healthCheckNotificationCenter: NotificationCenterClient"
+    ") -> AppDependencies {\n"
+    "return AppDependencies(healthCheckNotificationComposition: "
+    "healthCheckNotificationComposition, healthCheckNotificationCenter: "
+    "healthCheckNotificationCenter)\n"
+    "}\n"
+    "init(environment: AppEnvironment, persistence: PersistencePreparation) {\n"
+    "todayViewModel = TodayViewModel(onFirstMeaningfulContent: { elapsed in\n"
+    "AppLaunchPerformance.finish(elapsed)\n"
+    "notificationLaunchGate.markTodayContentMeaningful()\n"
+    "Task { await notificationLaunchGate.reconcileIfNeeded() }\n"
+    "})\n"
+    "}\n"
+    "onFirstMeaningfulContent "
+    "reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent "
+    "healthCheckNotificationCenter healthCheckNotificationComposition "
+    "trackerFeatureRouterInstantiationCount "
+    "DefaultHealthCheckNotificationFactory.make( "
+    "notificationLaunchGate.markTodayContentMeaningful() "
+    "await notificationLaunchGate.reconcileIfNeeded() "
+    "healthCheckNotificationComposition:\n"
+)
+fixture_files["App/Application/TrackerFeatureRouting.swift"] += "\n" + "\n".join(
+    [
+        "reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent",
+        "reconcileHealthCheckNotificationsAfterCommittedMutation",
+        "requestHealthCheckNotificationAuthorizationFromExplicitUserAction",
+    ]
+)
+fixture_files["App/Application/TrackerFeatureBundle.swift"] += "\n" + "\n".join(
+    [
+        "HealthCheckNotificationLifecycleCoordinator",
+        "HealthCheckNotificationAuthorizationController",
+        "SystemNotificationCenterAdapter",
+        "reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent",
+        "reconcileHealthCheckNotificationsAfterCommittedMutation",
+        "requestHealthCheckNotificationAuthorizationFromExplicitUserAction",
+        "onRequestNotificationAuthorization",
+        "healthCheckNotificationComposition",
+        "NotificationReconcilingHealthChecksRepository",
+        "onNotificationPermissionPresentation",
+        "onNotificationPermissionDismissal",
+        "struct HealthCheckListNotificationActions {}",
+        "func makeHealthCheckListNotificationActions(notificationCenter: any NotificationCenterClient = SystemNotificationCenterAdapter()) {}",
+        "let reconciler = HealthCheckNotificationReconciler(center: notificationCenter)",
+        "let authorization = HealthCheckNotificationAuthorizationController(center: notificationCenter)",
+        "healthChecksViewModel = HealthChecksViewModel(repository: healthChecksRepository)",
+        "let notificationActions = makeHealthCheckListNotificationActions(",
+        "onNotificationPermissionPresentation: notificationActions.onPresentation,",
+        "onNotificationPermissionDismissal: notificationActions.onDismissal,",
+        "onRequestNotificationAuthorization: { Task { await notificationActions.onRequestNotificationAuthorization() } },",
+    ]
+)
+fixture_files["App/Application/AppRootView.swift"] += (
+    "\nreconcileHealthCheckNotificationsAfterCommittedMutation onCommittedMutation\n"
+)
+fixture_files[
+    "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecks/HealthCheckListView.swift"
+] += "\n" + "\n".join(
+    [
+        "onRequestNotificationAuthorization",
+        "onNotificationPermissionPresentation",
+        "onNotificationPermissionDismissal",
+        ".onAppear(perform: onNotificationPermissionPresentation)",
+        ".onDisappear(perform: onNotificationPermissionDismissal)",
+        '.accessibilityIdentifier("health-check.notifications.permission")',
+    ]
+)
+fixture_files["App/Support/AppUITestLaunchConfiguration.swift"] += "\n" + "\n".join(
+    [
+        "notificationAuthorizationRequestCount",
+        '"health-check.notifications.permission.request-count"',
+    ]
+)
+
 
 def make_fixture(root: Path) -> None:
     for relative_path, content in fixture_files.items():
@@ -7351,6 +9118,35 @@ def run(root: Path, expected: str | None = None) -> None:
         raise SystemExit(
             f"M3 tracker mutation did not fail closed for {expected!r}:\n{completed.stdout}"
         )
+
+
+def mutate_scoped_token(
+    root: Path,
+    path: Path,
+    original: str,
+    scope_start: int,
+    scope_body: str,
+    token: str,
+    expected: str,
+    *,
+    decoy: str | None = None,
+) -> None:
+    offset = scope_body.find(token)
+    if offset < 0:
+        raise AssertionError(f"M3.11 self fixture is missing scoped token {token!r}")
+    token_start = scope_start + offset
+    token_end = token_start + len(token)
+    path.write_text(
+        original[:token_start]
+        + "m311ScopedContractRemoved"
+        + original[token_end:]
+        + "\n// "
+        + (decoy if decoy is not None else token)
+        + "\n",
+        encoding="utf-8",
+    )
+    run(root, expected)
+    path.write_text(original, encoding="utf-8")
 
 
 with tempfile.TemporaryDirectory() as temporary:
@@ -7399,6 +9195,1226 @@ with tempfile.TemporaryDirectory() as temporary:
     )
     run(root, "explicit medical-safety evidence launch remains unacknowledged")
     dependencies_first_use.write_text(original_dependencies_first_use, encoding="utf-8")
+
+    m311_planning_test = (
+        root
+        / "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationPlanningTests.swift"
+    )
+    original_m311_planning_test = m311_planning_test.read_text(encoding="utf-8")
+    for token, expected in (
+        (
+            "testStableIdentityGenericContentAndRouteDoNotDependOnInputOrder",
+            "testStableIdentityGenericContentAndRouteDoNotDependOnInputOrder",
+        ),
+        (
+            "testDuplicateAndIneligibleDescriptorsProduceAtMostOneStableRequest",
+            "testDuplicateAndIneligibleDescriptorsProduceAtMostOneStableRequest",
+        ),
+        ("HIV pozitif", "HIV pozitif"),
+        ('Locale(identifier: "en_US")', 'Locale(identifier: "en_US")'),
+        ('XCTAssertEqual(englishRequest.title, "Reminder")', 'XCTAssertEqual(englishRequest.title, "Reminder")'),
+        (
+            "XCTAssertEqual(request.deliveryDate, dueDate)",
+            "XCTAssertEqual(request.deliveryDate, dueDate)",
+        ),
+        (
+            "testFractionalDueDateRoundsUpToStableSystemSecondWithoutRecurrenceArithmetic",
+            "testFractionalDueDateRoundsUpToStableSystemSecondWithoutRecurrenceArithmetic",
+        ),
+        (
+            "XCTAssertGreaterThanOrEqual(request.deliveryDate, fractionalDueDate)",
+            "XCTAssertGreaterThanOrEqual(request.deliveryDate, fractionalDueDate)",
+        ),
+    ):
+        m311_planning_test.write_text(
+            original_m311_planning_test.replace(token, "m311ContractRemoved", 1),
+            encoding="utf-8",
+        )
+        run(root, expected)
+        m311_planning_test.write_text(original_m311_planning_test, encoding="utf-8")
+
+    m311_reconciliation_test = (
+        root
+        / "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationReconciliationTests.swift"
+    )
+    original_m311_reconciliation_test = m311_reconciliation_test.read_text(
+        encoding="utf-8"
+    )
+    for token, expected in (
+        (
+            "testReconciliationUsesDeterministicCleanupBeforeReplacementAndConverges",
+            "testReconciliationUsesDeterministicCleanupBeforeReplacementAndConverges",
+        ),
+        (
+            "failingOrdinal in 1...operationBoundaryCount",
+            "failingOrdinal in 1...operationBoundaryCount",
+        ),
+        (
+            "testDeniedAndNotDeterminedPerformCleanupWithoutAddingPromptingOrMutatingInput",
+            "testDeniedAndNotDeterminedPerformCleanupWithoutAddingPromptingOrMutatingInput",
+        ),
+        (
+            "testCancellationAfterSuspendedSystemReadPreventsCleanupAndAdds",
+            "testCancellationAfterSuspendedSystemReadPreventsCleanupAndAdds",
+        ),
+        (
+            "testRecurringOwnedRequestIsReplacedByCanonicalNonRepeatingRequest",
+            "testRecurringOwnedRequestIsReplacedByCanonicalNonRepeatingRequest",
+        ),
+    ):
+        m311_reconciliation_test.write_text(
+            original_m311_reconciliation_test.replace(token, "m311ContractRemoved", 1),
+            encoding="utf-8",
+        )
+        run(root, expected)
+        m311_reconciliation_test.write_text(
+            original_m311_reconciliation_test,
+            encoding="utf-8",
+        )
+
+    unauthorized_range = braced_declaration(
+        original_m311_reconciliation_test,
+        r"\bfunc\s+testDeniedAndNotDeterminedPerformCleanupWithoutAddingPromptingOrMutatingInput\b[^\{]*\{",
+    )
+    if unauthorized_range is None:
+        raise AssertionError("M3.11 self fixture is missing unauthorized cleanup coverage")
+    unauthorized_start, unauthorized_end = unauthorized_range
+    unauthorized_body = original_m311_reconciliation_test[
+        unauthorized_start:unauthorized_end
+    ]
+    for scoped_contract in (
+        ".removePending(fixture.removedPendingIDs)",
+        ".removeDelivered(fixture.removedDeliveredIDs)",
+        "snapshot.pending.keys.contains(fixture.replacementRequest.identifier)",
+        "snapshot.delivered.contains(fixture.replacementRequest.identifier)",
+        "snapshot.unprojectablePendingIdentifiers",
+    ):
+        scoped_offset = unauthorized_body.find(scoped_contract)
+        if scoped_offset < 0:
+            raise AssertionError(
+                f"M3.11 self fixture is missing unauthorized contract {scoped_contract!r}"
+            )
+        scoped_start = unauthorized_start + scoped_offset
+        scoped_end = scoped_start + len(scoped_contract)
+        m311_reconciliation_test.write_text(
+            original_m311_reconciliation_test[:scoped_start]
+            + "m311UnauthorizedCleanupRemoved"
+            + original_m311_reconciliation_test[scoped_end:]
+            + f"\n// {scoped_contract}\n",
+            encoding="utf-8",
+        )
+        run(root, scoped_contract)
+        m311_reconciliation_test.write_text(
+            original_m311_reconciliation_test,
+            encoding="utf-8",
+        )
+
+    m311_authorization_test = (
+        root
+        / "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationAuthorizationTests.swift"
+    )
+    original_m311_authorization_test = m311_authorization_test.read_text(encoding="utf-8")
+    m311_authorization_test.write_text(
+        original_m311_authorization_test.replace(
+            "testDismissedOlderCallbackCannotOverwriteNewerPresentationGeneration",
+            "m311GenerationCoverageRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testDismissedOlderCallbackCannotOverwriteNewerPresentationGeneration")
+    m311_authorization_test.write_text(original_m311_authorization_test, encoding="utf-8")
+
+    m311_codec_test = (
+        root
+        / "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationRouteCodecTests.swift"
+    )
+    original_m311_codec_test = m311_codec_test.read_text(encoding="utf-8")
+    m311_codec_test.write_text(
+        original_m311_codec_test.replace('"name": "HIV pozitif"', '"safe": "value"', 1),
+        encoding="utf-8",
+    )
+    run(root, '"name": "HIV pozitif"')
+    m311_codec_test.write_text(original_m311_codec_test, encoding="utf-8")
+
+    m311_adapter_test = (
+        root
+        / "Packages/HealthTrackingModules/Tests/NotificationsKitTests/SystemNotificationCenterAdapterTests.swift"
+    )
+    original_m311_adapter_test = m311_adapter_test.read_text(encoding="utf-8")
+    m311_adapter_test.write_text(
+        original_m311_adapter_test.replace(
+            "XCTAssertFalse(projection.repeats)",
+            "XCTAssertTrue(projection.repeats)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "XCTAssertFalse(projection.repeats)")
+    m311_adapter_test.write_text(original_m311_adapter_test, encoding="utf-8")
+
+    for token in (
+        "testDefaultBackendBuilderCopiesProjectionIntoActualSystemRequestWithoutLiveCenter",
+        "testDefaultBackendMapsAuthorizationAndRoundTripsPendingRequestWithoutLiveCenter",
+        "testPendingSystemProjectionPreservesIdentifierWhenRawRequestIsUnprojectable",
+        "XCTAssertNil(pending.request)",
+        "testDefaultAdapterExecutesLiveDriverOperationsAcrossAllOperationsWithoutLiveCenter",
+        "testPublicDefaultAdapterConstructsWithoutTouchingLiveCenter",
+        "testInjectedCenterProviderRemainsDeferredAcrossLiveDriverAndAdapterConstruction",
+        "testLiveDriverAndDefaultAdapterPropagateEverySystemOperationError",
+        "DefaultNotificationCenterSystemBackend.LiveOperations(",
+        ".live(operations: operations)",
+        "for failingOrdinal in 1...7",
+        "catch let failure as DefaultSystemDriverFailure",
+        "XCTAssertEqual(systemRequest.content.title, request.title)",
+        "XCTAssertEqual(systemRequest.content.body, request.body)",
+        "XCTAssertEqual(systemRequest.trigger?.repeats, false)",
+        "await recorder.recordPendingRequests()",
+        "XCTAssertEqual(snapshot.authorizationStatusCount, 1)",
+        "health-check-detail.v1.legacy-live-unprojectable",
+        "return [systemPending, unprojectableSystemPending]",
+        "identifier: unprojectableSystemPending.identifier",
+        "XCTAssertEqual(probe.callCount, 0)",
+    ):
+        m311_adapter_test.write_text(
+            original_m311_adapter_test.replace(token, "m311AdapterCoverageRemoved", 1),
+            encoding="utf-8",
+        )
+        run(root, token)
+        m311_adapter_test.write_text(original_m311_adapter_test, encoding="utf-8")
+
+    m311_today_test = (
+        root
+        / "Packages/HealthTrackingModules/Tests/TrainingKitTests/TodayViewModelTests.swift"
+    )
+    original_m311_today_test = m311_today_test.read_text(encoding="utf-8")
+    m311_today_test.write_text(
+        original_m311_today_test.replace(
+            "testFirstMeaningfulCallbackSkipsErrorAndEmptyThenPublishesExactlyOnce",
+            "m311MeaningfulCallbackCoverageRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testFirstMeaningfulCallbackSkipsErrorAndEmptyThenPublishesExactlyOnce")
+    m311_today_test.write_text(original_m311_today_test, encoding="utf-8")
+
+    m311_today_test.write_text(
+        original_m311_today_test.replace(
+            "testApplyingPreloadedSnapshotPublishesContentWithoutRepositoryFetch",
+            "m311PreloadedMeaningfulCallbackCoverageRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testApplyingPreloadedSnapshotPublishesContentWithoutRepositoryFetch")
+    m311_today_test.write_text(original_m311_today_test, encoding="utf-8")
+
+    m311_app_test = root / "HealthTrackingAppTests/HealthCheckNotificationCompositionTests.swift"
+    original_m311_app_test = m311_app_test.read_text(encoding="utf-8")
+    for token in (
+        "testNewerMutationGenerationIgnoresOlderSuspendedLaunchFetch",
+        "testNewerMutationCancelsOlderReconciliationAlreadySuspendedAtSystemSeam",
+        "testNewerMutationWaitsForNonCancellableInFlightEffectAndConvergesNewestLast",
+        "testThreeGenerationsSkipMiddleWorkAndCommitOnlyNewestAfterOldNonCancellableEffect",
+        "testStaleSuccessfulLaunchCannotCloseGateWhenNewestMutationFailsAndLaunchRetries",
+        "testLaunchGateRetriesSupersededOutcomeAndClosesOnlyAfterConvergence",
+        "XCTAssertFalse(staleLaunchConverged)",
+        "XCTAssertFalse(supersededFetchLaunchConverged)",
+        "XCTAssertFalse(supersededEffectConverged)",
+        "XCTAssertTrue(retryConverged)",
+        "var outcomes = [false, true]",
+        "testFailedFirstMeaningfulReconciliationCanRetryAfterFailure",
+        "testDeniedAndNotDeterminedReconciliationNeverMutateRepositoryRemindersOrPrompt",
+        "testConcreteBundleMutationRepositoryDrivesLaunchEditCompleteDeleteAndExplicitPermissionThroughSystemAdapter",
+        "waitUntilMutationIsSuspended(.complete)",
+        "The first delete failure must propagate without reconciliation.",
+        "testConcretePermissionActionsBindPresentationDismissalAndRejectStaleCallback",
+        "actions.onDismissal()",
+        "testFailedConcreteMutationDoesNotRefetchOrReconcile",
+        "testCommittedMutationReturnsSuccessAndRetriesNotificationFailureWithoutRepeatingRepositoryWrite",
+        "testRealAppDependenciesUseDedicatedLaunchCallbackWithoutInstantiatingLazyTrackerFactory",
+        "testDefaultAppDependenciesLaunchFactoryRunsRealLifecycleWithoutInstantiatingTrackerFactory",
+        "testShippedDefaultPrewarmerCenterSerializesLaunchWithLazyBundleMutation",
+        "testAppDependenciesRetriesFailedMeaningfulLaunchReconciliationWithinSingleBootstrapLoad",
+        "throw HealthCheckNotificationLaunchFailure.injected",
+        "testDefaultAppDependenciesSharesLaunchCompositionWithLazyBundleMutationRepository",
+        "testShippedPrewarmerSerializesPreloadedLaunchWithLazyBundleMutationOnSharedComposition",
+        "let dependencies = try await prewarmer.makeDependencies()",
+        "The shipped prewarmer must bind launch and lazy tracker mutations to one composition.",
+        "bundle.healthCheckNotificationComposition === composition",
+        "XCTAssertEqual(afterLoad.authorizationStatusCount, 1)",
+    ):
+        m311_app_test.write_text(
+            original_m311_app_test.replace(token, "m311AppCoverageRemoved", 1),
+            encoding="utf-8",
+        )
+        run(root, token)
+        m311_app_test.write_text(original_m311_app_test, encoding="utf-8")
+
+    three_generation_range = braced_declaration(
+        original_m311_app_test,
+        r"\bfunc\s+testThreeGenerationsSkipMiddleWorkAndCommitOnlyNewestAfterOldNonCancellableEffect\b[^\{]*\{",
+    )
+    if three_generation_range is None:
+        raise AssertionError("M3.11 self fixture is missing three-generation coverage")
+    three_generation_start, three_generation_end = three_generation_range
+    three_generation_body = original_m311_app_test[
+        three_generation_start:three_generation_end
+    ]
+    for scoped_contract in (
+        "let newestGenerationEntered = expectation(",
+        "await fulfillment(of: [newestGenerationEntered], timeout: 1)",
+        "await reconciler.resumeReconciliation(call: 1)",
+        "_ = await middleMutation.result",
+        "try await newestMutation.value",
+    ):
+        mutate_scoped_token(
+            root,
+            m311_app_test,
+            original_m311_app_test,
+            three_generation_start,
+            three_generation_body,
+            scoped_contract,
+            "three-generation test must use a bounded newest-entry signal",
+        )
+
+    m311_app_test.write_text(
+        original_m311_app_test[:three_generation_end - 1]
+        + "\n_ = await repository.waitUntilFetch(call: 3)\n"
+        + original_m311_app_test[three_generation_end - 1:],
+        encoding="utf-8",
+    )
+    run(root, "three-generation test must not require a third fetch")
+    m311_app_test.write_text(original_m311_app_test, encoding="utf-8")
+
+    retry_callback_range = braced_declaration(
+        original_m311_app_test,
+        r"\bfunc\s+testRealAppDependenciesTodayRetryAfterInitialEmptyTriggersOwnedNotificationCallbackOnce\b[^\{]*\{",
+    )
+    if retry_callback_range is None:
+        raise AssertionError("M3.11 self fixture is missing real Today retry coverage")
+    retry_callback_start, retry_callback_end = retry_callback_range
+    retry_callback_body = original_m311_app_test[
+        retry_callback_start:retry_callback_end
+    ]
+    for scoped_contract in (
+        "XCTAssertEqual(dependencies.todayViewModel.state, .empty)",
+        "XCTAssertEqual(launchReconciliationCount, 0)",
+        "try dependencies.load()",
+        "await fulfillment(of: [launchReconciliation], timeout: 1)",
+        "Later retries must not reopen the completed first-meaningful launch gate.",
+    ):
+        mutate_scoped_token(
+            root,
+            m311_app_test,
+            original_m311_app_test,
+            retry_callback_start,
+            retry_callback_body,
+            scoped_contract,
+            "AppDependencies retry integration must prove empty state",
+        )
+
+    retry_call = "await dependencies.todayViewModel.retry()"
+    first_retry_offset = retry_callback_body.find(retry_call)
+    second_retry_offset = retry_callback_body.find(
+        retry_call,
+        first_retry_offset + len(retry_call),
+    )
+    if first_retry_offset < 0 or second_retry_offset < 0:
+        raise AssertionError("M3.11 self fixture must contain exactly two Today retries")
+    second_retry_start = retry_callback_start + second_retry_offset
+    m311_app_test.write_text(
+        original_m311_app_test[:second_retry_start]
+        + "await dependencies.todayViewModel.load()"
+        + original_m311_app_test[second_retry_start + len(retry_call):]
+        + f"\n// {retry_call}\n",
+        encoding="utf-8",
+    )
+    run(root, "AppDependencies retry integration must prove empty state")
+    m311_app_test.write_text(original_m311_app_test, encoding="utf-8")
+
+    m311_ui_test = root / "HealthTrackingAppUITests/HealthCheckNotificationFlowUITests.swift"
+    original_m311_ui_test = m311_ui_test.read_text(encoding="utf-8")
+    m311_ui_test.write_text(
+        original_m311_ui_test.replace(
+            '"health-check.notifications.permission"',
+            '"health-check.notifications.permission.removed"',
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, '"health-check.notifications.permission"')
+    m311_ui_test.write_text(original_m311_ui_test, encoding="utf-8")
+
+    for token in (
+        "acknowledgeFirstUseMedicalExplanation(in: app)",
+        '"medical.explanation.l0"',
+        '"medical.explanation.l0.acknowledge"',
+        "makeHittable(acknowledgement, in: app)",
+        "acknowledgement.frame.height + 0.01",
+        "acknowledgement.tap()",
+        "explicitPermissionAction.frame.height + 0.01",
+        'NSPredicate(format: "label == %@", expected)',
+        'NSPredicate(format: "isEnabled == false")',
+        "XCTWaiter.wait(for: [disabledExpectation], timeout: 5)",
+    ):
+        m311_ui_test.write_text(
+            original_m311_ui_test.replace(token, "m311FirstUseContractRemoved", 1),
+            encoding="utf-8",
+        )
+        run(root, token)
+        m311_ui_test.write_text(original_m311_ui_test, encoding="utf-8")
+
+    m311_ui_test.write_text(
+        original_m311_ui_test.replace(
+            'acknowledgement.tap()\n        assertRequestCount("0", in: app)',
+            "acknowledgement.tap()",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(
+        root,
+        "M3.11 L0 acknowledgement must immediately prove permission count remains zero",
+    )
+    m311_ui_test.write_text(original_m311_ui_test, encoding="utf-8")
+
+    for contract, replacement, expected in (
+        (
+            'require(app.descendants(matching: .any)["root.today.content"])\n'
+            '        assertRequestCount("0", in: app)',
+            'require(app.descendants(matching: .any)["root.today.content"])',
+            "M3.11 initial Today publication must prove permission count remains zero",
+        ),
+        (
+            'require(app.descendants(matching: .any)["health-check.list.loaded"])\n'
+            '        assertRequestCount("0", in: app)',
+            'require(app.descendants(matching: .any)["health-check.list.loaded"])',
+            "M3.11 health-check navigation must prove permission count remains zero",
+        ),
+        (
+            "acknowledgement.frame.height + 0.01,\n            52,",
+            "acknowledgement.frame.height + 0.01,\n            44,",
+            "M3.11 L0 acknowledgement must retain the exact 52-point target",
+        ),
+        (
+            "explicitPermissionAction.frame.height + 0.01,\n            44,",
+            "explicitPermissionAction.frame.height + 0.01,\n            20,",
+            "M3.11 explicit permission action must retain the exact 44-point target",
+        ),
+    ):
+        m311_ui_test.write_text(
+            original_m311_ui_test.replace(contract, replacement, 1),
+            encoding="utf-8",
+        )
+        run(root, expected)
+        m311_ui_test.write_text(original_m311_ui_test, encoding="utf-8")
+
+    ui_launch_range = braced_declaration(
+        original_m311_ui_test,
+        r"\bfunc\s+launch\s*\([^\{]*\{",
+    )
+    if ui_launch_range is None:
+        raise AssertionError("M3.11 self fixture is missing the notification UI launcher")
+    ui_launch_start, ui_launch_end = ui_launch_range
+    ui_launch_body = original_m311_ui_test[ui_launch_start:ui_launch_end]
+    mutate_scoped_token(
+        root,
+        m311_ui_test,
+        original_m311_ui_test,
+        ui_launch_start,
+        ui_launch_body,
+        '"-ui-test-medical-safety-first-use-evidence"',
+        "explicit L0 notification UI flow must opt into medical-safety first-use evidence",
+    )
+    m311_ui_test.write_text(
+        original_m311_ui_test[:ui_launch_end - 1]
+        + '\n"-ui-test-launch-performance-evidence"\n'
+        + original_m311_ui_test[ui_launch_end - 1:],
+        encoding="utf-8",
+    )
+    run(root, "notification UI flow must not opt into unrelated launch-performance evidence")
+    m311_ui_test.write_text(original_m311_ui_test, encoding="utf-8")
+
+    m311_marker = (
+        root
+        / "Packages/HealthTrackingModules/Sources/NotificationsKit/NotificationsKitModule.swift"
+    )
+    original_m311_marker = m311_marker.read_text(encoding="utf-8")
+    m311_marker.write_text(
+        original_m311_marker.replace(
+            "M3.11 RED module marker",
+            "M3.11 removed module marker",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.11 RED module marker")
+    m311_marker.write_text(original_m311_marker, encoding="utf-8")
+
+    m311_package = root / "Packages/HealthTrackingModules/Package.swift"
+    original_m311_package = m311_package.read_text(encoding="utf-8")
+    m311_package.write_text(
+        original_m311_package.replace(
+            '.library(name: "NotificationsKit", targets: ["NotificationsKit"])',
+            '.library(name: "RemovedNotificationsKit", targets: ["NotificationsKit"])',
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, '.library(name: "NotificationsKit", targets: ["NotificationsKit"])')
+    m311_package.write_text(original_m311_package, encoding="utf-8")
+
+    m311_package.write_text(
+        original_m311_package.replace(
+            '.target(name: "NotificationsKit", resources: [.process("Resources")], swiftSettings: strictConcurrency)',
+            '.target(name: "NotificationsKit", swiftSettings: strictConcurrency)',
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "must remain dependency-neutral, localized")
+    m311_package.write_text(original_m311_package, encoding="utf-8")
+
+    m311_project = root / "project.yml"
+    original_m311_project = m311_project.read_text(encoding="utf-8")
+    m311_project.write_text(
+        original_m311_project.replace(
+            "HealthTrackingModules/NotificationsKitTests",
+            "HealthTrackingModules/RemovedNotificationsKitTests",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "HealthTrackingModules/NotificationsKitTests")
+    m311_project.write_text(original_m311_project, encoding="utf-8")
+
+    m311_workflow = root / ".github/workflows/ios.yml"
+    original_m311_workflow = m311_workflow.read_text(encoding="utf-8")
+    m311_workflow.write_text(
+        original_m311_workflow.replace(
+            "scripts/test-ios.sh --only-testing NotificationsKitTests",
+            "scripts/test-ios.sh --only-testing RemovedNotificationsKitTests",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "scripts/test-ios.sh --only-testing NotificationsKitTests")
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    m311_workflow.write_text(
+        original_m311_workflow.replace(
+            "Qualifying M3.11 behavior RED",
+            "m311-temporary-step-name",
+            1,
+        ).replace(
+            "M0 acceptance gates",
+            "Qualifying M3.11 behavior RED",
+            1,
+        ).replace(
+            "m311-temporary-step-name",
+            "M0 acceptance gates",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.11 qualifying RED must run before the M0 acceptance gates")
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    m311_planner_source = (
+        root
+        / "Packages/HealthTrackingModules/Sources/NotificationsKit/Planner/HealthCheckNotificationPlanner.swift"
+    )
+    original_m311_planner_source = m311_planner_source.read_text(encoding="utf-8")
+    m311_planner_source.write_text(
+        "import HealthChecksKit\n" + original_m311_planner_source,
+        encoding="utf-8",
+    )
+    run(root, "must remain tracker- and persistence-neutral")
+    m311_planner_source.write_text(original_m311_planner_source, encoding="utf-8")
+
+    m311_planner_source.write_text(
+        original_m311_planner_source + "\nlet next = date.addingTimeInterval(86400)\n",
+        encoding="utf-8",
+    )
+    run(root, "without recurrence arithmetic")
+    m311_planner_source.write_text(original_m311_planner_source, encoding="utf-8")
+
+    m311_localization = (
+        root
+        / "Packages/HealthTrackingModules/Sources/NotificationsKit/Resources/Localizable.xcstrings"
+    )
+    original_m311_localization = m311_localization.read_text(encoding="utf-8")
+    m311_localization.write_text(
+        original_m311_localization.replace(
+            '"notifications.health-check.title"',
+            '"notifications.health-check.removed"',
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, '"notifications.health-check.title"')
+    m311_localization.write_text(original_m311_localization, encoding="utf-8")
+
+    m311_reconciler_source = (
+        root
+        / "Packages/HealthTrackingModules/Sources/NotificationsKit/Planner/HealthCheckNotificationReconciler.swift"
+    )
+    original_m311_reconciler_source = m311_reconciler_source.read_text(encoding="utf-8")
+    m311_reconciler_source.write_text(
+        original_m311_reconciler_source.replace(
+            "let pending = try await center.pendingRequests()\n"
+            "let delivered = try await center.deliveredRequestIdentifiers()",
+            "let delivered = try await center.deliveredRequestIdentifiers()\n"
+            "let pending = try await center.pendingRequests()",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "must preserve deterministic status/read/cleanup/add operation order")
+    m311_reconciler_source.write_text(original_m311_reconciler_source, encoding="utf-8")
+
+    m311_reconciler_source.write_text(
+        original_m311_reconciler_source + "\ntry await center.requestAuthorization()\n",
+        encoding="utf-8",
+    )
+    run(root, "must never request notification authorization")
+    m311_reconciler_source.write_text(original_m311_reconciler_source, encoding="utf-8")
+
+    m311_reconciler_source.write_text(
+        original_m311_reconciler_source.replace(
+            "try Task.checkCancellation()",
+            "",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "Task.checkCancellation()")
+    m311_reconciler_source.write_text(original_m311_reconciler_source, encoding="utf-8")
+
+    m311_system_source = (
+        root
+        / "Packages/HealthTrackingModules/Sources/NotificationsKit/SystemAdapter/SystemNotificationCenterAdapter.swift"
+    )
+    original_m311_system_source = m311_system_source.read_text(encoding="utf-8")
+    deferred_center_declaration = (
+        "static let currentCenter: @Sendable () -> UNUserNotificationCenter = "
+        "{ .current() }"
+    )
+    if deferred_center_declaration not in original_m311_system_source:
+        raise AssertionError("M3.11 self fixture is missing the deferred center provider")
+    m311_system_source.write_text(
+        original_m311_system_source.replace(
+            deferred_center_declaration,
+            "static let currentCenter: UNUserNotificationCenter = .current()",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "must defer UNUserNotificationCenter.current()")
+    m311_system_source.write_text(original_m311_system_source, encoding="utf-8")
+
+    deferred_system_signature = (
+        "static func system(centerProvider: @escaping @Sendable () -> "
+        "UNUserNotificationCenter = currentCenter) -> LiveOperations {"
+    )
+    if deferred_system_signature not in original_m311_system_source:
+        raise AssertionError("M3.11 self fixture is missing LiveOperations.system")
+    m311_system_source.write_text(
+        original_m311_system_source.replace(
+            deferred_system_signature,
+            deferred_system_signature + "\n_ = centerProvider()",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "must resolve the center provider only inside its seven deferred")
+    m311_system_source.write_text(original_m311_system_source, encoding="utf-8")
+
+    m311_system_source.write_text(
+        original_m311_system_source.replace(
+            "@preconcurrency import UserNotifications",
+            "import Foundation",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "@preconcurrency import UserNotifications")
+    m311_system_source.write_text(original_m311_system_source, encoding="utf-8")
+
+    for token in (
+        "static func makeUserNotificationRequest(",
+        "static func pendingSystemRequest(",
+        "static func notificationAuthorizationStatus(",
+        "content.title = projection.title",
+        "content.body = projection.body",
+        "content.userInfo",
+        "repeats: projection.repeats",
+        "center.notificationSettings()",
+        "settings.authorizationStatus",
+        "center.pendingNotificationRequests()",
+        "pending.map",
+        "center.deliveredNotifications()",
+        "delivered.map { $0.request.identifier }",
+        "center.removePendingNotificationRequests(withIdentifiers:",
+        "center.removeDeliveredNotifications(withIdentifiers:",
+        "try await center.add(systemRequest)",
+        "center.requestAuthorization(options:",
+        "calendar.date(from: calendarTrigger.dateComponents)",
+    ):
+        m311_system_source.write_text(
+            original_m311_system_source.replace(token, "m311SystemBridgeRemoved", 1),
+            encoding="utf-8",
+        )
+        run(root, token)
+        m311_system_source.write_text(original_m311_system_source, encoding="utf-8")
+
+    backend_range = braced_declaration(
+        original_m311_system_source,
+        r"\bstruct\s+DefaultNotificationCenterSystemBackend\b[^\{]*\{",
+    )
+    if backend_range is None:
+        raise AssertionError("M3.11 self fixture is missing the default backend body")
+    backend_start, backend_end = backend_range
+    backend_body = original_m311_system_source[backend_start:backend_end]
+
+    live_operations_range = braced_declaration(
+        backend_body,
+        r"\bstruct\s+LiveOperations\b[^\{]*\{",
+    )
+    if live_operations_range is None:
+        raise AssertionError("M3.11 self fixture is missing LiveOperations")
+    live_operations_start, live_operations_end = live_operations_range
+    live_operations_body = backend_body[live_operations_start:live_operations_end]
+    live_system_range = braced_declaration(
+        live_operations_body,
+        r"\bstatic\s+func\s+system\b[^\{]*\{",
+    )
+    if live_system_range is None:
+        raise AssertionError("M3.11 self fixture is missing LiveOperations.system")
+    live_system_start, live_system_end = live_system_range
+    live_system_body = live_operations_body[live_system_start:live_system_end]
+    live_system_absolute_start = (
+        backend_start + live_operations_start + live_system_start
+    )
+    for field_name in (
+        "authorizationStatus",
+        "pendingRequests",
+        "deliveredRequestIdentifiers",
+        "removePendingRequests",
+        "removeDeliveredRequests",
+        "add",
+        "requestAuthorization",
+    ):
+        field_range = braced_declaration(
+            live_system_body,
+            rf"\b{re.escape(field_name)}\s*:\s*\{{",
+        )
+        if field_range is None:
+            raise AssertionError(
+                f"M3.11 self fixture is missing live field {field_name!r}"
+            )
+        field_start, field_end = field_range
+        field_body = live_system_body[field_start:field_end]
+        provider_binding = "let center = centerProvider()"
+        binding_offset = field_body.find(provider_binding)
+        if binding_offset < 0:
+            raise AssertionError(
+                f"M3.11 self fixture is missing deferred binding for {field_name!r}"
+            )
+        binding_start = live_system_absolute_start + field_start + binding_offset
+        binding_end = binding_start + len(provider_binding)
+        live_system_absolute_end = live_system_absolute_start + len(live_system_body)
+        m311_system_source.write_text(
+            original_m311_system_source[:binding_start]
+            + "m311DeferredCenterBindingRemoved"
+            + original_m311_system_source[binding_end:live_system_absolute_end - 1]
+            + f"\n// same-system provider decoy: {provider_binding}\n"
+            + original_m311_system_source[live_system_absolute_end - 1:],
+            encoding="utf-8",
+        )
+        run(root, "LiveOperations.system must bind each returned field")
+        m311_system_source.write_text(
+            original_m311_system_source,
+            encoding="utf-8",
+        )
+
+    for scoped_contract in (
+        "center.notificationSettings()",
+        "center.pendingNotificationRequests()",
+        "center.deliveredNotifications()",
+        "center.removePendingNotificationRequests(withIdentifiers:",
+        "center.removeDeliveredNotifications(withIdentifiers:",
+        "try await center.add(",
+        "center.requestAuthorization(options:",
+    ):
+        scoped_offset = live_system_body.find(scoped_contract)
+        if scoped_offset < 0:
+            raise AssertionError(
+                f"M3.11 self fixture is missing live system field {scoped_contract!r}"
+            )
+        scoped_start = live_system_absolute_start + scoped_offset
+        scoped_end = scoped_start + len(scoped_contract)
+        live_system_absolute_end = live_system_absolute_start + len(live_system_body)
+        decoy = (
+            "try await center.add(systemRequest)"
+            if scoped_contract == "try await center.add("
+            else scoped_contract
+        )
+        m311_system_source.write_text(
+            original_m311_system_source[:scoped_start]
+            + "m311LiveSystemFieldRemoved"
+            + original_m311_system_source[scoped_end:live_system_absolute_end - 1]
+            + f"\n// same-system decoy: {decoy}\n"
+            + original_m311_system_source[live_system_absolute_end - 1:],
+            encoding="utf-8",
+        )
+        run(root, "LiveOperations.system must bind each returned field")
+        m311_system_source.write_text(
+            original_m311_system_source,
+            encoding="utf-8",
+        )
+
+    for throwing_call, exact_decoy in (
+        (
+            "try await center.add(systemRequest)",
+            "try await center.add(systemRequest)",
+        ),
+        (
+            "try await center.requestAuthorization(options:",
+            "let granted = try await center.requestAuthorization(options:",
+        ),
+    ):
+        throwing_offset = live_system_body.find(throwing_call)
+        if throwing_offset < 0:
+            raise AssertionError(
+                f"M3.11 self fixture is missing throwing call {throwing_call!r}"
+            )
+        throwing_start = live_system_absolute_start + throwing_offset
+        throwing_end = throwing_start + len("try await")
+        for unsafe_try in ("try? await", "try! await"):
+            m311_system_source.write_text(
+                original_m311_system_source[:throwing_start]
+                + unsafe_try
+                + original_m311_system_source[throwing_end:live_system_absolute_end - 1]
+                + f"\n// same-system exact decoy: {exact_decoy}\n"
+                + original_m311_system_source[live_system_absolute_end - 1:],
+                encoding="utf-8",
+            )
+            run(
+                root,
+                "must propagate add/authorization errors without swallowing catch",
+            )
+            m311_system_source.write_text(
+                original_m311_system_source,
+                encoding="utf-8",
+            )
+
+    for propagating_closure, swallowing_closure in (
+        (
+            "add: { systemRequest in let center = centerProvider(); try await center.add(systemRequest) },",
+            "add: { systemRequest in let center = centerProvider(); do { try await center.add(systemRequest) } catch {} },",
+        ),
+        (
+            "requestAuthorization: { let center = centerProvider(); let granted = try await center.requestAuthorization(options: [.alert, .sound]); return granted }",
+            "requestAuthorization: { let center = centerProvider(); do { let granted = try await center.requestAuthorization(options: [.alert, .sound]); return granted } catch { return false } }",
+        ),
+    ):
+        if propagating_closure not in original_m311_system_source:
+            raise AssertionError(
+                "M3.11 self fixture is missing a directly propagating live closure"
+            )
+        m311_system_source.write_text(
+            original_m311_system_source.replace(
+                propagating_closure,
+                swallowing_closure,
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "must propagate add/authorization errors without swallowing catch")
+        m311_system_source.write_text(
+            original_m311_system_source,
+            encoding="utf-8",
+        )
+
+    driver_range = braced_declaration(
+        backend_body,
+        r"\bstruct\s+Driver\b[^\{]*\{",
+    )
+    if driver_range is None:
+        raise AssertionError("M3.11 self fixture is missing Driver")
+    driver_start, driver_end = driver_range
+    driver_body = backend_body[driver_start:driver_end]
+    driver_live_range = braced_declaration(
+        driver_body,
+        r"\bstatic\s+func\s+live\b[^\{]*\{",
+    )
+    if driver_live_range is None:
+        raise AssertionError("M3.11 self fixture is missing Driver.live")
+    driver_live_start, driver_live_end = driver_live_range
+    driver_live_body = driver_body[driver_live_start:driver_live_end]
+    driver_live_absolute_start = backend_start + driver_start + driver_live_start
+    for scoped_contract in (
+        "operations.authorizationStatus",
+        "operations.pendingRequests",
+        "operations.deliveredRequestIdentifiers",
+        "operations.removePendingRequests",
+        "operations.removeDeliveredRequests",
+        "operations.add",
+        "operations.requestAuthorization",
+    ):
+        mutate_scoped_token(
+            root,
+            m311_system_source,
+            original_m311_system_source,
+            driver_live_absolute_start,
+            driver_live_body,
+            scoped_contract,
+            "Driver.live must forward every injected live operation",
+        )
+
+    for method_name, scoped_contract in (
+        ("authorizationStatus", "try await driver.authorizationStatus()"),
+        ("pendingRequests", "try await driver.pendingRequests()"),
+        (
+            "deliveredRequestIdentifiers",
+            "try await driver.deliveredRequestIdentifiers()",
+        ),
+        ("removePendingRequests", "try await driver.removePendingRequests("),
+        ("removeDeliveredRequests", "try await driver.removeDeliveredRequests("),
+        ("add", "try await driver.add("),
+        ("requestAuthorization", "try await driver.requestAuthorization()"),
+    ):
+        method_range = braced_declaration(
+            backend_body,
+            rf"\bfunc\s+{method_name}\b[^\{{]*\{{",
+        )
+        if method_range is None:
+            raise AssertionError(
+                f"M3.11 self fixture is missing backend method {method_name}"
+            )
+        method_start, method_end = method_range
+        method_body = backend_body[method_start:method_end]
+        mutate_scoped_token(
+            root,
+            m311_system_source,
+            original_m311_system_source,
+            backend_start + method_start,
+            method_body,
+            scoped_contract,
+            f"{method_name} must execute its injected driver/conversion path",
+        )
+
+    live_binding = re.search(
+        r"driver\s*:\s*Driver\s*=\s*\.live\(\)",
+        backend_body,
+    )
+    if live_binding is None:
+        raise AssertionError("M3.11 self fixture is missing the live driver binding")
+    live_start = backend_start + live_binding.start()
+    live_end = backend_start + live_binding.end()
+    m311_system_source.write_text(
+        original_m311_system_source[:live_start]
+        + "driver: Driver = .m311RemovedLiveDriver"
+        + original_m311_system_source[live_end:]
+        + "\n// driver: Driver = .live()\n",
+        encoding="utf-8",
+    )
+    run(root, "must use the live system driver by default")
+    m311_system_source.write_text(original_m311_system_source, encoding="utf-8")
+
+    adapter_range = braced_declaration(
+        original_m311_system_source,
+        r"\bactor\s+SystemNotificationCenterAdapter\b[^\{]*\{",
+    )
+    if adapter_range is None:
+        raise AssertionError("M3.11 self fixture is missing the system adapter body")
+    adapter_start, adapter_end = adapter_range
+    adapter_body = original_m311_system_source[adapter_start:adapter_end]
+    for method_name, scoped_contract in (
+        ("authorizationStatus", "try await backend.authorizationStatus()"),
+        ("pendingRequests", "try await backend.pendingRequests()"),
+        (
+            "deliveredRequestIdentifiers",
+            "try await backend.deliveredRequestIdentifiers()",
+        ),
+        (
+            "removePendingRequests",
+            "try await backend.removePendingRequests(withIdentifiers:",
+        ),
+        (
+            "removeDeliveredRequests",
+            "try await backend.removeDeliveredRequests(withIdentifiers:",
+        ),
+        ("add", "try await backend.add("),
+        ("requestAuthorization", "try await backend.requestAuthorization()"),
+    ):
+        method_range = braced_declaration(
+            adapter_body,
+            rf"\bfunc\s+{method_name}\b[^\{{]*\{{",
+        )
+        if method_range is None:
+            raise AssertionError(
+                f"M3.11 self fixture is missing adapter method {method_name}"
+            )
+        method_start, method_end = method_range
+        method_body = adapter_body[method_start:method_end]
+        mutate_scoped_token(
+            root,
+            m311_system_source,
+            original_m311_system_source,
+            adapter_start + method_start,
+            method_body,
+            scoped_contract,
+            "system adapter must delegate and propagate errors through its stored backend",
+        )
+
+    driver_init_range = braced_declaration(
+        adapter_body,
+        r"\binit\s*\([^\)]*systemDriver[^\)]*\)\s*\{",
+    )
+    if driver_init_range is None:
+        raise AssertionError("M3.11 self fixture is missing the driver adapter initializer")
+    driver_init_start, driver_init_end = driver_init_range
+    driver_init_body = adapter_body[driver_init_start:driver_init_end]
+    mutate_scoped_token(
+        root,
+        m311_system_source,
+        original_m311_system_source,
+        adapter_start + driver_init_start,
+        driver_init_body,
+        "DefaultNotificationCenterSystemBackend(calendar: calendar, driver: systemDriver)",
+        "injectable system adapter initializer must store the same default backend path",
+    )
+
+    backend_init_range = braced_declaration(
+        adapter_body,
+        r"\binit\s*\([^\)]*backend[^\)]*\)\s*\{",
+    )
+    if backend_init_range is None:
+        raise AssertionError("M3.11 self fixture is missing the backend adapter initializer")
+    backend_init_start, backend_init_end = backend_init_range
+    backend_init_body = adapter_body[backend_init_start:backend_init_end]
+    mutate_scoped_token(
+        root,
+        m311_system_source,
+        original_m311_system_source,
+        adapter_start + backend_init_start,
+        backend_init_body,
+        "self.backend = backend",
+        "injected backend initializer must store its exact backend",
+    )
+
+    public_init_range = braced_declaration(
+        adapter_body,
+        r"\bpublic\s+init\s*\([^\)]*calendar[^\)]*\)\s*\{",
+    )
+    if public_init_range is None:
+        raise AssertionError("M3.11 self fixture is missing the public adapter initializer")
+    public_init_start, public_init_end = public_init_range
+    public_init_body = adapter_body[public_init_start:public_init_end]
+    public_backend_offset = public_init_body.find(
+        "DefaultNotificationCenterSystemBackend("
+    )
+    if public_backend_offset < 0:
+        raise AssertionError("M3.11 self fixture is missing the shipped backend binding")
+    public_backend_start = adapter_start + public_init_start + public_backend_offset
+    public_backend_end = public_backend_start + len(
+        "DefaultNotificationCenterSystemBackend("
+    )
+    m311_system_source.write_text(
+        original_m311_system_source[:public_backend_start]
+        + "M311RemovedSystemBackend("
+        + original_m311_system_source[public_backend_end:]
+        + "\n// DefaultNotificationCenterSystemBackend(\n",
+        encoding="utf-8",
+    )
+    run(root, "shipped no-argument system adapter must store the default live backend")
+    m311_system_source.write_text(original_m311_system_source, encoding="utf-8")
+
+    m311_system_source.write_text(
+        original_m311_system_source
+        + "\nlet shiftedDelivery = request.deliveryDate.addingTimeInterval(60)\n",
+        encoding="utf-8",
+    )
+    run(root, "without recurrence arithmetic")
+    m311_system_source.write_text(original_m311_system_source, encoding="utf-8")
+
+    m311_mapper_source = root / "App/Application/HealthCheckNotificationCoordinator.swift"
+    original_m311_mapper_source = m311_mapper_source.read_text(encoding="utf-8")
+    m311_mapper_source.write_text(
+        original_m311_mapper_source.replace(
+            "snapshots.map { snapshot in",
+            "snapshots.map { snapshot in\n_ = snapshot.name",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "must expose only opaque ID, due date, and eligibility")
+    m311_mapper_source.write_text(original_m311_mapper_source, encoding="utf-8")
+
+    for mutation_method, repository_call in (
+        ("createReminder", "repository.createReminder("),
+        ("updateReminder", "repository.updateReminder("),
+        ("deleteReminder", "repository.deleteReminder("),
+        ("completeReminder", "repository.completeReminder("),
+        ("undoCompletion", "repository.undoCompletion("),
+    ):
+        m311_mapper_source.write_text(
+            original_m311_mapper_source.replace(
+                repository_call,
+                f"repository.removed{mutation_method}(",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, repository_call)
+        m311_mapper_source.write_text(original_m311_mapper_source, encoding="utf-8")
+
+    m311_mapper_source.write_text(
+        original_m311_mapper_source.replace(
+            "_ = try await repository.updateReminder(id: id); await reconcileAfterCommittedMutation()",
+            "await reconcileAfterCommittedMutation(); _ = try await repository.updateReminder(id: id)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "must reconcile exactly after a successful updateReminder commit")
+    m311_mapper_source.write_text(original_m311_mapper_source, encoding="utf-8")
+
+    m311_dependencies = root / "App/Application/AppDependencies.swift"
+    original_m311_dependencies = m311_dependencies.read_text(encoding="utf-8")
+    m311_dependencies.write_text(
+        original_m311_dependencies.replace(
+            "reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent",
+            "m311LaunchGateRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent")
+    m311_dependencies.write_text(original_m311_dependencies, encoding="utf-8")
+
+    for token in (
+        "AppLaunchPerformance.finish(elapsed)",
+        "notificationLaunchGate.markTodayContentMeaningful()",
+        "await notificationLaunchGate.reconcileIfNeeded()",
+        "Task { await notificationLaunchGate.reconcileIfNeeded() }",
+    ):
+        m311_dependencies.write_text(
+            original_m311_dependencies.replace(
+                token,
+                "m311SharedLaunchCompositionRemoved",
+                1,
+            )
+            + "\n// AppLaunchPerformance.finish(elapsed) "
+            + "notificationLaunchGate.markTodayContentMeaningful() "
+            + "await notificationLaunchGate.reconcileIfNeeded() "
+            + "Task { await notificationLaunchGate.reconcileIfNeeded() }\n",
+            encoding="utf-8",
+        )
+        run(root, "AppDependencies onFirstMeaningfulContent closure must finish launch evidence")
+        m311_dependencies.write_text(original_m311_dependencies, encoding="utf-8")
+
+    prepare_range = braced_declaration(
+        original_m311_dependencies,
+        r"\bfunc\s+prepareDependencies\b[^\{]*\{",
+    )
+    if prepare_range is None:
+        raise AssertionError("M3.11 self fixture is missing prepareDependencies")
+    prepare_start, prepare_end = prepare_range
+    prepare_body = original_m311_dependencies[prepare_start:prepare_end]
+    shared_binding = re.search(
+        r"healthCheckNotificationComposition\s*:\s*"
+        r"healthCheckNotificationComposition",
+        prepare_body,
+    )
+    if shared_binding is None:
+        raise AssertionError("M3.11 self fixture is missing the prewarmer shared binding")
+    shared_start = prepare_start + shared_binding.start()
+    shared_end = prepare_start + shared_binding.end()
+    m311_dependencies.write_text(
+        original_m311_dependencies[:shared_start]
+        + "healthCheckNotificationComposition: m311RemovedComposition"
+        + original_m311_dependencies[shared_end:]
+        + "\n// healthCheckNotificationComposition: healthCheckNotificationComposition\n",
+        encoding="utf-8",
+    )
+    run(root, "shipped AppDependencyPrewarmer must pass its shared notification composition")
+    m311_dependencies.write_text(original_m311_dependencies, encoding="utf-8")
+
+    center_binding = re.search(
+        r"healthCheckNotificationCenter\s*:\s*healthCheckNotificationCenter",
+        prepare_body,
+    )
+    if center_binding is None:
+        raise AssertionError("M3.11 self fixture is missing the prewarmer center binding")
+    center_start = prepare_start + center_binding.start()
+    center_end = prepare_start + center_binding.end()
+    m311_dependencies.write_text(
+        original_m311_dependencies[:center_start]
+        + "healthCheckNotificationCenter: m311RemovedCenter"
+        + original_m311_dependencies[center_end:]
+        + "\n// healthCheckNotificationCenter: healthCheckNotificationCenter\n",
+        encoding="utf-8",
+    )
+    run(root, "shipped AppDependencyPrewarmer must pass its default notification center")
+    m311_dependencies.write_text(original_m311_dependencies, encoding="utf-8")
+
+    m311_bundle = root / "App/Application/TrackerFeatureBundle.swift"
+    original_m311_bundle = m311_bundle.read_text(encoding="utf-8")
+    m311_bundle.write_text(
+        original_m311_bundle.replace(
+            "SystemNotificationCenterAdapter()",
+            "RemovedSystemAdapter()",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "notificationCenter:anyNotificationCenterClient=SystemNotificationCenterAdapter()")
+    m311_bundle.write_text(original_m311_bundle, encoding="utf-8")
+
+    for token, expected in (
+        (
+            "healthChecksViewModel = HealthChecksViewModel(repository: healthChecksRepository)",
+            "healthChecksViewModel=HealthChecksViewModel(repository:healthChecksRepository)",
+        ),
+        (
+            "onNotificationPermissionPresentation: notificationActions.onPresentation,",
+            "onNotificationPermissionPresentation:notificationActions.onPresentation",
+        ),
+        (
+            "onNotificationPermissionDismissal: notificationActions.onDismissal,",
+            "onNotificationPermissionDismissal:notificationActions.onDismissal",
+        ),
+    ):
+        m311_bundle.write_text(
+            original_m311_bundle.replace(token, "m311ConcreteBundleBindingRemoved", 1),
+            encoding="utf-8",
+        )
+        run(root, expected)
+        m311_bundle.write_text(original_m311_bundle, encoding="utf-8")
+
+    m311_health_check_view = (
+        root
+        / "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecks/HealthCheckListView.swift"
+    )
+    original_m311_health_check_view = m311_health_check_view.read_text(encoding="utf-8")
+    for token in (
+        ".onAppear(perform: onNotificationPermissionPresentation)",
+        ".onDisappear(perform: onNotificationPermissionDismissal)",
+    ):
+        m311_health_check_view.write_text(
+            original_m311_health_check_view.replace(token, "m311SheetLifecycleBindingRemoved", 1),
+            encoding="utf-8",
+        )
+        run(root, token)
+        m311_health_check_view.write_text(
+            original_m311_health_check_view,
+            encoding="utf-8",
+        )
 
     today_composition_test = root / "HealthTrackingAppTests/TodayCompositionTests.swift"
     original_today_composition_test = today_composition_test.read_text(encoding="utf-8")
@@ -10769,16 +13785,17 @@ PY
 
 case "${1:-}" in
     "") verify_repo "$repo_root" ;;
+    --m311-red) verify_repo "$repo_root" m311-red ;;
     --self-test) self_test ;;
     --verify-root)
         if (( $# != 2 )) || [[ -z "$2" ]]; then
-            echo "Usage: $0 [--self-test|--verify-root PATH]" >&2
+            echo "Usage: $0 [--m311-red|--self-test|--verify-root PATH]" >&2
             exit 2
         fi
         verify_repo "$2"
         ;;
     *)
-        echo "Usage: $0 [--self-test|--verify-root PATH]" >&2
+        echo "Usage: $0 [--m311-red|--self-test|--verify-root PATH]" >&2
         exit 2
         ;;
 esac

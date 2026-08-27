@@ -18,6 +18,7 @@ let package = Package(
         .library(name: "NutritionKit", targets: ["NutritionKit"]),
         .library(name: "HealthSafetyKit", targets: ["HealthSafetyKit"]),
         .library(name: "HealthChecksKit", targets: ["HealthChecksKit"]),
+        .library(name: "NotificationsKit", targets: ["NotificationsKit"]),
         .library(name: "ProgressPhotosKit", targets: ["ProgressPhotosKit"]),
         .library(name: "MetricsKit", targets: ["MetricsKit"]),
         .library(name: "SleepMoodKit", targets: ["SleepMoodKit"]),
@@ -64,6 +65,10 @@ let package = Package(
             name: "HealthChecksKit",
             dependencies: ["CoreModels", "DesignSystem", "HealthSafetyKit"],
             resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
+        .target(
+            name: "NotificationsKit",
             swiftSettings: strictConcurrency
         ),
         .target(
@@ -134,6 +139,11 @@ let package = Package(
         .testTarget(
             name: "HealthChecksKitTests",
             dependencies: ["CoreModels", "HealthChecksKit"],
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
+            name: "NotificationsKitTests",
+            dependencies: ["NotificationsKit"],
             swiftSettings: strictConcurrency
         ),
         .testTarget(
