@@ -662,6 +662,10 @@ private final class ProgressPhotoRepositoryFake: ProgressPhotoRepository {
         .missing
     }
 
+    func fullImage(assetID: String) async throws -> PhotoAssetLoadResult {
+        .missing
+    }
+
     func deletePhoto(id: UUID, expectedUpdatedAt: Date) async throws {
         deleteRequests.append(.init(id: id, expectedUpdatedAt: expectedUpdatedAt))
         guard !deleteResults.isEmpty else { return }

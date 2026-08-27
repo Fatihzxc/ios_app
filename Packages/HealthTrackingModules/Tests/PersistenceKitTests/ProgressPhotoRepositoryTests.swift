@@ -46,6 +46,32 @@ final class ProgressPhotoRepositoryTests: XCTestCase {
         )
     }
 
+    func testThumbnailAndFullImageUseExplicitAssetVariants() async throws {
+        let context = try makeContext()
+        let assetID = "00000000-0000-0000-0000-000000000036"
+        let assetStore = ProgressPhotoAssetStoreFake(
+            loadResults: [
+                .success(.available(Data([1]))),
+                .success(.available(Data([2]))),
+            ]
+        )
+        let repository = SwiftDataProgressPhotoRepository(
+            modelContext: context,
+            assetStore: assetStore,
+            cleanupJournal: PhotoAssetCleanupJournalFake()
+        )
+
+        let thumbnail = try await repository.thumbnail(assetID: assetID)
+        let fullImage = try await repository.fullImage(assetID: assetID)
+
+        XCTAssertEqual(thumbnail, .available(Data([1])))
+        XCTAssertEqual(fullImage, .available(Data([2])))
+        XCTAssertEqual(assetStore.loadRequests, [
+            .init(id: assetID, variant: .thumbnail),
+            .init(id: assetID, variant: .full),
+        ])
+    }
+
     func testMetadataSaveFailureDeletesImportedAssetAndRollsBackModel() async throws {
         let context = try makeContext()
         let assetID = "00000000-0000-0000-0000-000000000038"

@@ -121,6 +121,13 @@ public final class SwiftDataProgressPhotoRepository: ProgressPhotoRepository {
         return try await assetStore.loadAsset(id: assetID, variant: .thumbnail)
     }
 
+    public func fullImage(assetID: String) async throws -> PhotoAssetLoadResult {
+        guard isOpaquePhotoAssetID(assetID) else {
+            throw PhotoAssetStoreError.invalidAssetID
+        }
+        return try await assetStore.loadAsset(id: assetID, variant: .full)
+    }
+
     public func deletePhoto(
         id: UUID,
         expectedUpdatedAt: Date
