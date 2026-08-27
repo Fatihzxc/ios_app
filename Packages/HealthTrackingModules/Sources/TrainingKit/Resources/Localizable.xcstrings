@@ -1,6 +1,12 @@
 {
   "sourceLanguage" : "tr",
   "strings" : {
+    "today.posture.action" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Duruş ve belirti ekle" } } } },
+    "today.posture.action.hint" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Duruş, duvar testi ve belirti günlüğünü açar." } } } },
+    "session.ohp.journal.error" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Belirti günlüğe yazılamadı; güvenlik duruşu korunuyor." } } } },
+    "session.ohp.journal.recorded" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Belirti günlüğe kaydedildi." } } } },
+    "session.ohp.journal.recording" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Belirti günlüğe kaydediliyor." } } } },
+    "session.ohp.journal.retry" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Günlüğü tekrar dene" } } } },
     "today.metrics.action" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Vücut ölçümü ekle" } } } },
     "today.metrics.action.hint" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Ağırlık, bel çevresi veya özel ölçüm girişini açar." } } } },
     "today.lifestyle.action" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Uyku ve ruh hali ekle" } } } },

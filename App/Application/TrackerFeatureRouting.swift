@@ -10,5 +10,9 @@ protocol TrackerFeatureRouting: AnyObject {
         onClose: @escaping @MainActor () -> Void
     ) -> AnyView
 
+    func makePostureEntryView(
+        onClose: @escaping @MainActor () -> Void
+    ) -> AnyView
+
     func makeProgressView() -> AnyView
 }

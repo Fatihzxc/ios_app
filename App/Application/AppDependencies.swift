@@ -32,7 +32,10 @@ final class AppDependencies: AppDependencyLoading {
     private lazy var deferredTrainingDependencies = DeferredTrainingDependencies(
         repository: trainingRepository,
         todayViewModel: todayViewModel,
-        hapticControllerReference: hapticControllerReference
+        hapticControllerReference: hapticControllerReference,
+        makeSymptomEventClient: { [unowned self] in
+            self.trainingSymptomEventClient
+        }
     )
     var foundationViewModel: FoundationProgramViewModel {
         deferredTrainingDependencies.foundationViewModel
@@ -90,6 +93,20 @@ final class AppDependencies: AppDependencyLoading {
         repository: nutritionRepository
     )
     private lazy var trackerFeatureRouter = trackerFeatureBundleFactory(mainContext)
+    private lazy var trainingSymptomEventClient: any SymptomEventClient = {
+        let adapter = DefaultTrainingSymptomEventFactory.make(
+            modelContext: mainContext
+        )
+        #if DEBUG
+        if AppUITestLaunchConfiguration.resolve()?.scenario == .ohpSafety {
+            return UITestSymptomEventClient(
+                client: adapter,
+                failsFirstRecord: true
+            )
+        }
+        #endif
+        return adapter
+    }()
     var makeTrackerFeatureRouter: @MainActor () -> any TrackerFeatureRouting {
         { self.trackerFeatureRouter }
     }
@@ -190,7 +207,7 @@ final class AppDependencies: AppDependencyLoading {
                  .nutritionDeleteErrorOnce, .nutritionQuickAdd, .m2Acceptance:
                 trainingRepository = repository
                 shouldLoadFoundation = true
-            case .m3BodyMetrics, .m3SleepMood:
+            case .m3BodyMetrics, .m3SleepMood, .m3Posture:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -415,7 +432,8 @@ private final class DeferredTrainingDependencies {
     init(
         repository: any TrainingRepository,
         todayViewModel: TodayViewModel,
-        hapticControllerReference: TrainingHapticControllerReference
+        hapticControllerReference: TrainingHapticControllerReference,
+        makeSymptomEventClient: @escaping @MainActor () -> any SymptomEventClient
     ) {
         let foundationViewModel = FoundationProgramViewModel(repository: repository)
         let phaseTransitionViewModel = PhaseTransitionViewModel(repository: repository)
@@ -433,13 +451,39 @@ private final class DeferredTrainingDependencies {
         makeSessionViewModel = {
             SessionViewModel(
                 repository: repository,
-                haptics: hapticControllerReference.value
+                haptics: hapticControllerReference.value,
+                symptomEventClient: makeSymptomEventClient(),
+                symptomSafetyPresentation:
+                    TrainingSymptomSafetyMapper.overheadPressSymptom()
             )
         }
     }
 }
 
 #if DEBUG
+@MainActor
+private final class UITestSymptomEventClient: SymptomEventClient {
+    private enum FixtureFailure: Error {
+        case record
+    }
+
+    private let client: any SymptomEventClient
+    private var failsNextRecord: Bool
+
+    init(client: any SymptomEventClient, failsFirstRecord: Bool) {
+        self.client = client
+        failsNextRecord = failsFirstRecord
+    }
+
+    func record(_ event: SymptomJournalEvent) async throws {
+        if failsNextRecord {
+            failsNextRecord = false
+            throw FixtureFailure.record
+        }
+        try await client.record(event)
+    }
+}
+
 @MainActor
 private final class UITestNutritionDayRepository: NutritionDayViewRepository {
     private enum FixtureFailure: Error {
@@ -650,11 +694,37 @@ private enum UITestSessionFixture {
             try installNutritionQuickAdd(in: modelContext)
         case .m2Acceptance:
             try installM2Acceptance(in: modelContext)
+        case .m3Posture:
+            try installM3Posture(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow,
              .todayEmptyOnce, .todayErrorOnce, .nutritionEmpty, .m3BodyMetrics,
              .m3SleepMood:
             return
         }
+    }
+
+    private static func installM3Posture(in modelContext: ModelContext) throws {
+        let fixtureID = uuid("00000000-0000-4000-8000-00000000d401")
+        let existing = try modelContext.fetch(
+            FetchDescriptor<PostureMetric>(
+                predicate: #Predicate { $0.id == fixtureID }
+            )
+        )
+        guard existing.isEmpty else { return }
+        let date = installedAt.addingTimeInterval(-7 * 24 * 60 * 60)
+        modelContext.insert(
+            PostureMetric(
+                id: fixtureID,
+                createdAt: date,
+                updatedAt: date,
+                date: date,
+                wallTestPass: true,
+                symptomScore: 2,
+                region: "Boyun",
+                note: "Haftalık başlangıç kaydı"
+            )
+        )
+        try modelContext.save()
     }
 
     private static func installNutritionContent(

@@ -89,7 +89,7 @@ support = {
     ".github/workflows/ios.yml": {
         "scripts/verify-trackers.sh --self-test",
         "scripts/verify-trackers.sh",
-        "--only-testing SleepMoodKitTests",
+        "--only-testing HealthSafetyKitTests",
     },
     "project.yml": {
         "HealthTrackingModules/DesignSystemTests",
@@ -190,8 +190,8 @@ m32_support = {
         "HealthTrackingModules/MetricsKitTests",
     },
     ".github/workflows/ios.yml": {
-        "Targeted M3.3 SleepMood tests",
-        "scripts/test-ios.sh --only-testing SleepMoodKitTests",
+        "Targeted M3.4 medical safety tests",
+        "scripts/test-ios.sh --only-testing HealthSafetyKitTests",
     },
     "Packages/HealthTrackingModules/Sources/MetricsKit/MetricsKitModule.swift": {
         "MetricsKitModuleMarker",
@@ -291,8 +291,8 @@ m33_support = {
         "HealthTrackingModules/SleepMoodKitTests",
     },
     ".github/workflows/ios.yml": {
-        "Targeted M3.3 SleepMood tests",
-        "scripts/test-ios.sh --only-testing SleepMoodKitTests",
+        "Targeted M3.4 medical safety tests",
+        "scripts/test-ios.sh --only-testing HealthSafetyKitTests",
         '"BodyMetricFlowUITests"',
         '"LifestyleFlowUITests"',
         '"m3-lifestyle-progress-light"',
@@ -316,6 +316,129 @@ for relative_path, tokens in m33_support.items():
     absent = sorted(token for token in tokens if token not in text)
     if absent:
         raise SystemExit(f"{relative_path} is missing M3.3 wiring: {absent}")
+
+m34_tests = {
+    "Packages/HealthTrackingModules/Tests/HealthSafetyKitTests/MedicalSafetyPresentationTests.swift": {
+        "MedicalDisclaimerPresentation.permanent",
+        "MedicalSafetyPresentation.resolve",
+        "overheadPressSymptom",
+        "increasingSymptom",
+        "cervicalRedFlags",
+        "urgentAssessmentInformation",
+        "Hareketi durdur.",
+    },
+    "Packages/HealthTrackingModules/Tests/MetricsKitTests/PostureMetricInputTests.swift": {
+        "PostureMetricInput",
+        "invalidSymptomScore",
+        "PostureMetricOrdering.newestFirst",
+        "PostureSymptomTrend.compare",
+        "safetyTrigger",
+    },
+    "Packages/HealthTrackingModules/Tests/MetricsKitTests/PostureViewModelTests.swift": {
+        "PostureViewModel",
+        "retrySave",
+        "testSecondTapWhileSavingCannotReplaceTheRetryPayload",
+        "previousExplicitSymptomScore",
+        "expectedUpdatedAt",
+        "posture.validation.empty",
+    },
+    "Packages/HealthTrackingModules/Tests/PersistenceKitTests/PostureRepositoryTests.swift": {
+        "createPostureMetric",
+        "fetchPostureMetrics",
+        "updatePostureMetric",
+        "deletePostureMetric",
+        "upsertPostureMetric",
+        "duplicatePostureMetricIDs",
+        "postureMetricUpsertCollision",
+        "testExternalEventSaveFailureRollsBackSoTheSameStableEventCanRetry",
+    },
+    "Packages/HealthTrackingModules/Tests/TrainingKitTests/SymptomEventContractTests.swift": {
+        "SymptomJournalEvent",
+        r'Set(Mirror(reflecting: event).children.compactMap(\.label))',
+        '["id", "occurredAt", "source"]',
+        "NoOpSymptomEventClient.shared",
+    },
+    "Packages/HealthTrackingModules/Tests/TrainingKitTests/SessionViewModelTests.swift": {
+        "SymptomEventClientSpy",
+        "symptomJournalState",
+        "retrySymptomJournal",
+        "testJournalFailureKeepsOHPStoppedAndRetryDoesNotRewriteTrainingState",
+        "testRestoringSymptomPresentSessionReemitsTheSameStableEvent",
+    },
+    "HealthTrackingAppTests/SymptomJournalAdapterTests.swift": {
+        "TrainingSymptomMetricsAdapter",
+        "TrainingSymptomSafetyMapper.overheadPressSymptom",
+        'XCTAssertEqual(repository.upserts[0], repository.upserts[1])',
+        'XCTAssertEqual(repository.upserts[0].input.region, "OHP")',
+    },
+    "HealthTrackingAppUITests/PostureFlowUITests.swift": {
+        '"-ui-test-scenario", "m3-posture"',
+        "today.posture.action",
+        "posture.entry.save-error",
+        "posture.entry.retry",
+        "posture.history.loaded",
+        "medical.disclaimer.l1",
+        "medical.safety.l2",
+        "m3-posture-entry-ax5",
+        "m3-posture-high-contrast",
+    },
+    "HealthTrackingAppUITests/OHPSafetyFlowUITests.swift": {
+        "session.ohp.journal.error",
+        "session.ohp.journal.retry",
+        "session.ohp.journal.recorded",
+        "medical.disclaimer.l1",
+        "medical.safety.l2",
+    },
+}
+
+for relative_path, tokens in m34_tests.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.4 test file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.4 RED contracts: {absent}")
+
+m34_support = {
+    "Packages/HealthTrackingModules/Package.swift": {
+        '.library(name: "HealthSafetyKit", targets: ["HealthSafetyKit"])',
+        'name: "HealthSafetyKit"',
+        'dependencies: ["CoreModels", "DesignSystem", "HealthSafetyKit"]',
+        'name: "HealthSafetyKitTests"',
+        'dependencies: ["HealthSafetyKit"]',
+        'dependencies: ["CoreModels", "HealthSafetyKit", "MetricsKit"]',
+    },
+    "project.yml": {
+        "product: HealthSafetyKit",
+        "HealthTrackingModules/HealthSafetyKitTests",
+    },
+    ".github/workflows/ios.yml": {
+        "Targeted M3.4 medical safety tests",
+        "scripts/test-ios.sh --only-testing HealthSafetyKitTests",
+        '"PostureFlowUITests"',
+        '"OHPSafetyFlowUITests"',
+        '"m3-posture-high-contrast"',
+    },
+    "Packages/HealthTrackingModules/Sources/HealthSafetyKit/HealthSafetyKitModule.swift": {
+        "HealthSafetyKitModule",
+    },
+    "Packages/HealthTrackingModules/Sources/HealthSafetyKit/Resources/Localizable.xcstrings": {
+        '"sourceLanguage" : "tr"',
+    },
+    "App/Support/AppUITestLaunchConfiguration.swift": {
+        'case m3Posture = "m3-posture"',
+    },
+}
+
+for relative_path, tokens in m34_support.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.4 support file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.4 wiring: {absent}")
 
 m32_production = {
     "Packages/HealthTrackingModules/Sources/MetricsKit/Domain/BodyMetricDomain.swift": {
@@ -625,10 +748,25 @@ for source in (root / "Packages/HealthTrackingModules/Sources/SleepMoodKit").rgl
 
 for source in (root / "Packages/HealthTrackingModules/Sources/TrainingKit").rglob("*.swift"):
     text = source.read_text(encoding="utf-8")
-    for module in ("MetricsKit", "SleepMoodKit"):
+    for module in ("MetricsKit", "SleepMoodKit", "HealthSafetyKit"):
         if f"import {module}" in text:
             relative = source.relative_to(root)
             raise SystemExit(f"{relative} must not reverse-import {module}")
+
+for source in (root / "Packages/HealthTrackingModules/Sources/HealthSafetyKit").rglob("*.swift"):
+    text = source.read_text(encoding="utf-8")
+    forbidden = sorted(
+        module
+        for module in (
+            "CoreModels", "DesignSystem", "MetricsKit", "SleepMoodKit",
+            "TrainingKit", "PersistenceKit", "SwiftData", "SwiftUI",
+            "UserNotifications", "CloudKit",
+        )
+        if f"import {module}" in text
+    )
+    if forbidden:
+        relative = source.relative_to(root)
+        raise SystemExit(f"{relative} must remain dependency-neutral: {forbidden}")
 
 body_metric_entry_source = (
     root
@@ -815,11 +953,14 @@ fixture_files = {
         [
             "scripts/verify-trackers.sh --self-test",
             "scripts/verify-trackers.sh",
-            "Targeted M3.3 SleepMood tests",
-            "scripts/test-ios.sh --only-testing SleepMoodKitTests",
+            "Targeted M3.4 medical safety tests",
+            "scripts/test-ios.sh --only-testing HealthSafetyKitTests",
             '"BodyMetricFlowUITests"',
             '"LifestyleFlowUITests"',
             '"m3-lifestyle-progress-light"',
+            '"PostureFlowUITests"',
+            '"OHPSafetyFlowUITests"',
+            '"m3-posture-high-contrast"',
         ]
     ),
     "project.yml": "\n".join(
@@ -829,18 +970,26 @@ fixture_files = {
             "HealthTrackingModules/MetricsKitTests",
             "product: SleepMoodKit",
             "HealthTrackingModules/SleepMoodKitTests",
+            "product: HealthSafetyKit",
+            "HealthTrackingModules/HealthSafetyKitTests",
         ]
     ),
     "Packages/HealthTrackingModules/Package.swift": "\n".join(
         [
             '.library(name: "MetricsKit", targets: ["MetricsKit"])',
             '.library(name: "SleepMoodKit", targets: ["SleepMoodKit"])',
+            '.library(name: "HealthSafetyKit", targets: ["HealthSafetyKit"])',
             'name: "MetricsKit"',
             'name: "SleepMoodKit"',
+            'name: "HealthSafetyKit"',
             'dependencies: ["CoreModels", "DesignSystem"]',
+            'dependencies: ["CoreModels", "DesignSystem", "HealthSafetyKit"]',
             'dependencies: ["CoreModels", "GuidanceKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit"]',
             'name: "MetricsKitTests"',
             'name: "SleepMoodKitTests"',
+            'name: "HealthSafetyKitTests"',
+            'dependencies: ["HealthSafetyKit"]',
+            'dependencies: ["CoreModels", "HealthSafetyKit", "MetricsKit"]',
             'dependencies: ["CoreModels", "SleepMoodKit"]',
             'dependencies: ["CoreModels", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
         ]
@@ -979,6 +1128,101 @@ fixture_files = {
             "m3-lifestyle-entry-dark",
             "m3-lifestyle-entry-ax5",
         ]
+    ),
+    "Packages/HealthTrackingModules/Tests/HealthSafetyKitTests/MedicalSafetyPresentationTests.swift": " ".join(
+        [
+            "MedicalDisclaimerPresentation.permanent",
+            "MedicalSafetyPresentation.resolve",
+            "overheadPressSymptom",
+            "increasingSymptom",
+            "cervicalRedFlags",
+            "urgentAssessmentInformation",
+            "Hareketi durdur.",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/MetricsKitTests/PostureMetricInputTests.swift": " ".join(
+        [
+            "PostureMetricInput",
+            "invalidSymptomScore",
+            "PostureMetricOrdering.newestFirst",
+            "PostureSymptomTrend.compare",
+            "safetyTrigger",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/MetricsKitTests/PostureViewModelTests.swift": " ".join(
+        [
+            "PostureViewModel",
+            "retrySave",
+            "testSecondTapWhileSavingCannotReplaceTheRetryPayload",
+            "previousExplicitSymptomScore",
+            "expectedUpdatedAt",
+            "posture.validation.empty",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/PersistenceKitTests/PostureRepositoryTests.swift": " ".join(
+        [
+            "createPostureMetric",
+            "fetchPostureMetrics",
+            "updatePostureMetric",
+            "deletePostureMetric",
+            "upsertPostureMetric",
+            "duplicatePostureMetricIDs",
+            "postureMetricUpsertCollision",
+            "testExternalEventSaveFailureRollsBackSoTheSameStableEventCanRetry",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/TrainingKitTests/SymptomEventContractTests.swift": " ".join(
+        [
+            "SymptomJournalEvent",
+            r"Set(Mirror(reflecting: event).children.compactMap(\.label))",
+            '["id", "occurredAt", "source"]',
+            "NoOpSymptomEventClient.shared",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/TrainingKitTests/SessionViewModelTests.swift": " ".join(
+        [
+            "SymptomEventClientSpy",
+            "symptomJournalState",
+            "retrySymptomJournal",
+            "testJournalFailureKeepsOHPStoppedAndRetryDoesNotRewriteTrainingState",
+            "testRestoringSymptomPresentSessionReemitsTheSameStableEvent",
+        ]
+    ),
+    "HealthTrackingAppTests/SymptomJournalAdapterTests.swift": " ".join(
+        [
+            "TrainingSymptomMetricsAdapter",
+            "TrainingSymptomSafetyMapper.overheadPressSymptom",
+            "XCTAssertEqual(repository.upserts[0], repository.upserts[1])",
+            'XCTAssertEqual(repository.upserts[0].input.region, "OHP")',
+        ]
+    ),
+    "HealthTrackingAppUITests/PostureFlowUITests.swift": " ".join(
+        [
+            '"-ui-test-scenario", "m3-posture"',
+            "today.posture.action",
+            "posture.entry.save-error",
+            "posture.entry.retry",
+            "posture.history.loaded",
+            "medical.disclaimer.l1",
+            "medical.safety.l2",
+            "m3-posture-entry-ax5",
+            "m3-posture-high-contrast",
+        ]
+    ),
+    "HealthTrackingAppUITests/OHPSafetyFlowUITests.swift": " ".join(
+        [
+            "session.ohp.journal.error",
+            "session.ohp.journal.retry",
+            "session.ohp.journal.recorded",
+            "medical.disclaimer.l1",
+            "medical.safety.l2",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/HealthSafetyKit/HealthSafetyKitModule.swift": (
+        "enum HealthSafetyKitModule {}"
+    ),
+    "Packages/HealthTrackingModules/Sources/HealthSafetyKit/Resources/Localizable.xcstrings": (
+        '"sourceLanguage" : "tr"'
     ),
     "Packages/HealthTrackingModules/Sources/SleepMoodKit/SleepMoodKitModule.swift": (
         "enum SleepMoodKitModuleMarker {}"
@@ -1219,6 +1463,7 @@ fixture_files = {
         [
             'case m3BodyMetrics = "m3-body-metrics"',
             'case m3SleepMood = "m3-sleep-mood"',
+            'case m3Posture = "m3-posture"',
         ]
     ),
 }
@@ -1512,6 +1757,27 @@ with tempfile.TemporaryDirectory() as temporary:
     )
     run(root, "forbidden feature imports")
     sleep_mood_source.write_text(original_sleep_mood_source, encoding="utf-8")
+
+    symptom_event_test = root / "Packages/HealthTrackingModules/Tests/TrainingKitTests/SymptomEventContractTests.swift"
+    original_symptom_event_test = symptom_event_test.read_text(encoding="utf-8")
+    symptom_event_test.write_text(
+        original_symptom_event_test.replace(
+            '["id", "occurredAt", "source"]',
+            '["id", "occurredAt", "region"]',
+        ),
+        encoding="utf-8",
+    )
+    run(root, '["id", "occurredAt", "source"]')
+    symptom_event_test.write_text(original_symptom_event_test, encoding="utf-8")
+
+    health_safety_source = root / "Packages/HealthTrackingModules/Sources/HealthSafetyKit/HealthSafetyKitModule.swift"
+    original_health_safety_source = health_safety_source.read_text(encoding="utf-8")
+    health_safety_source.write_text(
+        "import MetricsKit\n" + original_health_safety_source,
+        encoding="utf-8",
+    )
+    run(root, "must remain dependency-neutral")
+    health_safety_source.write_text(original_health_safety_source, encoding="utf-8")
 
     training_source = root / "Packages/HealthTrackingModules/Sources/TrainingKit/Forbidden.swift"
     training_source.parent.mkdir(parents=True, exist_ok=True)

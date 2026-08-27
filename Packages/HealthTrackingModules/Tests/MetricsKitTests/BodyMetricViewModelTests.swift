@@ -298,6 +298,33 @@ private final class MetricsRepositoryStub: MetricsRepository {
         self.suspendsFirstCreate = suspendsFirstCreate
     }
 
+    func fetchPostureMetrics() async throws -> [PostureMetricSnapshot] { [] }
+
+    func createPostureMetric(
+        _ input: PostureMetricInput
+    ) async throws -> PostureMetricSnapshot {
+        throw StubFailure.unexpectedPostureCall
+    }
+
+    func updatePostureMetric(
+        id: UUID,
+        expectedUpdatedAt: Date,
+        input: PostureMetricInput
+    ) async throws -> PostureMetricSnapshot {
+        throw StubFailure.unexpectedPostureCall
+    }
+
+    func deletePostureMetric(id: UUID, expectedUpdatedAt: Date) async throws {
+        throw StubFailure.unexpectedPostureCall
+    }
+
+    func upsertPostureMetric(
+        id: UUID,
+        input: PostureMetricInput
+    ) async throws -> PostureMetricSnapshot {
+        throw StubFailure.unexpectedPostureCall
+    }
+
     func fetchBodyMetrics() async throws -> [BodyMetricSnapshot] {
         fetched
     }
@@ -367,5 +394,6 @@ private final class MetricsRepositoryStub: MetricsRepository {
     private enum StubFailure: Error {
         case missingCreateResult
         case missingUpdateResult
+        case unexpectedPostureCall
     }
 }

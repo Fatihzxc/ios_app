@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "PersistenceKit", targets: ["PersistenceKit"]),
         .library(name: "DesignSystem", targets: ["DesignSystem"]),
         .library(name: "NutritionKit", targets: ["NutritionKit"]),
+        .library(name: "HealthSafetyKit", targets: ["HealthSafetyKit"]),
         .library(name: "MetricsKit", targets: ["MetricsKit"]),
         .library(name: "SleepMoodKit", targets: ["SleepMoodKit"]),
         .library(name: "ReportsKit", targets: ["ReportsKit"]),
@@ -53,8 +54,13 @@ let package = Package(
             swiftSettings: strictConcurrency
         ),
         .target(
+            name: "HealthSafetyKit",
+            resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
+        .target(
             name: "MetricsKit",
-            dependencies: ["CoreModels", "DesignSystem"],
+            dependencies: ["CoreModels", "DesignSystem", "HealthSafetyKit"],
             resources: [.process("Resources")],
             swiftSettings: strictConcurrency
         ),
@@ -107,8 +113,13 @@ let package = Package(
             swiftSettings: strictConcurrency
         ),
         .testTarget(
+            name: "HealthSafetyKitTests",
+            dependencies: ["HealthSafetyKit"],
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
             name: "MetricsKitTests",
-            dependencies: ["CoreModels", "MetricsKit"],
+            dependencies: ["CoreModels", "HealthSafetyKit", "MetricsKit"],
             swiftSettings: strictConcurrency
         ),
         .testTarget(

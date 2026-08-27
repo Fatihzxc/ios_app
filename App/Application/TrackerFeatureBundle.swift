@@ -10,6 +10,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
     let repository: any MetricsRepository
     let lifestyleRepository: any LifestyleRepository
     let bodyMetricViewModel: BodyMetricViewModel
+    let postureViewModel: PostureViewModel
     let lifestyleViewModel: LifestyleViewModel
     private let now: @MainActor () -> Date
 
@@ -22,6 +23,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         self.lifestyleRepository = lifestyleRepository
         self.now = now
         bodyMetricViewModel = BodyMetricViewModel(repository: metricsRepository)
+        postureViewModel = PostureViewModel(repository: metricsRepository)
         lifestyleViewModel = LifestyleViewModel(repository: lifestyleRepository)
     }
 
@@ -48,13 +50,28 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         )
     }
 
+    func makePostureEntryView(
+        onClose: @escaping @MainActor () -> Void
+    ) -> AnyView {
+        AnyView(
+            PostureEntryView(
+                viewModel: postureViewModel,
+                initialDate: now(),
+                onClose: onClose
+            )
+        )
+    }
+
     func makeProgressView() -> AnyView {
         AnyView(
             BodyMetricProgressView(viewModel: bodyMetricViewModel) {
-                LifestyleProgressSection(
-                    viewModel: lifestyleViewModel,
-                    date: now()
-                )
+                VStack(alignment: .leading, spacing: 24) {
+                    LifestyleProgressSection(
+                        viewModel: lifestyleViewModel,
+                        date: now()
+                    )
+                    PostureProgressSection(viewModel: postureViewModel)
+                }
             }
         )
     }
@@ -87,6 +104,16 @@ enum DefaultTrackerFeatureFactory {
                         repository: lifestyleRepository,
                         failsFirstUpsert: true
                     )
+                )
+            }
+            if scenario == .m3Posture {
+                return TrackerFeatureBundle(
+                    metricsRepository: UITestMetricsRepository(
+                        repository: metricsRepository,
+                        failsFirstCreate: false,
+                        failsFirstPostureCreate: true
+                    ),
+                    lifestyleRepository: lifestyleRepository
                 )
             }
         }
@@ -142,13 +169,56 @@ private final class UITestMetricsRepository: MetricsRepository {
 
     private let repository: any MetricsRepository
     private var failsNextCreate: Bool
+    private var failsNextPostureCreate: Bool
 
     init(
         repository: any MetricsRepository,
-        failsFirstCreate: Bool
+        failsFirstCreate: Bool,
+        failsFirstPostureCreate: Bool = false
     ) {
         self.repository = repository
         failsNextCreate = failsFirstCreate
+        failsNextPostureCreate = failsFirstPostureCreate
+    }
+
+    func fetchPostureMetrics() async throws -> [PostureMetricSnapshot] {
+        try await repository.fetchPostureMetrics()
+    }
+
+    func createPostureMetric(
+        _ input: PostureMetricInput
+    ) async throws -> PostureMetricSnapshot {
+        if failsNextPostureCreate {
+            failsNextPostureCreate = false
+            throw FixtureFailure.create
+        }
+        return try await repository.createPostureMetric(input)
+    }
+
+    func updatePostureMetric(
+        id: UUID,
+        expectedUpdatedAt: Date,
+        input: PostureMetricInput
+    ) async throws -> PostureMetricSnapshot {
+        try await repository.updatePostureMetric(
+            id: id,
+            expectedUpdatedAt: expectedUpdatedAt,
+            input: input
+        )
+    }
+
+    func deletePostureMetric(id: UUID, expectedUpdatedAt: Date) async throws {
+        try await repository.deletePostureMetric(
+            id: id,
+            expectedUpdatedAt: expectedUpdatedAt
+        )
+    }
+
+    func upsertPostureMetric(
+        id: UUID,
+        input: PostureMetricInput
+    ) async throws -> PostureMetricSnapshot {
+        try await repository.upsertPostureMetric(id: id, input: input)
     }
 
     func fetchBodyMetrics() async throws -> [BodyMetricSnapshot] {

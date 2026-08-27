@@ -605,6 +605,7 @@ final class SessionViewModelTests: XCTestCase {
     func testCurrentOHPSymptomWritesCurrentSessionAndRoutesOnlyTheExerciseToAlternative() async {
         let plan = makeOHPPlan()
         let repository = FakeSessionRepository(plan: plan)
+        let symptomClient = SymptomEventClientSpy()
         repository.configureProgram(week: 5)
         let exercise = plan.exercises[0]
         repository.completedExerciseHistory[exercise.id] = [
@@ -619,7 +620,10 @@ final class SessionViewModelTests: XCTestCase {
                 ]
             ),
         ]
-        let viewModel = makeViewModel(repository)
+        let viewModel = makeViewModel(
+            repository,
+            symptomEventClient: symptomClient
+        )
         await viewModel.start(workoutDayID: plan.workoutDayID)
         await viewModel.skipWarmup()
         let currentSessionID = requireActive(viewModel.state).session.id
@@ -647,6 +651,118 @@ final class SessionViewModelTests: XCTestCase {
         XCTAssertEqual(
             requireActive(viewModel.state).session.ohpSymptomResponse,
             .symptomsPresent
+        )
+        let event = SymptomJournalEvent(
+            id: currentSessionID,
+            occurredAt: now,
+            source: .overheadPressCurrentSymptom
+        )
+        XCTAssertEqual(symptomClient.events, [event])
+        XCTAssertEqual(viewModel.symptomJournalState, .recorded(event: event))
+    }
+
+    func testJournalFailureKeepsOHPStoppedAndRetryDoesNotRewriteTrainingState() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        repository.configureProgram(week: 5)
+        let exercise = plan.exercises[0]
+        repository.completedExerciseHistory[exercise.id] = [
+            makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                ohpSymptomResponse: .symptomFree,
+                measurements: [
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                ]
+            ),
+        ]
+        let symptomClient = SymptomEventClientSpy(
+            outcomes: [.failure(FakeSessionError.save), .success(())]
+        )
+        let viewModel = makeViewModel(
+            repository,
+            symptomEventClient: symptomClient
+        )
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let sessionID = requireActive(viewModel.state).session.id
+
+        await viewModel.reportCurrentOHPSymptom()
+
+        let event = SymptomJournalEvent(
+            id: sessionID,
+            occurredAt: now,
+            source: .overheadPressCurrentSymptom
+        )
+        XCTAssertNotNil(activePresentation(from: viewModel.state))
+        XCTAssertEqual(
+            viewModel.ohpSafetyState,
+            .stopped(alternative: repository.ohpSafeAlternative)
+        )
+        XCTAssertEqual(viewModel.symptomJournalState, .failed(event: event))
+        XCTAssertEqual(repository.ohpSymptomUpdates.count, 1)
+
+        await viewModel.retrySymptomJournal()
+
+        XCTAssertEqual(symptomClient.events, [event, event])
+        XCTAssertEqual(viewModel.symptomJournalState, .recorded(event: event))
+        XCTAssertEqual(
+            repository.ohpSymptomUpdates.count,
+            1,
+            "Retrying the journal must not rewrite the safety response."
+        )
+        XCTAssertEqual(
+            viewModel.ohpSafetyState,
+            .stopped(alternative: repository.ohpSafeAlternative)
+        )
+    }
+
+    func testRestoringSymptomPresentSessionReemitsTheSameStableEvent() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        repository.configureProgram(week: 5)
+        let checkedAt = now.addingTimeInterval(-300)
+        let sessionID = uuid("00000000-0000-4000-8000-000000000756")
+        repository.inProgressSession = WorkoutSessionSnapshot(
+            id: sessionID,
+            createdAt: checkedAt.addingTimeInterval(-600),
+            updatedAt: checkedAt,
+            date: checkedAt.addingTimeInterval(-600),
+            status: .inProgress,
+            workoutDayTemplateID: plan.workoutDayID,
+            ohpSymptomResponse: .symptomsPresent,
+            ohpSymptomCheckedAt: checkedAt
+        )
+        repository.progress = WorkoutSessionProgressSnapshot(
+            id: uuid("00000000-0000-4000-8000-000000000757"),
+            createdAt: checkedAt,
+            updatedAt: checkedAt,
+            workoutSessionID: sessionID,
+            stage: .movement,
+            currentExerciseTemplateID: plan.exercises[0].id,
+            completedWarmupItemIDs: Set(plan.warmupItems.map(\.id)),
+            warmupDisposition: .completed
+        )
+        let symptomClient = SymptomEventClientSpy()
+        let expected = SymptomJournalEvent(
+            id: sessionID,
+            occurredAt: checkedAt,
+            source: .overheadPressCurrentSymptom
+        )
+
+        let first = makeViewModel(repository, symptomEventClient: symptomClient)
+        await first.start(workoutDayID: UUID())
+        let restoredAgain = makeViewModel(repository, symptomEventClient: symptomClient)
+        await restoredAgain.start(workoutDayID: UUID())
+
+        XCTAssertEqual(symptomClient.events, [expected, expected])
+        XCTAssertEqual(first.symptomJournalState, .recorded(event: expected))
+        XCTAssertEqual(restoredAgain.symptomJournalState, .recorded(event: expected))
+        XCTAssertEqual(
+            first.ohpSafetyState,
+            .stopped(alternative: repository.ohpSafeAlternative)
         )
     }
 
@@ -847,8 +963,18 @@ final class SessionViewModelTests: XCTestCase {
         XCTAssertNotNil(activePresentation(from: viewModel.state))
     }
 
-    private func makeViewModel(_ repository: FakeSessionRepository) -> SessionViewModel {
-        SessionViewModel(repository: repository, now: { self.now })
+    private func makeViewModel(
+        _ repository: FakeSessionRepository,
+        symptomEventClient: (any SymptomEventClient)? = nil
+    ) -> SessionViewModel {
+        if let symptomEventClient {
+            return SessionViewModel(
+                repository: repository,
+                now: { self.now },
+                symptomEventClient: symptomEventClient
+            )
+        }
+        return SessionViewModel(repository: repository, now: { self.now })
     }
 
     private func makePlan() -> SessionWorkoutPlanSnapshot {
@@ -1439,6 +1565,23 @@ private final class FakeSessionRepository: TrainingRepository {
 private enum FakeSessionError: Error {
     case load
     case save
+}
+
+@MainActor
+private final class SymptomEventClientSpy: SymptomEventClient {
+    var outcomes: [Result<Void, Error>]
+    private(set) var events: [SymptomJournalEvent] = []
+
+    init(outcomes: [Result<Void, Error>] = []) {
+        self.outcomes = outcomes
+    }
+
+    func record(_ event: SymptomJournalEvent) async throws {
+        events.append(event)
+        if !outcomes.isEmpty {
+            try outcomes.removeFirst().get()
+        }
+    }
 }
 
 private extension SessionPresentation {
