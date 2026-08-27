@@ -75,22 +75,21 @@ final class ProgressPhotoRepositoryTests: XCTestCase {
     func testProtectedCleanupFailureRemainsPendingUntilExactRetrySucceeds() async throws {
         let context = try makeContext()
         let assetID = "00000000-0000-0000-0000-000000000039"
-        let assetStore = ProgressPhotoAssetStoreFake(
+        let journal = PhotoAssetCleanupJournalFake()
+        let firstAssetStore = ProgressPhotoAssetStoreFake(
             importResults: [.success(.init(assetID: assetID))],
-            deleteResults: [
-                .failure(.protectedDataUnavailable),
-                .success(()),
-            ]
+            deleteResults: [.failure(.protectedDataUnavailable)]
         )
-        let repository = SwiftDataProgressPhotoRepository(
+        let firstRepository = SwiftDataProgressPhotoRepository(
             modelContext: context,
-            assetStore: assetStore,
+            assetStore: firstAssetStore,
+            cleanupJournal: journal,
             save: { throw FixtureError.save },
             rollback: { context.rollback() }
         )
 
         do {
-            _ = try await repository.importPhoto(
+            _ = try await firstRepository.importPhoto(
                 try ProgressPhotoInput(date: .now, pose: .back, note: nil),
                 bytes: Data([1])
             )
@@ -101,11 +100,88 @@ final class ProgressPhotoRepositoryTests: XCTestCase {
                 .metadataSaveFailedCleanupPending(assetID: assetID)
             )
         }
-        XCTAssertEqual(repository.pendingAssetCleanupIDs, [assetID])
+        XCTAssertEqual(firstRepository.pendingAssetCleanupIDs, [assetID])
+        let persistedAfterFailure = try await journal.loadPendingAssetIDs()
+        XCTAssertEqual(persistedAfterFailure, [assetID])
 
-        try await repository.retryPendingAssetCleanup()
-        XCTAssertTrue(repository.pendingAssetCleanupIDs.isEmpty)
-        XCTAssertEqual(assetStore.deleteRequests, [assetID, assetID])
+        let relaunchedAssetStore = ProgressPhotoAssetStoreFake(
+            deleteResults: [.success(())],
+            localAssetIDs: [assetID]
+        )
+        let relaunchedRepository = SwiftDataProgressPhotoRepository(
+            modelContext: context,
+            assetStore: relaunchedAssetStore,
+            cleanupJournal: journal
+        )
+
+        _ = try await relaunchedRepository.fetchPhotos()
+
+        XCTAssertTrue(relaunchedRepository.pendingAssetCleanupIDs.isEmpty)
+        let persistedAfterRelaunch = try await journal.loadPendingAssetIDs()
+        XCTAssertEqual(persistedAfterRelaunch, [])
+        XCTAssertEqual(firstAssetStore.deleteRequests, [assetID])
+        XCTAssertEqual(relaunchedAssetStore.deleteRequests, [assetID])
+    }
+
+    func testStartupReconciliationKeepsReferencedAssetAndDeletesCrashWindowOrphan() async throws {
+        let context = try makeContext()
+        let referencedID = "00000000-0000-0000-0000-000000000061"
+        let orphanID = "00000000-0000-0000-0000-000000000062"
+        let date = Date(timeIntervalSince1970: 620)
+        context.insert(
+            ProgressPhoto(
+                id: UUID(),
+                createdAt: date,
+                updatedAt: date,
+                date: date,
+                imageRef: referencedID,
+                pose: .front,
+                note: nil
+            )
+        )
+        try context.save()
+        let journal = PhotoAssetCleanupJournalFake(
+            pendingAssetIDs: [referencedID, orphanID]
+        )
+        let assetStore = ProgressPhotoAssetStoreFake(
+            deleteResults: [.success(())],
+            localAssetIDs: [referencedID, orphanID]
+        )
+        let repository = SwiftDataProgressPhotoRepository(
+            modelContext: context,
+            assetStore: assetStore,
+            cleanupJournal: journal
+        )
+
+        let snapshots = try await repository.fetchPhotos()
+
+        XCTAssertEqual(snapshots.map(\.imageRef), [referencedID])
+        XCTAssertEqual(assetStore.deleteRequests, [orphanID])
+        XCTAssertEqual(assetStore.localAssetIDs, [referencedID])
+        let persistedAfterReconciliation = try await journal.loadPendingAssetIDs()
+        XCTAssertEqual(persistedAfterReconciliation, [])
+    }
+
+    func testStartupInventoryDeletesUnjournaledOrphanFromRenameCrashWindow() async throws {
+        let context = try makeContext()
+        let orphanID = "00000000-0000-0000-0000-000000000063"
+        let journal = PhotoAssetCleanupJournalFake()
+        let assetStore = ProgressPhotoAssetStoreFake(
+            deleteResults: [.success(())],
+            localAssetIDs: [orphanID]
+        )
+        let repository = SwiftDataProgressPhotoRepository(
+            modelContext: context,
+            assetStore: assetStore,
+            cleanupJournal: journal
+        )
+
+        _ = try await repository.fetchPhotos()
+
+        XCTAssertEqual(assetStore.deleteRequests, [orphanID])
+        XCTAssertTrue(assetStore.localAssetIDs.isEmpty)
+        let persistedAfterReconciliation = try await journal.loadPendingAssetIDs()
+        XCTAssertEqual(persistedAfterReconciliation, [])
     }
 
     func testAssetDeleteFailureRestoresMetadataForExactRetry() async throws {
@@ -235,6 +311,7 @@ private final class ProgressPhotoAssetStoreFake: PhotoAssetStoring {
     var importResults: [Result<PhotoAssetReference, PhotoAssetStoreError>]
     var loadResults: [Result<PhotoAssetLoadResult, PhotoAssetStoreError>]
     var deleteResults: [Result<Void, PhotoAssetStoreError>]
+    var localAssetIDs: Set<String>
     private(set) var importRequests: [Data] = []
     private(set) var loadRequests: [LoadRequest] = []
     private(set) var deleteRequests: [String] = []
@@ -242,17 +319,21 @@ private final class ProgressPhotoAssetStoreFake: PhotoAssetStoring {
     init(
         importResults: [Result<PhotoAssetReference, PhotoAssetStoreError>] = [],
         loadResults: [Result<PhotoAssetLoadResult, PhotoAssetStoreError>] = [],
-        deleteResults: [Result<Void, PhotoAssetStoreError>] = []
+        deleteResults: [Result<Void, PhotoAssetStoreError>] = [],
+        localAssetIDs: Set<String> = []
     ) {
         self.importResults = importResults
         self.loadResults = loadResults
         self.deleteResults = deleteResults
+        self.localAssetIDs = localAssetIDs
     }
 
     func importAsset(_ bytes: Data) async throws -> PhotoAssetReference {
         importRequests.append(bytes)
         guard !importResults.isEmpty else { throw PhotoAssetStoreError.corruptInput }
-        return try importResults.removeFirst().get()
+        let reference = try importResults.removeFirst().get()
+        localAssetIDs.insert(reference.assetID)
+        return reference
     }
 
     func loadAsset(
@@ -266,7 +347,32 @@ private final class ProgressPhotoAssetStoreFake: PhotoAssetStoring {
 
     func deleteAsset(id: String) async throws {
         deleteRequests.append(id)
-        guard !deleteResults.isEmpty else { return }
-        try deleteResults.removeFirst().get()
+        if !deleteResults.isEmpty {
+            try deleteResults.removeFirst().get()
+        }
+        localAssetIDs.remove(id)
+    }
+
+    func storedAssetIDs() async throws -> Set<String> { localAssetIDs }
+}
+
+@MainActor
+private final class PhotoAssetCleanupJournalFake: PhotoAssetCleanupJournaling {
+    private var pendingAssetIDs: Set<String>
+
+    init(pendingAssetIDs: Set<String> = []) {
+        self.pendingAssetIDs = pendingAssetIDs
+    }
+
+    func loadPendingAssetIDs() async throws -> Set<String> {
+        pendingAssetIDs
+    }
+
+    func addPendingAssetID(_ assetID: String) async throws {
+        pendingAssetIDs.insert(assetID)
+    }
+
+    func removePendingAssetID(_ assetID: String) async throws {
+        pendingAssetIDs.remove(assetID)
     }
 }

@@ -72,14 +72,60 @@ final class PhotoAssetStoreTests: XCTestCase {
             try Data(contentsOf: finalDirectory.appendingPathComponent("thumbnail.jpg")),
             Data([0x20])
         )
-        XCTAssertEqual(fileSystem.protectedURLs.count, 2)
+        XCTAssertEqual(fileSystem.protectedWriteURLs.count, 2)
         XCTAssertTrue(
-            fileSystem.protectedURLs.allSatisfy { $0.path.contains(".staging") },
-            "Complete file protection must be applied before the atomic rename."
+            fileSystem.protectedWriteURLs.allSatisfy { $0.path.contains(".staging") },
+            "Every byte must be created atomically with complete protection."
         )
         XCTAssertTrue(
-            fileSystem.writeURLs.allSatisfy { $0.path.contains(".staging") },
+            fileSystem.protectedDirectoryURLs.contains {
+                $0.path.contains(".staging")
+            },
+            "The staging directory itself must have complete protection."
+        )
+        XCTAssertTrue(
+            fileSystem.protectedWriteURLs.allSatisfy { $0.path.contains(".staging") },
             "The final directory must never expose a partially written asset."
+        )
+    }
+
+    func testImportPurgesStaleStagingBeforeWritingNewProtectedAsset() async throws {
+        let applicationSupport = temporaryDirectory()
+        let stagingRoot = applicationSupport
+            .appendingPathComponent("ProgressPhotos", isDirectory: true)
+            .appendingPathComponent(".staging", isDirectory: true)
+        let staleDirectory = stagingRoot.appendingPathComponent(
+            "stale-crash-window",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: staleDirectory,
+            withIntermediateDirectories: true
+        )
+        try Data([0xde, 0xad]).write(
+            to: staleDirectory.appendingPathComponent("plaintext.tmp")
+        )
+        let fileSystem = RecordingPhotoAssetFileSystem(
+            applicationSupport: applicationSupport
+        )
+        let store = LocalPhotoAssetStore(
+            policy: .testFixture,
+            processor: PhotoImageProcessorFake(
+                metadata: .init(pixelWidth: 2, pixelHeight: 2, orientation: .up),
+                normalized: .tinyFixture
+            ),
+            fileSystem: fileSystem,
+            makeAssetID: {
+                UUID(uuidString: "00000000-0000-0000-0000-000000000064")!
+            }
+        )
+
+        _ = try await store.importAsset(Data([1]))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staleDirectory.path))
+        XCTAssertTrue(fileSystem.removedURLs.contains(stagingRoot))
+        XCTAssertTrue(
+            fileSystem.protectedWriteURLs.allSatisfy { !$0.path.contains("stale-crash-window") }
         )
     }
 
@@ -117,7 +163,7 @@ final class PhotoAssetStoreTests: XCTestCase {
         await assertImportError(.corruptInput) {
             try await store.importAsset(Data([2]))
         }
-        XCTAssertTrue(fileSystem.writeURLs.isEmpty)
+        XCTAssertTrue(fileSystem.protectedWriteURLs.isEmpty)
         XCTAssertTrue(fileSystem.moveOperations.isEmpty)
     }
 
@@ -158,7 +204,7 @@ final class PhotoAssetStoreTests: XCTestCase {
         await assertImportError(.invalidNormalizedOutput) {
             try await store.importAsset(Data([1]))
         }
-        XCTAssertTrue(fileSystem.writeURLs.isEmpty)
+        XCTAssertTrue(fileSystem.protectedWriteURLs.isEmpty)
     }
 
     func testLoadReturnsMissingOrCorruptFallbackWithoutExposingAPath() async throws {
@@ -330,8 +376,9 @@ private final class RecordingPhotoAssetFileSystem: PhotoAssetFileSystem {
 
     let applicationSupport: URL
     var removeError: PhotoAssetFileSystemError?
-    private(set) var writeURLs: [URL] = []
-    private(set) var protectedURLs: [URL] = []
+    private(set) var protectedWriteURLs: [URL] = []
+    private(set) var protectedDirectoryURLs: [URL] = []
+    private(set) var removedURLs: [URL] = []
     private(set) var moveOperations: [MoveOperation] = []
 
     init(applicationSupport: URL) {
@@ -340,7 +387,8 @@ private final class RecordingPhotoAssetFileSystem: PhotoAssetFileSystem {
 
     func applicationSupportDirectory() throws -> URL { applicationSupport }
 
-    func createDirectory(at url: URL) throws {
+    func createProtectedDirectory(at url: URL) throws {
+        protectedDirectoryURLs.append(url)
         try FileManager.default.createDirectory(
             at: url,
             withIntermediateDirectories: true
@@ -351,13 +399,9 @@ private final class RecordingPhotoAssetFileSystem: PhotoAssetFileSystem {
         FileManager.default.fileExists(atPath: url.path)
     }
 
-    func write(_ data: Data, to url: URL) throws {
-        writeURLs.append(url)
-        try data.write(to: url)
-    }
-
-    func applyCompleteProtection(to url: URL) throws {
-        protectedURLs.append(url)
+    func writeProtectedAtomically(_ data: Data, to url: URL) throws {
+        protectedWriteURLs.append(url)
+        try data.write(to: url, options: .atomic)
     }
 
     func moveItem(at source: URL, to destination: URL) throws {
@@ -374,7 +418,16 @@ private final class RecordingPhotoAssetFileSystem: PhotoAssetFileSystem {
 
     func removeItemIfExists(at url: URL) throws {
         if let removeError { throw removeError }
+        removedURLs.append(url)
         guard fileExists(at: url) else { return }
         try FileManager.default.removeItem(at: url)
+    }
+
+    func contentsOfDirectory(at url: URL) throws -> [URL] {
+        guard fileExists(at: url) else { return [] }
+        return try FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        )
     }
 }

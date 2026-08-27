@@ -792,7 +792,7 @@ m37_tests = {
         "rightMirrored",
         "containsMetadata: false",
         'path.contains(".staging")',
-        "applyCompleteProtection",
+        "writeProtectedAtomically",
         "testImportRejectsEmptyOversizedCorruptAndPixelBombInputsBeforeWriting",
         "testImportRejectsProcessorOutputThatRetainsMetadataOrientationOrExceedsBounds",
         "testLoadReturnsMissingOrCorruptFallbackWithoutExposingAPath",
@@ -806,7 +806,7 @@ m37_tests = {
         "testAssetDeleteFailureRestoresMetadataForExactRetry",
         "testThumbnailPassesThroughAvailableMissingAndCorruptFallbacks",
         "testAbsoluteOrMalformedPersistedImageRefFailsClosed",
-        "retryPendingAssetCleanup",
+        "PhotoAssetCleanupJournalFake",
     },
     "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/PhotoImportViewModelTests.swift": {
         "testCancelledSelectionPreservesDatePoseAndNoteWithoutRepositoryWrite",
@@ -2545,7 +2545,7 @@ fixture_files = {
             "rightMirrored",
             "containsMetadata: false",
             'path.contains(".staging")',
-            "applyCompleteProtection",
+            "writeProtectedAtomically",
             "testImportRejectsEmptyOversizedCorruptAndPixelBombInputsBeforeWriting",
             "testImportRejectsProcessorOutputThatRetainsMetadataOrientationOrExceedsBounds",
             "testLoadReturnsMissingOrCorruptFallbackWithoutExposingAPath",
@@ -2561,7 +2561,7 @@ fixture_files = {
             "testAssetDeleteFailureRestoresMetadataForExactRetry",
             "testThumbnailPassesThroughAvailableMissingAndCorruptFallbacks",
             "testAbsoluteOrMalformedPersistedImageRefFailsClosed",
-            "retryPendingAssetCleanup",
+            "PhotoAssetCleanupJournalFake",
         ]
     ),
     "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/PhotoImportViewModelTests.swift": " ".join(

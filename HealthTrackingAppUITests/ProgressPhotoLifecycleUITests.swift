@@ -33,6 +33,21 @@ final class ProgressPhotoLifecycleUITests: XCTestCase {
         require(identified("photos.list.empty", in: relaunched))
     }
 
+    func testSuccessfulImportOffersAccessibleExactUndo() {
+        let app = launch(storeIdentifier: UUID())
+        openProgressPhotos(in: app)
+
+        require(identified("photos.import.fixture", in: app)).tap()
+        require(identified("photos.import.saved", in: app))
+        let undo = require(identified("photos.import.undo", in: app))
+        makeHittable(undo, in: app)
+        XCTAssertGreaterThanOrEqual(undo.frame.height + 0.01, 52)
+        undo.tap()
+
+        require(identified("photos.list.empty", in: app))
+        XCTAssertFalse(identified("photos.import.undo", in: app).exists)
+    }
+
     private func launch(storeIdentifier: UUID) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
