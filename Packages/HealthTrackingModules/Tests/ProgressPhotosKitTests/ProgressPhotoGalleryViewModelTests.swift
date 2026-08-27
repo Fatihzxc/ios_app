@@ -378,6 +378,127 @@ final class ProgressPhotoGalleryViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.comparison?.after.assetState, .available(Data([33])))
     }
 
+    func testSuccessfulSyncReloadsExactMissingAndCorruptGalleryStatesInOpenLifecycle() async throws {
+        let thumbnailMissing = fixtureSnapshot(
+            id: "00000000-0000-0000-0000-000000000065",
+            date: Date(timeIntervalSince1970: 12_400),
+            pose: .front,
+            assetID: "00000000-0000-0000-0000-000000000165"
+        )
+        let thumbnailCorrupt = fixtureSnapshot(
+            id: "00000000-0000-0000-0000-000000000066",
+            date: Date(timeIntervalSince1970: 12_500),
+            pose: .side,
+            assetID: "00000000-0000-0000-0000-000000000166"
+        )
+        let alreadyAvailable = fixtureSnapshot(
+            id: "00000000-0000-0000-0000-000000000067",
+            date: Date(timeIntervalSince1970: 12_600),
+            pose: .back,
+            assetID: "00000000-0000-0000-0000-000000000167"
+        )
+        let comparisonMissing = fixtureSnapshot(
+            id: "00000000-0000-0000-0000-000000000068",
+            date: Date(timeIntervalSince1970: 12_700),
+            pose: .front,
+            assetID: "00000000-0000-0000-0000-000000000168"
+        )
+        let comparisonCorrupt = fixtureSnapshot(
+            id: "00000000-0000-0000-0000-000000000069",
+            date: Date(timeIntervalSince1970: 12_800),
+            pose: .side,
+            assetID: "00000000-0000-0000-0000-000000000169"
+        )
+        let repository = ProgressPhotoGalleryRepositoryFake(
+            photos: [
+                thumbnailMissing,
+                thumbnailCorrupt,
+                alreadyAvailable,
+                comparisonMissing,
+                comparisonCorrupt,
+            ],
+            thumbnails: [
+                thumbnailMissing.imageRef: .missing,
+                thumbnailCorrupt.imageRef: .corrupt,
+                alreadyAvailable.imageRef: .available(Data([7])),
+                comparisonMissing.imageRef: .available(Data([8])),
+                comparisonCorrupt.imageRef: .available(Data([9])),
+            ],
+            fullImages: [
+                comparisonMissing.imageRef: .missing,
+                comparisonCorrupt.imageRef: .corrupt,
+            ]
+        )
+        let viewModel = ProgressPhotoGalleryViewModel(repository: repository)
+        await viewModel.load()
+        await viewModel.loadThumbnail(id: thumbnailMissing.id)
+        await viewModel.loadThumbnail(id: thumbnailCorrupt.id)
+        await viewModel.loadThumbnail(id: alreadyAvailable.id)
+        await viewModel.loadThumbnail(id: comparisonMissing.id)
+        await viewModel.loadThumbnail(id: comparisonCorrupt.id)
+        _ = viewModel.toggleSelection(id: comparisonMissing.id)
+        _ = viewModel.toggleSelection(id: comparisonCorrupt.id)
+        await viewModel.loadComparisonImages()
+
+        XCTAssertEqual(
+            viewModel.items.first { $0.id == thumbnailMissing.id }?.assetState,
+            .missing
+        )
+        XCTAssertEqual(
+            viewModel.items.first { $0.id == thumbnailCorrupt.id }?.assetState,
+            .corrupt
+        )
+        XCTAssertEqual(viewModel.comparison?.before.assetState, .missing)
+        XCTAssertEqual(viewModel.comparison?.after.assetState, .corrupt)
+
+        repository.thumbnails[thumbnailMissing.imageRef] = .available(Data([5]))
+        repository.thumbnails[thumbnailCorrupt.imageRef] = .available(Data([6]))
+        repository.fullImages[comparisonMissing.imageRef] = .available(Data([18]))
+        repository.fullImages[comparisonCorrupt.imageRef] = .available(Data([19]))
+        let synchronizer = CloudPhotoAssetSynchronizerFake(outcome: .synchronized)
+        let lifecycle = ProgressPhotoAssetSyncLifecycle(
+            synchronizer: synchronizer,
+            galleryViewModel: viewModel
+        )
+
+        let outcome = try await lifecycle.synchronize()
+        _ = try await lifecycle.synchronize()
+        let synchronizationCalls = await synchronizer.calls
+
+        XCTAssertEqual(outcome, .synchronized)
+        XCTAssertEqual(synchronizationCalls, 2)
+        XCTAssertEqual(
+            viewModel.items.first { $0.id == thumbnailMissing.id }?.assetState,
+            .available(Data([5]))
+        )
+        XCTAssertEqual(
+            viewModel.items.first { $0.id == thumbnailCorrupt.id }?.assetState,
+            .available(Data([6]))
+        )
+        XCTAssertEqual(viewModel.comparison?.before.assetState, .available(Data([18])))
+        XCTAssertEqual(viewModel.comparison?.after.assetState, .available(Data([19])))
+        XCTAssertEqual(
+            repository.thumbnailRequests.filter { $0 == thumbnailMissing.imageRef }.count,
+            2
+        )
+        XCTAssertEqual(
+            repository.thumbnailRequests.filter { $0 == thumbnailCorrupt.imageRef }.count,
+            2
+        )
+        XCTAssertEqual(
+            repository.thumbnailRequests.filter { $0 == alreadyAvailable.imageRef }.count,
+            1
+        )
+        XCTAssertEqual(
+            repository.fullImageRequests.filter { $0 == comparisonMissing.imageRef }.count,
+            2
+        )
+        XCTAssertEqual(
+            repository.fullImageRequests.filter { $0 == comparisonCorrupt.imageRef }.count,
+            2
+        )
+    }
+
     func testThumbnailCacheEvictsLeastRecentUnselectedAsset() async {
         let snapshots = (0..<3).map { offset in
             fixtureSnapshot(
@@ -414,6 +535,20 @@ final class ProgressPhotoGalleryViewModelTests: XCTestCase {
             Set(viewModel.items.filter { $0.assetState.isAvailable }.map(\.id)),
             Set([snapshots[1].id, snapshots[2].id])
         )
+    }
+}
+
+private actor CloudPhotoAssetSynchronizerFake: CloudPhotoAssetSynchronizing {
+    private let outcome: CloudPhotoAssetSyncOutcome
+    private(set) var calls = 0
+
+    init(outcome: CloudPhotoAssetSyncOutcome) {
+        self.outcome = outcome
+    }
+
+    func synchronize() async throws -> CloudPhotoAssetSyncOutcome {
+        calls += 1
+        return outcome
     }
 }
 

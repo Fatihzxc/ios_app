@@ -32,6 +32,7 @@ public struct ProgressPhotoLifecycleView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Bindable private var viewModel: ProgressPhotoImportViewModel
     @Bindable private var galleryViewModel: ProgressPhotoGalleryViewModel
+    private let assetSynchronizer: any CloudPhotoAssetSynchronizing
     private let fixtureImageData: Data?
     private let onClose: @MainActor () -> Void
     @State private var pendingDelete: ProgressPhotoSnapshot?
@@ -40,11 +41,13 @@ public struct ProgressPhotoLifecycleView: View {
     public init(
         viewModel: ProgressPhotoImportViewModel,
         galleryViewModel: ProgressPhotoGalleryViewModel,
+        assetSynchronizer: any CloudPhotoAssetSynchronizing = NoOpCloudPhotoAssetCoordinator.shared,
         fixtureImageData: Data? = nil,
         onClose: @escaping @MainActor () -> Void
     ) {
         self.viewModel = viewModel
         self.galleryViewModel = galleryViewModel
+        self.assetSynchronizer = assetSynchronizer
         self.fixtureImageData = fixtureImageData
         self.onClose = onClose
     }
@@ -93,6 +96,7 @@ public struct ProgressPhotoLifecycleView: View {
                         Task {
                             if await viewModel.importSelection(selection) {
                                 await galleryViewModel.load()
+                                await synchronizeAssets()
                             }
                         }
                     }
@@ -103,6 +107,7 @@ public struct ProgressPhotoLifecycleView: View {
                             Task {
                                 if await viewModel.importFixtureBytes(fixtureImageData) {
                                     await galleryViewModel.load()
+                                    await synchronizeAssets()
                                 }
                             }
                         }
@@ -138,6 +143,10 @@ public struct ProgressPhotoLifecycleView: View {
             } else if galleryViewModel.phase == .loaded {
                 await galleryViewModel.retryUnavailableAssets()
             }
+            await synchronizeAssets()
+            if galleryViewModel.phase == .loaded {
+                await galleryViewModel.retryUnavailableAssets()
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
@@ -146,6 +155,10 @@ public struct ProgressPhotoLifecycleView: View {
                 if galleryViewModel.phase == .failed {
                     await galleryViewModel.load()
                 } else if galleryViewModel.phase == .loaded {
+                    await galleryViewModel.retryUnavailableAssets()
+                }
+                await synchronizeAssets()
+                if galleryViewModel.phase == .loaded {
                     await galleryViewModel.retryUnavailableAssets()
                 }
             }
@@ -161,6 +174,7 @@ public struct ProgressPhotoLifecycleView: View {
                     if await viewModel.delete(pendingDelete) {
                         self.pendingDelete = nil
                         await galleryViewModel.load()
+                        await synchronizeAssets()
                     }
                 }
             }
@@ -192,6 +206,7 @@ public struct ProgressPhotoLifecycleView: View {
                         Task {
                             if await viewModel.undoLastImport() {
                                 await galleryViewModel.load()
+                                await synchronizeAssets()
                             }
                         }
                     }
@@ -214,6 +229,7 @@ public struct ProgressPhotoLifecycleView: View {
                         Task {
                             if await viewModel.retryImport() {
                                 await galleryViewModel.load()
+                                await synchronizeAssets()
                             }
                         }
                     }
@@ -226,6 +242,7 @@ public struct ProgressPhotoLifecycleView: View {
                         Task {
                             if await viewModel.retryUndo() {
                                 await galleryViewModel.load()
+                                await synchronizeAssets()
                             }
                         }
                     }
@@ -284,5 +301,9 @@ public struct ProgressPhotoLifecycleView: View {
 
     private func localized(_ key: String.LocalizationValue) -> String {
         String(localized: key, bundle: .module)
+    }
+
+    private func synchronizeAssets() async {
+        _ = try? await assetSynchronizer.synchronize()
     }
 }

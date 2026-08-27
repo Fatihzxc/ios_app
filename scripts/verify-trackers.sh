@@ -1048,7 +1048,7 @@ m37_support = {
         "HealthTrackingModules/ProgressPhotosKitTests",
     },
     ".github/workflows/ios.yml": {
-        "Targeted M3.7-M3.8 photo lifecycle and gallery tests",
+        "Targeted M3.7-M3.9 photo lifecycle, gallery, and cloud asset tests",
         "scripts/test-ios.sh --only-testing ProgressPhotosKitTests",
         "ProgressPhotoLifecycleUITests",
     },
@@ -1090,9 +1090,18 @@ for source_path in progress_photo_source_root.rglob("*.swift"):
             raise SystemExit(
                 f"M3.7 platform import {framework} escaped its named adapter: {relative}"
             )
-    for forbidden in ("import SwiftData", "import PersistenceKit", "import CloudKit"):
+    for forbidden in ("import SwiftData", "import PersistenceKit"):
         if forbidden in source:
             raise SystemExit(f"M3.7 feature source has forbidden dependency: {forbidden}")
+    if "import CloudKit" in source:
+        allowed_cloud_adapter = (
+            "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/"
+            "CloudKitPrivatePhotoAssetDatabase.swift"
+        )
+        if relative != allowed_cloud_adapter:
+            raise SystemExit(
+                f"M3.9 CloudKit import escaped its named adapter: {relative}"
+            )
     if "PHPhotoLibrary" in source or "requestAuthorization" in source:
         raise SystemExit("M3.7 system picker must not request broad Photo Library access")
 
@@ -1299,7 +1308,7 @@ m38_support = {
         'case m3PhotoGallery = "m3-photo-gallery"',
     },
     ".github/workflows/ios.yml": {
-        "Targeted M3.7-M3.8 photo lifecycle and gallery tests",
+        "Targeted M3.7-M3.9 photo lifecycle, gallery, and cloud asset tests",
         "scripts/test-ios.sh --only-testing ProgressPhotosKitTests",
         "ProgressPhotoLifecycleUITests",
     },
@@ -1389,6 +1398,387 @@ if ".m3PhotoGallery" not in fixture_group or "return" not in fixture_body:
         "M3.8 UI test fixture installation must skip CoreModels seeding for "
         ".m3PhotoGallery beside .m3ProgressPhotos"
     )
+m39_tests = {
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudPhotoAssetContractTests.swift": {
+        "testRecordContractUsesDeterministicOpaqueNameAndPrivacyAllowlist",
+        "testChecksumIsStableAndValidationRejectsSizeOrDigestMismatch",
+        "testOpaqueSyncStatePersistsQueuesKnownIDsAndChangeToken",
+        "testTemporaryStoreOwnsUploadAndDownloadCopiesUntilExplicitCleanup",
+        "testAdapterStagesDownloadIntoOwnedStorageBeforeSystemSourceDisappears",
+        "testDownloadStagingRejectsOversizedMetadataBeforeOpeningSource",
+        "testDownloadStagingBoundsActualBytesAndRejectsMetadataMismatch",
+        "testRealBoundedStagerLimitsReadRequestsAndNeverWritesMaximumPlusOneByte",
+        "fileHandleFactory:",
+        "testTemporaryStoreRecreationSweepsStaleTransferFiles",
+        "testLegacyUnscopedSyncStateRecreatesWithNilAccountIdentity",
+        "FileCloudPhotoAssetSyncStateStore",
+        "FileCloudPhotoAssetTemporaryStore",
+    },
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudPhotoAssetCoordinatorTests.swift": {
+        "testEveryUnavailableAccountStateDefersWithoutTouchingLocalAssetsOrQueue",
+        "testBackfillWaitsForServerResponseUsesPrivateZoneAndCleansUploadFile",
+        "testMatchingExistingRecordIsIdempotentAndSkipsAssetSave",
+        "testRetryableSaveUsesInjectedExponentialBackoffThenCommits",
+        "testPaginatedChangesPersistOpaqueTokenRebuildDownloadAndApplyDeletion",
+        "testExpiredChangeTokenClearsPersistedTokenAndRestartsFromNil",
+        "testInvalidDownloadDoesNotAdvanceTokenOrMutateLocalStore",
+        "testDeletionQueueTreatsMissingServerRecordAsIdempotentSuccess",
+        "testNewerSynchronizationWinsWhenOlderUploadCompletesLate",
+        "testReferencedMissingAssetRestoresFromCloudWithoutInferringDeletion",
+        "testOnlyExplicitCommittedMetadataDeletionQueuesServerDeletion",
+        "testAccountIdentityChangeResetsStateAndBackfillsNewAccount",
+        "testLegacyUnscopedFileStateResetsFailClosedAndBackfillsCurrentAccount",
+        "referenceSnapshotProvider:",
+        "deletionIntentStore:",
+        "inboundAssetJournal:",
+        "try await coordinator.synchronize()",
+        "PrivateCloudPhotoAssetDatabase",
+        "CloudPhotoAssetDatabaseError",
+    },
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/PhotoAssetStoreTests.swift": {
+        "testCloudRestoreUsesExactOpaqueIDAndRebuildsBothVariantsIdempotently",
+        "restoreCloudAsset(id:",
+        "cloudAssetBytes(id:",
+        "deleteCloudAsset(id:",
+    },
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/ProgressPhotoGalleryViewModelTests.swift": {
+        "testSuccessfulSyncReloadsExactMissingAndCorruptGalleryStatesInOpenLifecycle",
+        "ProgressPhotoAssetSyncLifecycle",
+        "comparison?.before.assetState",
+        "fullImageRequests.filter",
+    },
+    "Packages/HealthTrackingModules/Tests/PersistenceKitTests/ProgressPhotoRepositoryTests.swift": {
+        "testCommittedMetadataDeletionPersistsUntilCloudRetrySucceedsAfterRelaunch",
+        "testRepositoryCloudReferenceSnapshotIsImmutableAcrossLaterMetadataChange",
+        "testInboundCloudAssetSurvivesCoordinatorRestoreCrashAndRepositoryRelaunch",
+        "testSuccessfulInboundSyncRetainsIntentUntilMetadataReferencesAsset",
+        "testRepositoryConsumesOnlyInboundIDsMatchedByMetadataAcrossRelaunches",
+        "testMetadataDeleteSaveFailureNeverCreatesCloudDeletionIntent",
+        "testCompensatedLocalDeleteFailureClearsCloudIntentBeforeReturning",
+        "XCTAssertEqual(intentCalls.recordCalls, [])",
+        "XCTAssertEqual(intentCalls.clearCalls, [])",
+        "let persistedContext = ModelContext(container)",
+        "persistedPhotoIDs([])",
+        "pendingAfterA, [assetB]",
+        "pendingAfterARelaunch, [assetB]",
+        "cloudAssets[assetB], bytesB",
+        "FileCloudPhotoAssetDeletionIntentStore",
+        "FileCloudPhotoAssetInboundJournal",
+        "inboundAssetJournal:",
+    },
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudKitPrivatePhotoAssetDatabaseTests.swift": {
+        "testActualAdapterOwnsDownloadBeforeSystemURLDisappearsAtReturnBoundary",
+        "testActualAdapterReturnsChangingOpaqueAccountIdentity",
+        "testActualAdapterAndCoordinatorConsumeAndRemoveOneSharedOwnedTransfer",
+        "CloudKitPrivatePhotoAssetDatabase",
+        "systemDatabase:",
+        "accountIdentityProvider:",
+        "downloadStore:",
+    },
+}
+
+for relative_path, tokens in m39_tests.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.9 test file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.9 RED contracts: {absent}")
+
+m39_coordinator_tests_text = (
+    root
+    / "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudPhotoAssetCoordinatorTests.swift"
+).read_text(encoding="utf-8")
+if "synchronize(snapshot:" in m39_coordinator_tests_text:
+    raise SystemExit(
+        "M3.9 RED must exercise shipped no-argument synchronize(), not an unused overload"
+    )
+
+m39_production = {
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetDomain.swift": {
+        "CloudPhotoAssetRecordContract",
+        'zoneName = "ProgressPhotoAssetsZone"',
+        'recordType = "ProgressPhotoAsset"',
+        "CloudPhotoAssetChecksum",
+        "CloudPhotoAssetSyncState",
+        "pendingUploadAssetIDs",
+        "pendingDeletionAssetIDs",
+        "uploadedAssetIDs",
+        "changeToken",
+        "PrivateCloudPhotoAssetDatabase",
+        "CloudPhotoAssetSynchronizing",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetCoordinator.swift": {
+        "public actor CloudPhotoAssetCoordinator",
+        "database.accountStatus()",
+        "database.ensureZone",
+        "reconcile(localAssetIDs:",
+        "temporaryStore.createUploadFile",
+        "CloudPhotoAssetChecksum.validate",
+        "CloudPhotoAssetDatabaseError.changeTokenExpired",
+        "CloudPhotoAssetDatabaseError.recordNotFound",
+        "retryPolicy.delay",
+        "ensureCurrent",
+        "generation &+= 1",
+        "state.changeToken = page.changeToken",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/FileCloudPhotoAssetStores.swift": {
+        "FileCloudPhotoAssetSyncStateStore",
+        "FileCloudPhotoAssetTemporaryStore",
+        ".completeFileProtection",
+        "removeFile",
+        "NoOpCloudPhotoAssetCoordinator",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudKitPrivatePhotoAssetDatabase.swift": {
+        "@preconcurrency import CloudKit",
+        "public actor CloudKitPrivatePhotoAssetDatabase",
+        "privateCloudDatabase",
+        "CKRecordZone",
+        "CKAsset(fileURL:",
+        "recordZoneChanges(",
+        "CKServerChangeToken",
+        "requiringSecureCoding: true",
+        "retryAfterSeconds",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/AssetStore/LocalPhotoAssetStore.swift": {
+        "CloudPhotoAssetLocalStoring",
+        "cloudAssetBytes(id:",
+        "restoreCloudAsset(id:",
+        "deleteCloudAsset(id:",
+        "replacingExisting: true",
+    },
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Gallery/ProgressPhotoLifecycleView.swift": {
+        "assetSynchronizer: any CloudPhotoAssetSynchronizing",
+        "await synchronizeAssets()",
+    },
+    "App/Application/TrackerFeatureBundle.swift": {
+        "progressPhotoAssetSynchronizer",
+        "makeProgressPhotoAssetSynchronizer",
+        "guard case let .cloud(containerIdentifier, storeURL)",
+        "NoOpCloudPhotoAssetCoordinator.shared",
+        "CloudKitPrivatePhotoAssetDatabase",
+        "FileCloudPhotoAssetSyncStateStore",
+        "FileCloudPhotoAssetTemporaryStore",
+    },
+    ".github/workflows/ios.yml": {
+        "Targeted M3.7-M3.9 photo lifecycle, gallery, and cloud asset tests",
+        "scripts/test-ios.sh --only-testing ProgressPhotosKitTests",
+    },
+}
+
+for relative_path, tokens in m39_production.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.9 production file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(
+            f"{relative_path} is missing M3.9 production contracts: {absent}"
+        )
+
+m39_coordinator_path = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetCoordinator.swift"
+m39_coordinator_text = m39_coordinator_path.read_text(encoding="utf-8")
+if not any(
+    token in m39_coordinator_text
+    for token in ("temporaryStore.copyDownloadedFile", "record.stagedFileURL")
+):
+    raise SystemExit("M3.9 coordinator is missing a download consumption boundary")
+
+m39_transfer_path = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/FileCloudPhotoAssetStores.swift"
+m39_transfer_text = m39_transfer_path.read_text(encoding="utf-8")
+if not any(
+    token in m39_transfer_text
+    for token in ("copyDownloadedFile", "stageDownload")
+):
+    raise SystemExit("M3.9 temporary store is missing a download staging boundary")
+
+m39_lifecycle_path = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Gallery/ProgressPhotoLifecycleView.swift"
+m39_lifecycle_text = m39_lifecycle_path.read_text(encoding="utf-8")
+if not any(
+    token in m39_lifecycle_text
+    for token in ("await assetSynchronizer.synchronize()", "await assetSyncLifecycle.synchronize()")
+):
+    raise SystemExit("M3.9 lifecycle is missing cloud synchronization delegation")
+
+m39_domain_source = (
+    root
+    / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetDomain.swift"
+).read_text(encoding="utf-8")
+m39_field_block = m39_domain_source.split("fieldNames = [", 1)[1].split("]", 1)[0]
+m39_fields = set(re.findall(r'"([A-Za-z]+)"', m39_field_block))
+m39_allowed_fields = {"assetID", "asset", "checksum", "byteCount"}
+if m39_fields != m39_allowed_fields:
+    raise SystemExit(
+        f"M3.9 CKAsset record field allowlist changed: {sorted(m39_fields)}"
+    )
+
+m39_cloudkit_source = (
+    root
+    / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudKitPrivatePhotoAssetDatabase.swift"
+).read_text(encoding="utf-8")
+m39_record_fields = set(re.findall(r'record\["([A-Za-z]+)"\]', m39_cloudkit_source))
+if m39_record_fields != m39_allowed_fields:
+    raise SystemExit(
+        f"M3.9 CloudKit adapter persisted an unexpected field: {sorted(m39_record_fields)}"
+    )
+for forbidden_payload in ("date", "pose", "note", "filePath", "tracker", "health"):
+    if re.search(rf'record\["{forbidden_payload}"\]', m39_cloudkit_source, re.I):
+        raise SystemExit(
+            f"M3.9 CKAsset record must not contain {forbidden_payload}"
+        )
+
+# These production-quality gates activate atomically when GREEN introduces the
+# reference snapshot boundary. RED remains statically verifiable while the
+# behavior tests fail to compile on the intentionally missing contracts.
+if "CloudPhotoAssetReferenceSnapshotProviding" in m39_domain_source:
+    m39_coordinator_source = (
+        root
+        / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetCoordinator.swift"
+    ).read_text(encoding="utf-8")
+    for required in (
+        "public func synchronize()",
+        "referenceSnapshotProvider",
+        "await referenceSnapshotProvider.snapshot()",
+        "deletionIntentStore",
+        "pendingDeletionAssetIDs()",
+        "inboundJournal",
+        "recordInboundAssetID",
+        "temporaryStore.removeFile(at: record.stagedFileURL)",
+    ):
+        if required not in m39_coordinator_source:
+            raise SystemExit(
+                f"M3.9 shipped no-argument sync is missing injected quality contract: {required}"
+            )
+    if "temporaryStore.copyDownloadedFile" in m39_coordinator_source:
+        raise SystemExit(
+            "M3.9 coordinator must not copy a system-owned download after adapter return"
+        )
+    if "clearInboundAssetID" in m39_coordinator_source:
+        raise SystemExit(
+            "M3.9 coordinator must retain inbound intent until repository metadata ownership"
+        )
+
+    m39_repository_source = (
+        root
+        / "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataProgressPhotoRepository.swift"
+    ).read_text(encoding="utf-8")
+    for required in (
+        "deletionIntentStore",
+        "recordCommittedDeletion",
+        "clearCommittedDeletion",
+        "inboundAssetJournal",
+        "pendingInboundAssetIDs",
+    ):
+        if required not in m39_repository_source:
+            raise SystemExit(
+                f"M3.9 repository is missing durable cloud handshake contract: {required}"
+            )
+
+    m39_factory_source = (
+        root / "App/Application/TrackerFeatureBundle.swift"
+    ).read_text(encoding="utf-8")
+    for declaration in (
+        "let deletionIntentStore = FileCloudPhotoAssetDeletionIntentStore(",
+        "let inboundAssetJournal = FileCloudPhotoAssetInboundJournal(",
+    ):
+        if m39_factory_source.count(declaration) != 1:
+            raise SystemExit(
+                f"M3.9 app composition must create one shared provider: {declaration}"
+            )
+    for shared_argument in (
+        "deletionIntentStore: deletionIntentStore",
+        "inboundAssetJournal: inboundAssetJournal",
+    ):
+        if m39_factory_source.count(shared_argument) != 2:
+            raise SystemExit(
+                f"M3.9 repository and coordinator must receive the same provider: {shared_argument}"
+            )
+    if m39_factory_source.count(
+        "referenceSnapshotProvider: progressPhotoRepository"
+    ) != 1:
+        raise SystemExit(
+            "M3.9 shipped coordinator must receive the real repository snapshot provider"
+        )
+    transfer_declaration = (
+        "let cloudPhotoAssetTransferStore = FileCloudPhotoAssetTemporaryStore("
+    )
+    if m39_factory_source.count(transfer_declaration) != 1:
+        raise SystemExit(
+            "M3.9 app composition must create exactly one shared cloud transfer store"
+        )
+    for shared_transfer_argument in (
+        "downloadStore: cloudPhotoAssetTransferStore",
+        "temporaryStore: cloudPhotoAssetTransferStore",
+    ):
+        if m39_factory_source.count(shared_transfer_argument) != 1:
+            raise SystemExit(
+                "M3.9 adapter and coordinator must receive the same transfer store: "
+                + shared_transfer_argument
+            )
+
+    for required in (
+        "downloadStore.stageDownload(",
+        "accountIdentityProvider.accountIdentity()",
+    ):
+        if required not in m39_cloudkit_source:
+            raise SystemExit(
+                f"M3.9 actual CloudKit adapter is missing ownership/account contract: {required}"
+            )
+    if "stagedFileURL: stagedFileURL" in m39_cloudkit_source:
+        raise SystemExit(
+            "M3.9 CloudKit adapter must not return the system CKAsset URL"
+        )
+
+    m39_file_store_source = (
+        root
+        / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/FileCloudPhotoAssetStores.swift"
+    ).read_text(encoding="utf-8")
+    m39_transfer_store = m39_file_store_source.split(
+        "public final class FileCloudPhotoAssetTemporaryStore", 1
+    )[1]
+    for forbidden in (
+        "fileManager.copyItem",
+        "Data(contentsOf:",
+        "readToEnd",
+    ):
+        if forbidden in m39_transfer_store:
+            raise SystemExit(
+                f"M3.9 download staging must not use unbounded I/O: {forbidden}"
+            )
+    for required in (
+        "FileHandle",
+        "fileHandleFactory",
+        "read(upToCount: remaining + 1)",
+    ):
+        if required not in m39_transfer_store:
+            raise SystemExit(
+                f"M3.9 download staging is missing bounded streaming primitive: {required}"
+            )
+
+    m39_lifecycle_source = (
+        root
+        / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Gallery/ProgressPhotoLifecycleView.swift"
+    ).read_text(encoding="utf-8")
+    if "await assetSyncLifecycle.synchronize()" not in m39_lifecycle_source:
+        raise SystemExit(
+            "M3.9 shipped lifecycle view must delegate successful sync cache repair"
+        )
+    if "await assetSynchronizer.synchronize()" in m39_lifecycle_source:
+        raise SystemExit(
+            "M3.9 lifecycle view must not bypass the tested sync lifecycle"
+        )
+    for required in (
+        "accountIdentity",
+        "CloudPhotoAssetReferenceSnapshotProviding",
+        "CloudPhotoAssetDeletionIntentStoring",
+        "CloudPhotoAssetInboundJournaling",
+    ):
+        if required not in m39_domain_source:
+            raise SystemExit(
+                f"M3.9 cloud domain is missing persisted identity/provider contract: {required}"
+            )
 
 m32_production = {
     "Packages/HealthTrackingModules/Sources/MetricsKit/Domain/BodyMetricDomain.swift": {
@@ -2082,7 +2472,7 @@ fixture_files = {
             '"m3-bloodwork-empty-light"',
             '"m3-bloodwork-editor-dark-high-contrast"',
             '"m3-bloodwork-editor-ax5"',
-            "Targeted M3.7-M3.8 photo lifecycle and gallery tests",
+            "Targeted M3.7-M3.9 photo lifecycle, gallery, and cloud asset tests",
             "scripts/test-ios.sh --only-testing ProgressPhotosKitTests",
             '"ProgressPhotoLifecycleUITests"',
         ]
@@ -2909,6 +3299,23 @@ fixture_files = {
             "scenario == .m3PhotoGallery",
             "progressPhotoRepository: UITestProgressPhotoGalleryRepository()",
             "func fullImage(assetID:",
+            "progressPhotoAssetSynchronizer",
+            "makeProgressPhotoAssetSynchronizer",
+            "guard case let .cloud(containerIdentifier, storeURL)",
+            "NoOpCloudPhotoAssetCoordinator.shared",
+            "CloudKitPrivatePhotoAssetDatabase",
+            "FileCloudPhotoAssetSyncStateStore",
+            "FileCloudPhotoAssetTemporaryStore",
+            "let deletionIntentStore = FileCloudPhotoAssetDeletionIntentStore(",
+            "let inboundAssetJournal = FileCloudPhotoAssetInboundJournal(",
+            "deletionIntentStore: deletionIntentStore",
+            "deletionIntentStore: deletionIntentStore",
+            "inboundAssetJournal: inboundAssetJournal",
+            "inboundAssetJournal: inboundAssetJournal",
+            "referenceSnapshotProvider: progressPhotoRepository",
+            "let cloudPhotoAssetTransferStore = FileCloudPhotoAssetTemporaryStore(",
+            "downloadStore: cloudPhotoAssetTransferStore",
+            "temporaryStore: cloudPhotoAssetTransferStore",
         ]
     ),
     "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/PhotoAssetStoreTests.swift": " ".join(
@@ -2924,6 +3331,10 @@ fixture_files = {
             "testDeleteIsIdempotentAndProtectedDataFailureKeepsAssetForRetry",
             "testImportPurgesStaleStagingBeforeWritingNewProtectedAsset",
             "protectedWriteURLs",
+            "testCloudRestoreUsesExactOpaqueIDAndRebuildsBothVariantsIdempotently",
+            "restoreCloudAsset(id:",
+            "cloudAssetBytes(id:",
+            "deleteCloudAsset(id:",
         ]
     ),
     "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/PhotoAssetCleanupJournalTests.swift": " ".join(
@@ -2952,6 +3363,23 @@ fixture_files = {
             "testReconciliationSerializesAConcurrentImportAcrossSuspension",
             "testJournalAndImmediateDeleteFailureQueuesOrphanForCurrentProcessRetry",
             "testJournalAndDeleteCompensationFailureQueuesOrphanForRetry",
+            "testCommittedMetadataDeletionPersistsUntilCloudRetrySucceedsAfterRelaunch",
+            "testRepositoryCloudReferenceSnapshotIsImmutableAcrossLaterMetadataChange",
+            "testInboundCloudAssetSurvivesCoordinatorRestoreCrashAndRepositoryRelaunch",
+            "testSuccessfulInboundSyncRetainsIntentUntilMetadataReferencesAsset",
+            "testRepositoryConsumesOnlyInboundIDsMatchedByMetadataAcrossRelaunches",
+            "testMetadataDeleteSaveFailureNeverCreatesCloudDeletionIntent",
+            "testCompensatedLocalDeleteFailureClearsCloudIntentBeforeReturning",
+            "XCTAssertEqual(intentCalls.recordCalls, [])",
+            "XCTAssertEqual(intentCalls.clearCalls, [])",
+            "let persistedContext = ModelContext(container)",
+            "persistedPhotoIDs([])",
+            "pendingAfterA, [assetB]",
+            "pendingAfterARelaunch, [assetB]",
+            "cloudAssets[assetB], bytesB",
+            "FileCloudPhotoAssetDeletionIntentStore",
+            "FileCloudPhotoAssetInboundJournal",
+            "inboundAssetJournal:",
         ]
     ),
     "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/PhotoImportViewModelTests.swift": " ".join(
@@ -2991,6 +3419,10 @@ fixture_files = {
             "repository.fullImageRequests",
             "loadComparisonImages()",
             "retryUnavailableAssets()",
+            "testSuccessfulSyncReloadsExactMissingAndCorruptGalleryStatesInOpenLifecycle",
+            "ProgressPhotoAssetSyncLifecycle",
+            "comparison?.before.assetState",
+            "fullImageRequests.filter",
         ]
     ),
     "HealthTrackingAppUITests/ProgressPhotoGalleryUITests.swift": " ".join(
@@ -3073,6 +3505,11 @@ fixture_files = {
             "prepareStorage",
             "storedAssetIDs",
             "error as? PhotoAssetStoreError",
+            "CloudPhotoAssetLocalStoring",
+            "cloudAssetBytes(id:",
+            "restoreCloudAsset(id:",
+            "deleteCloudAsset(id:",
+            "replacingExisting: true",
         ]
     ),
     "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Platform/ImageIOPhotoImageProcessor.swift": " ".join(
@@ -3156,6 +3593,138 @@ fixture_files = {
             "galleryViewModel.retryUnavailableAssets()",
             "switch galleryViewModel.phase",
             "galleryViewModel.items.isEmpty",
+            "assetSynchronizer: any CloudPhotoAssetSynchronizing",
+            "assetSyncLifecycle",
+            "await assetSyncLifecycle.synchronize()",
+            "await synchronizeAssets()",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudPhotoAssetContractTests.swift": " ".join(
+        [
+            "testRecordContractUsesDeterministicOpaqueNameAndPrivacyAllowlist",
+            "testChecksumIsStableAndValidationRejectsSizeOrDigestMismatch",
+            "testOpaqueSyncStatePersistsQueuesKnownIDsAndChangeToken",
+            "testTemporaryStoreOwnsUploadAndDownloadCopiesUntilExplicitCleanup",
+            "testAdapterStagesDownloadIntoOwnedStorageBeforeSystemSourceDisappears",
+            "testDownloadStagingRejectsOversizedMetadataBeforeOpeningSource",
+            "testDownloadStagingBoundsActualBytesAndRejectsMetadataMismatch",
+            "testRealBoundedStagerLimitsReadRequestsAndNeverWritesMaximumPlusOneByte",
+            "fileHandleFactory:",
+            "testTemporaryStoreRecreationSweepsStaleTransferFiles",
+            "testLegacyUnscopedSyncStateRecreatesWithNilAccountIdentity",
+            "FileCloudPhotoAssetSyncStateStore",
+            "FileCloudPhotoAssetTemporaryStore",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudPhotoAssetCoordinatorTests.swift": " ".join(
+        [
+            "testEveryUnavailableAccountStateDefersWithoutTouchingLocalAssetsOrQueue",
+            "testBackfillWaitsForServerResponseUsesPrivateZoneAndCleansUploadFile",
+            "testMatchingExistingRecordIsIdempotentAndSkipsAssetSave",
+            "testRetryableSaveUsesInjectedExponentialBackoffThenCommits",
+            "testPaginatedChangesPersistOpaqueTokenRebuildDownloadAndApplyDeletion",
+            "testExpiredChangeTokenClearsPersistedTokenAndRestartsFromNil",
+            "testInvalidDownloadDoesNotAdvanceTokenOrMutateLocalStore",
+            "testDeletionQueueTreatsMissingServerRecordAsIdempotentSuccess",
+            "testNewerSynchronizationWinsWhenOlderUploadCompletesLate",
+            "testReferencedMissingAssetRestoresFromCloudWithoutInferringDeletion",
+            "testOnlyExplicitCommittedMetadataDeletionQueuesServerDeletion",
+            "testAccountIdentityChangeResetsStateAndBackfillsNewAccount",
+            "testLegacyUnscopedFileStateResetsFailClosedAndBackfillsCurrentAccount",
+            "referenceSnapshotProvider:",
+            "deletionIntentStore:",
+            "inboundAssetJournal:",
+            "try await coordinator.synchronize()",
+            "PrivateCloudPhotoAssetDatabase",
+            "CloudPhotoAssetDatabaseError",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudKitPrivatePhotoAssetDatabaseTests.swift": " ".join(
+        [
+            "testActualAdapterOwnsDownloadBeforeSystemURLDisappearsAtReturnBoundary",
+            "testActualAdapterReturnsChangingOpaqueAccountIdentity",
+            "testActualAdapterAndCoordinatorConsumeAndRemoveOneSharedOwnedTransfer",
+            "CloudKitPrivatePhotoAssetDatabase",
+            "systemDatabase:",
+            "accountIdentityProvider:",
+            "downloadStore:",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetDomain.swift": "\n".join(
+        [
+            'public static let fieldNames = ["assetID", "asset", "checksum", "byteCount"]',
+            'zoneName = "ProgressPhotoAssetsZone"',
+            'recordType = "ProgressPhotoAsset"',
+            "CloudPhotoAssetRecordContract",
+            "CloudPhotoAssetChecksum",
+            "CloudPhotoAssetSyncState",
+            "pendingUploadAssetIDs",
+            "pendingDeletionAssetIDs",
+            "uploadedAssetIDs",
+            "changeToken",
+            "accountIdentity",
+            "CloudPhotoAssetReferenceSnapshotProviding",
+            "CloudPhotoAssetDeletionIntentStoring",
+            "CloudPhotoAssetInboundJournaling",
+            "PrivateCloudPhotoAssetDatabase",
+            "CloudPhotoAssetSynchronizing",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetCoordinator.swift": " ".join(
+        [
+            "public actor CloudPhotoAssetCoordinator",
+            "database.accountStatus()",
+            "database.ensureZone",
+            "reconcile(localAssetIDs:",
+            "temporaryStore.createUploadFile",
+            "record.stagedFileURL",
+            "CloudPhotoAssetChecksum.validate",
+            "CloudPhotoAssetDatabaseError.changeTokenExpired",
+            "CloudPhotoAssetDatabaseError.recordNotFound",
+            "retryPolicy.delay",
+            "ensureCurrent",
+            "generation &+= 1",
+            "state.changeToken = page.changeToken",
+            "public func synchronize()",
+            "referenceSnapshotProvider",
+            "await referenceSnapshotProvider.snapshot()",
+            "deletionIntentStore",
+            "pendingDeletionAssetIDs()",
+            "inboundJournal",
+            "recordInboundAssetID",
+            "temporaryStore.removeFile(at: record.stagedFileURL)",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/FileCloudPhotoAssetStores.swift": " ".join(
+        [
+            "FileCloudPhotoAssetSyncStateStore",
+            "public final class FileCloudPhotoAssetTemporaryStore",
+            ".completeFileProtection",
+            "stageDownload",
+            "FileHandle",
+            "fileHandleFactory",
+            "read(upToCount: remaining + 1)",
+            "removeFile",
+            "NoOpCloudPhotoAssetCoordinator",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudKitPrivatePhotoAssetDatabase.swift": "\n".join(
+        [
+            "@preconcurrency import CloudKit",
+            "public actor CloudKitPrivatePhotoAssetDatabase",
+            "privateCloudDatabase",
+            "CKRecordZone",
+            "CKAsset(fileURL:",
+            "recordZoneChanges(",
+            "CKServerChangeToken",
+            "requiringSecureCoding: true",
+            "retryAfterSeconds",
+            "downloadStore.stageDownload(",
+            "accountIdentityProvider.accountIdentity()",
+            'record["assetID"]',
+            'record["asset"]',
+            'record["checksum"]',
+            'record["byteCount"]',
         ]
     ),
     "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Gallery/ProgressPhotoGalleryViewModel.swift": " ".join(
@@ -3246,6 +3815,11 @@ fixture_files = {
             "pendingCleanup.insert(row.snapshot.imageRef)",
             "public func fullImage(assetID:",
             "variant: .full",
+            "deletionIntentStore",
+            "recordCommittedDeletion",
+            "clearCommittedDeletion",
+            "inboundAssetJournal",
+            "pendingInboundAssetIDs",
         ]
     ),
     "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Resources/Localizable.xcstrings": " ".join(
@@ -3387,6 +3961,366 @@ with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     make_fixture(root)
     run(root)
+
+    cloud_domain = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetDomain.swift"
+    original_cloud_domain = cloud_domain.read_text(encoding="utf-8")
+    cloud_domain.write_text(
+        original_cloud_domain.replace('"byteCount"', '"pose"', 1),
+        encoding="utf-8",
+    )
+    run(root, "CKAsset record field allowlist changed")
+    cloud_domain.write_text(original_cloud_domain, encoding="utf-8")
+
+    cloud_adapter = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudKitPrivatePhotoAssetDatabase.swift"
+    original_cloud_adapter = cloud_adapter.read_text(encoding="utf-8")
+    cloud_adapter.write_text(
+        original_cloud_adapter.replace('record["byteCount"]', 'record["note"]', 1),
+        encoding="utf-8",
+    )
+    run(root, "CloudKit adapter persisted an unexpected field")
+    cloud_adapter.write_text(original_cloud_adapter, encoding="utf-8")
+
+    cloud_contract_tests = root / "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudPhotoAssetContractTests.swift"
+    original_cloud_contract_tests = cloud_contract_tests.read_text(encoding="utf-8")
+    cloud_contract_tests.write_text(
+        original_cloud_contract_tests.replace(
+            "testAdapterStagesDownloadIntoOwnedStorageBeforeSystemSourceDisappears",
+            "ownedDownloadRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testAdapterStagesDownloadIntoOwnedStorageBeforeSystemSourceDisappears")
+    cloud_contract_tests.write_text(original_cloud_contract_tests, encoding="utf-8")
+
+    cloud_contract_tests.write_text(
+        original_cloud_contract_tests.replace(
+            "testRealBoundedStagerLimitsReadRequestsAndNeverWritesMaximumPlusOneByte",
+            "realBoundedStagerRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testRealBoundedStagerLimitsReadRequestsAndNeverWritesMaximumPlusOneByte")
+    cloud_contract_tests.write_text(original_cloud_contract_tests, encoding="utf-8")
+
+    cloud_coordinator_tests = root / "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudPhotoAssetCoordinatorTests.swift"
+    original_cloud_coordinator_tests = cloud_coordinator_tests.read_text(encoding="utf-8")
+    cloud_coordinator_tests.write_text(
+        original_cloud_coordinator_tests.replace(
+            "testReferencedMissingAssetRestoresFromCloudWithoutInferringDeletion",
+            "referencedMissingRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testReferencedMissingAssetRestoresFromCloudWithoutInferringDeletion")
+    cloud_coordinator_tests.write_text(original_cloud_coordinator_tests, encoding="utf-8")
+
+    cloud_coordinator_tests.write_text(
+        original_cloud_coordinator_tests.replace(
+            "try await coordinator.synchronize()",
+            "try await coordinator.synchronize(snapshot: fixture)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "try await coordinator.synchronize()")
+    cloud_coordinator_tests.write_text(original_cloud_coordinator_tests, encoding="utf-8")
+
+    gallery_tests = root / "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/ProgressPhotoGalleryViewModelTests.swift"
+    original_gallery_tests = gallery_tests.read_text(encoding="utf-8")
+    gallery_tests.write_text(
+        original_gallery_tests.replace(
+            "testSuccessfulSyncReloadsExactMissingAndCorruptGalleryStatesInOpenLifecycle",
+            "openLifecycleSyncRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testSuccessfulSyncReloadsExactMissingAndCorruptGalleryStatesInOpenLifecycle")
+    gallery_tests.write_text(original_gallery_tests, encoding="utf-8")
+
+    photo_repository_tests = root / "Packages/HealthTrackingModules/Tests/PersistenceKitTests/ProgressPhotoRepositoryTests.swift"
+    original_photo_repository_tests = photo_repository_tests.read_text(encoding="utf-8")
+    photo_repository_tests.write_text(
+        original_photo_repository_tests.replace(
+            "testInboundCloudAssetSurvivesCoordinatorRestoreCrashAndRepositoryRelaunch",
+            "inboundCrashHandshakeRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testInboundCloudAssetSurvivesCoordinatorRestoreCrashAndRepositoryRelaunch")
+    photo_repository_tests.write_text(original_photo_repository_tests, encoding="utf-8")
+
+    for regression in (
+        "testSuccessfulInboundSyncRetainsIntentUntilMetadataReferencesAsset",
+        "testRepositoryConsumesOnlyInboundIDsMatchedByMetadataAcrossRelaunches",
+        "testMetadataDeleteSaveFailureNeverCreatesCloudDeletionIntent",
+        "testCompensatedLocalDeleteFailureClearsCloudIntentBeforeReturning",
+    ):
+        photo_repository_tests.write_text(
+            original_photo_repository_tests.replace(
+                regression,
+                "roundTwoRegressionRemoved",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, regression)
+        photo_repository_tests.write_text(
+            original_photo_repository_tests,
+            encoding="utf-8",
+        )
+
+    for required_evidence, weakened_evidence in (
+        (
+            "XCTAssertEqual(intentCalls.recordCalls, [])",
+            "XCTAssertEqual(intentCalls.recordCalls, [assetID])",
+        ),
+        (
+            "XCTAssertEqual(intentCalls.clearCalls, [])",
+            "XCTAssertEqual(intentCalls.clearCalls, [assetID])",
+        ),
+        (
+            "let persistedContext = ModelContext(container)",
+            "let persistedContext = context",
+        ),
+        (
+            "pendingAfterA, [assetB]",
+            "pendingAfterA, []",
+        ),
+        (
+            "pendingAfterARelaunch, [assetB]",
+            "pendingAfterARelaunch, []",
+        ),
+        (
+            "cloudAssets[assetB], bytesB",
+            "cloudAssets[assetB], Data()",
+        ),
+    ):
+        photo_repository_tests.write_text(
+            original_photo_repository_tests.replace(
+                required_evidence,
+                weakened_evidence,
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, required_evidence)
+        photo_repository_tests.write_text(
+            original_photo_repository_tests,
+            encoding="utf-8",
+        )
+
+    quality_coordinator = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudPhotoAssetCoordinator.swift"
+    original_quality_coordinator = quality_coordinator.read_text(encoding="utf-8")
+    quality_coordinator.write_text(
+        original_quality_coordinator.replace(
+            "public func synchronize()",
+            "public func synchronize(snapshot:)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 shipped no-argument sync is missing injected quality contract")
+    quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+
+    quality_repository = root / "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataProgressPhotoRepository.swift"
+    original_quality_repository = quality_repository.read_text(encoding="utf-8")
+    quality_repository.write_text(
+        original_quality_repository.replace(
+            "clearCommittedDeletion",
+            "leaveCompensatedCloudIntentPending",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 repository is missing durable cloud handshake contract")
+    quality_repository.write_text(original_quality_repository, encoding="utf-8")
+
+    quality_coordinator.write_text(
+        original_quality_coordinator.replace(
+            "recordInboundAssetID",
+            "recordInboundAssetID clearInboundAssetID",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 coordinator must retain inbound intent until repository metadata ownership")
+    quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+
+    quality_coordinator.write_text(
+        original_quality_coordinator.replace(
+            "temporaryStore.removeFile(at: record.stagedFileURL)",
+            "leaveAdapterOwnedTransferForRelaunch",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 shipped no-argument sync is missing injected quality contract")
+    quality_coordinator.write_text(original_quality_coordinator, encoding="utf-8")
+
+    quality_factory = root / "App/Application/TrackerFeatureBundle.swift"
+    original_quality_factory = quality_factory.read_text(encoding="utf-8")
+    quality_factory.write_text(
+        original_quality_factory.replace(
+            "deletionIntentStore: deletionIntentStore",
+            "deletionIntentStore: isolatedDeletionIntentStore",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 repository and coordinator must receive the same provider")
+    quality_factory.write_text(original_quality_factory, encoding="utf-8")
+
+    quality_factory.write_text(
+        original_quality_factory.replace(
+            "inboundAssetJournal: inboundAssetJournal",
+            "inboundAssetJournal: isolatedInboundAssetJournal",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 repository and coordinator must receive the same provider")
+    quality_factory.write_text(original_quality_factory, encoding="utf-8")
+
+    quality_factory.write_text(
+        original_quality_factory.replace(
+            "referenceSnapshotProvider: progressPhotoRepository",
+            "referenceSnapshotProvider: emptySnapshotProvider",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 shipped coordinator must receive the real repository snapshot provider")
+    quality_factory.write_text(original_quality_factory, encoding="utf-8")
+
+    quality_factory.write_text(
+        original_quality_factory.replace(
+            "downloadStore: cloudPhotoAssetTransferStore",
+            "downloadStore: isolatedAdapterTransferStore",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 adapter and coordinator must receive the same transfer store")
+    quality_factory.write_text(original_quality_factory, encoding="utf-8")
+
+    quality_factory.write_text(
+        original_quality_factory.replace(
+            "temporaryStore: cloudPhotoAssetTransferStore",
+            "temporaryStore: isolatedCoordinatorTransferStore",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 adapter and coordinator must receive the same transfer store")
+    quality_factory.write_text(original_quality_factory, encoding="utf-8")
+
+    quality_adapter = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/CloudKitPrivatePhotoAssetDatabase.swift"
+    original_quality_adapter = quality_adapter.read_text(encoding="utf-8")
+    quality_adapter.write_text(
+        original_quality_adapter.replace(
+            "downloadStore.stageDownload(",
+            "coordinatorStagesDownload(",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 actual CloudKit adapter is missing ownership/account contract")
+    quality_adapter.write_text(original_quality_adapter, encoding="utf-8")
+
+    quality_transfer_store = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Cloud/FileCloudPhotoAssetStores.swift"
+    original_quality_transfer_store = quality_transfer_store.read_text(encoding="utf-8")
+    quality_transfer_store.write_text(
+        original_quality_transfer_store.replace("remaining + 1", "remaining", 1),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 download staging is missing bounded streaming primitive")
+    quality_transfer_store.write_text(original_quality_transfer_store, encoding="utf-8")
+
+    quality_transfer_store.write_text(
+        original_quality_transfer_store.replace(
+            "fileHandleFactory",
+            "replacementCopier",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 download staging is missing bounded streaming primitive")
+    quality_transfer_store.write_text(original_quality_transfer_store, encoding="utf-8")
+
+    quality_transfer_store.write_text(
+        original_quality_transfer_store.replace(
+            "read(upToCount: remaining + 1)",
+            "readToEnd",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 download staging must not use unbounded I/O")
+    quality_transfer_store.write_text(original_quality_transfer_store, encoding="utf-8")
+
+    quality_lifecycle = root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Gallery/ProgressPhotoLifecycleView.swift"
+    original_quality_lifecycle = quality_lifecycle.read_text(encoding="utf-8")
+    quality_lifecycle.write_text(
+        original_quality_lifecycle.replace(
+            "await assetSyncLifecycle.synchronize()",
+            "await assetSynchronizer.synchronize()",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.9 shipped lifecycle view must delegate successful sync cache repair")
+    quality_lifecycle.write_text(original_quality_lifecycle, encoding="utf-8")
+
+    gallery_tests.write_text(
+        original_gallery_tests.replace(
+            "fullImageRequests.filter",
+            "comparisonReloadEvidenceRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "fullImageRequests.filter")
+    gallery_tests.write_text(original_gallery_tests, encoding="utf-8")
+
+    cloud_contract_tests.write_text(
+        original_cloud_contract_tests.replace(
+            "testLegacyUnscopedSyncStateRecreatesWithNilAccountIdentity",
+            "legacyIdentityRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testLegacyUnscopedSyncStateRecreatesWithNilAccountIdentity")
+    cloud_contract_tests.write_text(original_cloud_contract_tests, encoding="utf-8")
+
+    cloudkit_adapter_tests = root / "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/CloudKitPrivatePhotoAssetDatabaseTests.swift"
+    original_cloudkit_adapter_tests = cloudkit_adapter_tests.read_text(encoding="utf-8")
+    cloudkit_adapter_tests.write_text(
+        original_cloudkit_adapter_tests.replace(
+            "testActualAdapterReturnsChangingOpaqueAccountIdentity",
+            "adapterIdentityRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testActualAdapterReturnsChangingOpaqueAccountIdentity")
+    cloudkit_adapter_tests.write_text(original_cloudkit_adapter_tests, encoding="utf-8")
+
+    cloudkit_adapter_tests.write_text(
+        original_cloudkit_adapter_tests.replace(
+            "testActualAdapterAndCoordinatorConsumeAndRemoveOneSharedOwnedTransfer",
+            "sharedTransferIntegrationRegressionRemoved",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testActualAdapterAndCoordinatorConsumeAndRemoveOneSharedOwnedTransfer")
+    cloudkit_adapter_tests.write_text(original_cloudkit_adapter_tests, encoding="utf-8")
 
     bloodwork_domain_test = root / "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/BloodworkResultDomainTests.swift"
     original_bloodwork_domain_test = bloodwork_domain_test.read_text(encoding="utf-8")
