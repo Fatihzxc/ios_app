@@ -21,7 +21,12 @@ final class HealthChecksViewModelTests: XCTestCase {
                 .success(
                     HealthCheckCompletionMutation(
                         completed: completed,
-                        successor: successor
+                        successor: successor,
+                        undoToken: undoToken(
+                            original: original,
+                            completed: completed,
+                            successor: successor
+                        )
                     )
                 ),
             ]
@@ -35,7 +40,7 @@ final class HealthChecksViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.snapshots, [original])
         XCTAssertEqual(repository.completionRequests.count, 1)
 
-        await viewModel.retryCompletion()
+        await viewModel.retryCompletion(for: original)
 
         XCTAssertEqual(viewModel.mutationPhase, .saved)
         XCTAssertEqual(
@@ -67,7 +72,14 @@ final class HealthChecksViewModelTests: XCTestCase {
             with: .failure(HealthChecksRepositoryOperationError.saveFailed)
         )
         await firstTask.value
-        await viewModel.retryCompletion()
+        XCTAssertEqual(viewModel.failedCompletionID, first.id)
+        await viewModel.retryCompletion(for: second)
+
+        XCTAssertEqual(
+            repository.completionRequests,
+            [.init(id: first.id, expectedUpdatedAt: first.updatedAt)]
+        )
+        await viewModel.retryCompletion(for: first)
 
         XCTAssertEqual(
             repository.completionRequests,
@@ -75,6 +87,61 @@ final class HealthChecksViewModelTests: XCTestCase {
                 .init(id: first.id, expectedUpdatedAt: first.updatedAt),
                 .init(id: first.id, expectedUpdatedAt: first.updatedAt),
             ]
+        )
+    }
+
+    func testSuccessfulUndoRemovesSuccessorAndRestoresOriginalSnapshot() async {
+        let original = snapshot(id: uuid(531), status: .pending, updatedAt: date(40_000))
+        let completed = snapshot(id: original.id, status: .done, updatedAt: date(41_000))
+        let successor = snapshot(
+            id: uuid(532),
+            status: .pending,
+            updatedAt: date(41_000),
+            dueDate: date(50_000)
+        )
+        let restored = snapshot(id: original.id, status: .pending, updatedAt: date(42_000))
+        let token = undoToken(
+            original: original,
+            completed: completed,
+            successor: successor
+        )
+        let repository = HealthChecksRepositoryFake(
+            reminders: [original],
+            completionResults: [
+                .success(
+                    HealthCheckCompletionMutation(
+                        completed: completed,
+                        successor: successor,
+                        undoToken: token
+                    )
+                )
+            ],
+            undoResults: [.success(restored)]
+        )
+        let viewModel = HealthChecksViewModel(
+            repository: repository,
+            makeRequestID: { self.uuid(533) }
+        )
+        await viewModel.load()
+        await viewModel.complete(original)
+
+        await viewModel.undoLastCompletion()
+
+        XCTAssertEqual(repository.undoRequests, [token])
+        XCTAssertEqual(viewModel.snapshots, [restored])
+        XCTAssertEqual(viewModel.mutationPhase, .idle)
+    }
+
+    private func undoToken(
+        original: HealthCheckReminderSnapshot,
+        completed: HealthCheckReminderSnapshot,
+        successor: HealthCheckReminderSnapshot?
+    ) -> HealthCheckCompletionUndoToken {
+        HealthCheckCompletionUndoToken(
+            original: original,
+            completedUpdatedAt: completed.updatedAt,
+            successorID: successor?.id,
+            successorUpdatedAt: successor?.updatedAt
         )
     }
 
@@ -120,16 +187,20 @@ private final class HealthChecksRepositoryFake: HealthChecksRepository {
     var completionResults: [
         Result<HealthCheckCompletionMutation, HealthChecksRepositoryOperationError>
     ]
+    var undoResults: [Result<HealthCheckReminderSnapshot, Error>]
     private(set) var completionRequests: [CompletionRequest] = []
+    private(set) var undoRequests: [HealthCheckCompletionUndoToken] = []
 
     init(
         reminders: [HealthCheckReminderSnapshot],
         completionResults: [
             Result<HealthCheckCompletionMutation, HealthChecksRepositoryOperationError>
-        ]
+        ],
+        undoResults: [Result<HealthCheckReminderSnapshot, Error>] = []
     ) {
         self.reminders = reminders
         self.completionResults = completionResults
+        self.undoResults = undoResults
     }
 
     func fetchReminders() async throws -> [HealthCheckReminderSnapshot] {
@@ -162,6 +233,13 @@ private final class HealthChecksRepositoryFake: HealthChecksRepository {
             .init(id: id, expectedUpdatedAt: expectedUpdatedAt)
         )
         return try completionResults.removeFirst().get()
+    }
+
+    func undoCompletion(
+        _ token: HealthCheckCompletionUndoToken
+    ) async throws -> HealthCheckReminderSnapshot {
+        undoRequests.append(token)
+        return try undoResults.removeFirst().get()
     }
 }
 
@@ -219,6 +297,12 @@ private final class SuspendingHealthChecksRepository: HealthChecksRepository {
         return try await withCheckedThrowingContinuation { continuation in
             completionContinuation = continuation
         }
+    }
+
+    func undoCompletion(
+        _ token: HealthCheckCompletionUndoToken
+    ) async throws -> HealthCheckReminderSnapshot {
+        throw HealthChecksRepositoryOperationError.saveFailed
     }
 
     func waitUntilCompletionStarts() async {

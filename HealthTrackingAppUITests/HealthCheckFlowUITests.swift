@@ -33,6 +33,7 @@ final class HealthCheckFlowUITests: XCTestCase {
         require(identified("health-check.detail.retry", in: app)).tap()
         require(identified("health-check.detail.completed", in: app))
         require(identified("health-check.detail.successor", in: app))
+        require(identified("health-check.detail.undo", in: app))
         attachScreenshot(named: "m3-health-check-completed-light")
         require(identified("health-check.close", in: app)).tap()
 
@@ -57,6 +58,19 @@ final class HealthCheckFlowUITests: XCTestCase {
                 in: relaunched
             ),
             "Completion and its single successor must survive a new app process."
+        )
+        let relaunchedGeneralRows = relaunched.descendants(matching: .any)
+            .matching(
+                NSPredicate(
+                    format: "identifier BEGINSWITH %@ AND label CONTAINS[c] %@",
+                    "health-check.row.",
+                    "Genel"
+                )
+            )
+        XCTAssertEqual(
+            relaunchedGeneralRows.count,
+            2,
+            "Exactly one completed predecessor and one pending successor must survive."
         )
     }
 

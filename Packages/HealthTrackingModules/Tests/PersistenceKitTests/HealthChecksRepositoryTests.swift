@@ -474,6 +474,139 @@ final class HealthChecksRepositoryTests: XCTestCase {
         )
     }
 
+    func testCompletedRecurringReminderWithoutLinkCannotGenerateAnotherSuccessor() async throws {
+        let container = try ModelContainerFactory.make(for: .inMemory)
+        let context = ModelContext(container)
+        let reminderID = uuid(525)
+        let updatedAt = date(130_000)
+        context.insert(
+            reminder(
+                id: reminderID,
+                updatedAt: updatedAt,
+                recurrence: .monthly,
+                status: .done
+            )
+        )
+        try context.save()
+        let repository = SwiftDataHealthChecksRepository(
+            modelContext: context,
+            calendar: calendar("Europe/Istanbul"),
+            makeID: { self.uuid(526) }
+        )
+
+        do {
+            _ = try await repository.completeReminder(
+                id: reminderID,
+                expectedUpdatedAt: updatedAt
+            )
+            XCTFail("A completed reminder without valid retry metadata must fail closed.")
+        } catch {
+            XCTAssertEqual(
+                error as? HealthChecksRepositoryMutationError,
+                .completionRequiresPending(id: reminderID, actualStatus: .done)
+            )
+        }
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<HealthCheckReminder>()), 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<AppSetting>()), 0)
+    }
+
+    func testRecurringCompletionUndoRestoresPendingAndRemovesOnlySuccessorAndLink() async throws {
+        let container = try ModelContainerFactory.make(for: .inMemory)
+        let context = ModelContext(container)
+        let predecessorID = uuid(527)
+        let successorID = uuid(528)
+        let originalUpdatedAt = date(140_000)
+        context.insert(
+            reminder(
+                id: predecessorID,
+                updatedAt: originalUpdatedAt,
+                recurrence: .quarterly
+            )
+        )
+        context.insert(AppSetting(key: "unrelated.setting", value: "keep"))
+        try context.save()
+        var timestamps = [date(141_000), date(142_000)]
+        let repository = SwiftDataHealthChecksRepository(
+            modelContext: context,
+            calendar: calendar("Europe/Istanbul"),
+            now: { timestamps.removeFirst() },
+            makeID: { successorID }
+        )
+
+        let completion = try await repository.completeReminder(
+            id: predecessorID,
+            expectedUpdatedAt: originalUpdatedAt
+        )
+        let restored = try await repository.undoCompletion(completion.undoToken)
+
+        XCTAssertEqual(restored.id, predecessorID)
+        XCTAssertEqual(restored.status, .pending)
+        XCTAssertEqual(restored.updatedAt, date(142_000))
+        XCTAssertEqual(
+            try context.fetch(FetchDescriptor<HealthCheckReminder>()).map(\.id),
+            [predecessorID]
+        )
+        let settings = try context.fetch(FetchDescriptor<AppSetting>())
+        XCTAssertEqual(settings.map(\.key), ["unrelated.setting"])
+    }
+
+    func testUndoSaveFailureRollsBackThenExactTokenRetries() async throws {
+        let container = try ModelContainerFactory.make(for: .inMemory)
+        let context = ModelContext(container)
+        let predecessorID = uuid(529)
+        let successorID = uuid(530)
+        let originalUpdatedAt = date(150_000)
+        context.insert(
+            reminder(
+                id: predecessorID,
+                updatedAt: originalUpdatedAt,
+                recurrence: .yearly
+            )
+        )
+        try context.save()
+        var saveCount = 0
+        var timestamps = [date(151_000), date(152_000), date(153_000)]
+        let repository = SwiftDataHealthChecksRepository(
+            modelContext: context,
+            calendar: calendar("Europe/Istanbul"),
+            now: { timestamps.removeFirst() },
+            makeID: { successorID },
+            save: {
+                saveCount += 1
+                if saveCount == 2 { throw FixtureFailure.save }
+                try context.save()
+            },
+            rollback: { context.rollback() }
+        )
+        let completion = try await repository.completeReminder(
+            id: predecessorID,
+            expectedUpdatedAt: originalUpdatedAt
+        )
+
+        do {
+            _ = try await repository.undoCompletion(completion.undoToken)
+            XCTFail("The injected undo save failure must be retryable.")
+        } catch {
+            XCTAssertEqual(error as? HealthChecksRepositoryOperationError, .saveFailed)
+        }
+        let afterFailure = ModelContext(container)
+        XCTAssertEqual(
+            try afterFailure.fetch(FetchDescriptor<HealthCheckReminder>()).count,
+            2
+        )
+        XCTAssertEqual(
+            try afterFailure.fetch(FetchDescriptor<HealthCheckReminder>())
+                .first(where: { $0.id == predecessorID })?.status,
+            .done
+        )
+        XCTAssertEqual(try afterFailure.fetchCount(FetchDescriptor<AppSetting>()), 1)
+
+        let restored = try await repository.undoCompletion(completion.undoToken)
+        XCTAssertEqual(restored.status, .pending)
+        XCTAssertEqual(restored.updatedAt, date(153_000))
+        XCTAssertEqual(saveCount, 3)
+    }
+
     private func input(
         name: String,
         dueDate: Date,

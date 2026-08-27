@@ -105,6 +105,24 @@ final class HealthCheckRecurrenceEngineTests: XCTestCase {
         )
     }
 
+    func testNonGregorianCalendarFailsExplicitlyInsteadOfAssumingTwelveMonths() {
+        var nonGregorian = Calendar(identifier: .islamicUmmAlQura)
+        nonGregorian.timeZone = TimeZone(identifier: "Europe/Istanbul")!
+
+        XCTAssertThrowsError(
+            try HealthCheckRecurrenceEngine.nextDueDate(
+                after: Date(timeIntervalSinceReferenceDate: 1_000),
+                recurrence: .monthly,
+                calendar: nonGregorian
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? HealthCheckRecurrenceEngineError,
+                .unsupportedCalendar
+            )
+        }
+    }
+
     private func calendar(timeZone identifier: String) -> Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.locale = Locale(identifier: "en_US_POSIX")

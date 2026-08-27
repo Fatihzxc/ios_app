@@ -281,6 +281,32 @@ final class TodayViewModelTests: XCTestCase {
         )
     }
 
+    func testHealthCheckDueLaterTodayUsesTheSameLocalDaySemanticsAsTrackerDetail() async {
+        let dueLaterToday = TodayRepositorySnapshot.Reminder(
+            id: uuid(604),
+            title: "Genel check-up",
+            dueDate: calendar.date(
+                from: DateComponents(year: 2026, month: 8, day: 20, hour: 17)
+            )!
+        )
+        let dueTomorrow = TodayRepositorySnapshot.Reminder(
+            id: uuid(605),
+            title: "Ferritin",
+            dueDate: calendar.date(
+                from: DateComponents(year: 2026, month: 8, day: 21, hour: 0)
+            )!
+        )
+
+        await assertPrimaryAlert(
+            snapshot: makeSnapshot(healthChecks: [dueTomorrow, dueLaterToday]),
+            expected: .bloodwork(
+                title: dueLaterToday.title,
+                dueDate: dueLaterToday.dueDate
+            ),
+            additionalCount: 0
+        )
+    }
+
     func testReactiveDeloadIsRecomputedFromTheSnapshotHistory() async {
         let exerciseID = uuid(701)
         let newerDate = now.addingTimeInterval(-7 * 86_400)
