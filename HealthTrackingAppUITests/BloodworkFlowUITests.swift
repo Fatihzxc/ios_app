@@ -39,7 +39,12 @@ final class BloodworkFlowUITests: XCTestCase {
             identified("bloodwork.editor.save-error", in: app),
             "The first create failure must preserve the editor values."
         )
-        XCTAssertEqual(textField("bloodwork.editor.marker", in: app).value as? String, "Ferritin")
+        let failedMarker = textField("bloodwork.editor.marker", in: app)
+        XCTAssertEqual(failedMarker.value as? String, "Ferritin")
+        XCTAssertFalse(
+            failedMarker.isEnabled,
+            "A retry that owns an exact health-data payload must lock edited fields."
+        )
         require(identified("bloodwork.editor.retry", in: app)).tap()
 
         require(identified("bloodwork.detail.content", in: app))
@@ -140,6 +145,10 @@ final class BloodworkFlowUITests: XCTestCase {
     private func openBloodwork(in app: XCUIApplication) {
         require(identified("tab.progress", in: app)).tap()
         require(identified("root.progress", in: app))
+        require(
+            identified("health-check.history.error", in: app),
+            "Bloodwork access must remain available when health-check loading fails."
+        )
         let open = require(identified("bloodwork.open", in: app))
         makeHittable(open, in: app)
         open.tap()

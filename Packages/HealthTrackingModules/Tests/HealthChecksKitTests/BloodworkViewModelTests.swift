@@ -131,6 +131,83 @@ final class BloodworkViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.snapshots, [original])
     }
 
+    func testFailedUpdateRetryKeepsExactTargetTimestampAndInput() async throws {
+        let original = try makeSnapshot(idSuffix: 1, date: 100)
+        let editedInput = try makeInput(marker: "Ferritin", value: 31)
+        let repository = BloodworkRepositoryFake(
+            results: [original],
+            updateResults: [
+                .failure(.saveFailed),
+                .success(original),
+            ]
+        )
+        let viewModel = BloodworkViewModel(repository: repository)
+        await viewModel.load()
+
+        let firstAttemptSucceeded = await viewModel.update(original, input: editedInput)
+        XCTAssertFalse(firstAttemptSucceeded)
+        XCTAssertEqual(viewModel.editFailure, .update(id: original.id))
+
+        let retrySucceeded = await viewModel.retryEditMutation()
+        XCTAssertTrue(retrySucceeded)
+        let exactRequest = BloodworkRepositoryFake.UpdateRequest(
+            id: original.id,
+            expectedUpdatedAt: original.updatedAt,
+            input: editedInput
+        )
+        XCTAssertEqual(repository.updateRequests, [exactRequest, exactRequest])
+        XCTAssertNil(viewModel.editFailure)
+    }
+
+    func testFailedDeleteRetryCannotMoveToAnotherSelectedRecord() async throws {
+        let original = try makeSnapshot(idSuffix: 1, date: 100)
+        let another = try makeSnapshot(idSuffix: 2, date: 200)
+        let repository = BloodworkRepositoryFake(
+            results: [original, another],
+            deleteResults: [
+                .failure(.saveFailed),
+                .success(()),
+            ]
+        )
+        let viewModel = BloodworkViewModel(repository: repository)
+        await viewModel.load()
+
+        let firstAttemptSucceeded = await viewModel.delete(original)
+        XCTAssertFalse(firstAttemptSucceeded)
+        XCTAssertEqual(viewModel.editFailure, .delete(id: original.id))
+        XCTAssertNotEqual(viewModel.editFailure, .delete(id: another.id))
+
+        let retrySucceeded = await viewModel.retryEditMutation()
+        XCTAssertTrue(retrySucceeded)
+        let exactRequest = BloodworkRepositoryFake.DeleteRequest(
+            id: original.id,
+            expectedUpdatedAt: original.updatedAt
+        )
+        XCTAssertEqual(repository.deleteRequests, [exactRequest, exactRequest])
+        XCTAssertEqual(viewModel.snapshots, [another])
+        XCTAssertNil(viewModel.editFailure)
+    }
+
+    func testPreparingAnotherEditorExpiresFailedEditRetry() async throws {
+        let original = try makeSnapshot(idSuffix: 1, date: 100)
+        let editedInput = try makeInput(marker: "Ferritin", value: 31)
+        let repository = BloodworkRepositoryFake(
+            results: [original],
+            updateResults: [.failure(.saveFailed)]
+        )
+        let viewModel = BloodworkViewModel(repository: repository)
+        await viewModel.load()
+
+        let firstAttemptSucceeded = await viewModel.update(original, input: editedInput)
+        XCTAssertFalse(firstAttemptSucceeded)
+        viewModel.prepareForEditing()
+
+        XCTAssertNil(viewModel.editFailure)
+        let retrySucceeded = await viewModel.retryEditMutation()
+        XCTAssertFalse(retrySucceeded)
+        XCTAssertEqual(repository.updateRequests.count, 1)
+    }
+
     private func makeInput(
         marker: String,
         value: Double
