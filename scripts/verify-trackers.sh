@@ -5203,6 +5203,7 @@ m311_concrete_bundle_test = swift_braced_declaration(
     m311_app_test_text,
     "testConcreteBundleMutationRepositoryDrivesLaunchEditCompleteDeleteAndExplicitPermissionThroughSystemAdapter",
 ) or ""
+m311_concrete_bundle_code = swift_code_mask(m311_concrete_bundle_test)
 concrete_permission_tokens = (
     "actions.onPresentation()",
     "await actions.onRequestNotificationAuthorization()",
@@ -5211,7 +5212,7 @@ concrete_permission_tokens = (
     "XCTAssertEqual(backendSnapshot.authorizationRequestCount, 1)",
 )
 concrete_permission_positions = [
-    m311_concrete_bundle_test.find(token) for token in concrete_permission_tokens
+    m311_concrete_bundle_code.find(token) for token in concrete_permission_tokens
 ]
 if (
     any(position < 0 for position in concrete_permission_positions)
@@ -5229,13 +5230,14 @@ m311_cached_tracker_test = swift_braced_declaration(
     m311_tracker_composition_test_text,
     "testBootstrapAndRootConstructionDoNotInvokeTrackerFactoryAndFirstRouteCachesOnce",
 ) or ""
+m311_cached_tracker_code = swift_code_mask(m311_cached_tracker_test)
 for shared_health_check_contract in (
     "bundle.healthCheckNotificationComposition.repository as AnyObject",
     "=== healthChecksRepository",
     "bundle.healthChecksRepository as AnyObject",
     "bundle.healthCheckNotificationComposition.healthChecksRepository",
 ):
-    if shared_health_check_contract not in m311_cached_tracker_test:
+    if shared_health_check_contract not in m311_cached_tracker_code:
         raise SystemExit(
             "M3.11 cached tracker composition must retain the injected health-check "
             "repository beneath the exact notification-reconciling mutation surface: "
@@ -9234,6 +9236,33 @@ def mutate_scoped_token(
     path.write_text(original, encoding="utf-8")
 
 
+def mutate_scoped_token_with_in_scope_decoys(
+    root: Path,
+    path: Path,
+    original: str,
+    scope_start: int,
+    scope_body: str,
+    token: str,
+    expected: str,
+) -> None:
+    offset = scope_body.find(token)
+    if offset < 0:
+        raise AssertionError(f"M3.11 self fixture is missing scoped token {token!r}")
+    token_start = scope_start + offset
+    token_end = token_start + len(token)
+    string_decoy = token.replace("\\", "\\\\").replace('"', '\\"')
+    path.write_text(
+        original[:token_start]
+        + "m311ScopedContractRemoved\n"
+        + f"// {token}\n"
+        + f'let m311ScopedStringDecoy = "{string_decoy}"'
+        + original[token_end:],
+        encoding="utf-8",
+    )
+    run(root, expected)
+    path.write_text(original, encoding="utf-8")
+
+
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     make_fixture(root)
@@ -9646,7 +9675,7 @@ with tempfile.TemporaryDirectory() as temporary:
         "actions.onPresentation()",
         "XCTAssertEqual(actions.authorizationState, .authorized)",
     ):
-        mutate_scoped_token(
+        mutate_scoped_token_with_in_scope_decoys(
             root,
             m311_app_test,
             original_m311_app_test,
@@ -9676,7 +9705,7 @@ with tempfile.TemporaryDirectory() as temporary:
         "bundle.healthCheckNotificationComposition.repository as AnyObject",
         "bundle.healthChecksRepository as AnyObject",
     ):
-        mutate_scoped_token(
+        mutate_scoped_token_with_in_scope_decoys(
             root,
             m311_tracker_composition_test,
             original_m311_tracker_composition_test,
