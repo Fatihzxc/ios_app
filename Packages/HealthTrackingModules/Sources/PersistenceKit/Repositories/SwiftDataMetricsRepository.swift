@@ -25,6 +25,111 @@ public final class SwiftDataMetricsRepository: MetricsRepository {
         rollbackOperation = rollback ?? { modelContext.rollback() }
     }
 
+    public func fetchPostureMetrics() async throws -> [PostureMetricSnapshot] {
+        try validatedPostureRows().map(\.snapshot)
+            .sorted(by: PostureMetricOrdering.newestFirst)
+    }
+
+    public func createPostureMetric(
+        _ input: PostureMetricInput
+    ) async throws -> PostureMetricSnapshot {
+        let rows = try validatedPostureRows()
+        let id = makeID()
+        guard !rows.contains(where: { $0.model.id == id }) else {
+            throw MetricsRepositoryIntegrityError.postureMetricIDCollision(id: id)
+        }
+
+        let timestamp = now()
+        let model = PostureMetric(
+            id: id,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            date: input.date,
+            wallTestPass: input.wallTestPass,
+            symptomScore: input.symptomScore,
+            region: input.region,
+            note: input.note
+        )
+        modelContext.insert(model)
+        try saveOrRollback()
+        return try validatedPostureSnapshot(from: model)
+    }
+
+    public func updatePostureMetric(
+        id: UUID,
+        expectedUpdatedAt: Date,
+        input: PostureMetricInput
+    ) async throws -> PostureMetricSnapshot {
+        let rows = try validatedPostureRows()
+        guard let row = rows.first(where: { $0.model.id == id }) else {
+            throw MetricsRepositoryMutationError.postureMetricNotFound(id: id)
+        }
+        guard row.model.updatedAt == expectedUpdatedAt else {
+            throw MetricsRepositoryMutationError.stalePostureMetric(
+                id: id,
+                expectedUpdatedAt: expectedUpdatedAt,
+                actualUpdatedAt: row.model.updatedAt
+            )
+        }
+
+        row.model.date = input.date
+        row.model.wallTestPass = input.wallTestPass
+        row.model.symptomScore = input.symptomScore
+        row.model.region = input.region
+        row.model.note = input.note
+        row.model.updatedAt = now()
+        try saveOrRollback()
+        return try validatedPostureSnapshot(from: row.model)
+    }
+
+    public func deletePostureMetric(
+        id: UUID,
+        expectedUpdatedAt: Date
+    ) async throws {
+        let rows = try validatedPostureRows()
+        guard let row = rows.first(where: { $0.model.id == id }) else {
+            throw MetricsRepositoryMutationError.postureMetricNotFound(id: id)
+        }
+        guard row.model.updatedAt == expectedUpdatedAt else {
+            throw MetricsRepositoryMutationError.stalePostureMetric(
+                id: id,
+                expectedUpdatedAt: expectedUpdatedAt,
+                actualUpdatedAt: row.model.updatedAt
+            )
+        }
+
+        modelContext.delete(row.model)
+        try saveOrRollback()
+    }
+
+    public func upsertPostureMetric(
+        id: UUID,
+        input: PostureMetricInput
+    ) async throws -> PostureMetricSnapshot {
+        let rows = try validatedPostureRows()
+        if let existing = rows.first(where: { $0.model.id == id }) {
+            guard existing.snapshot.matches(input) else {
+                throw MetricsRepositoryIntegrityError.postureMetricUpsertCollision(id: id)
+            }
+            return existing.snapshot
+        }
+
+        let timestamp = now()
+        let model = PostureMetric(
+            id: id,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            date: input.date,
+            wallTestPass: input.wallTestPass,
+            symptomScore: input.symptomScore,
+            region: input.region,
+            note: input.note
+        )
+        modelContext.insert(model)
+        try saveOrRollback()
+        return try validatedPostureSnapshot(from: model)
+    }
+
     public func fetchBodyMetrics() async throws -> [BodyMetricSnapshot] {
         try validatedRows().map(\.snapshot)
             .sorted(by: BodyMetricOrdering.newestFirst)
@@ -161,6 +266,78 @@ public final class SwiftDataMetricsRepository: MetricsRepository {
         let snapshot: BodyMetricSnapshot
     }
 
+    private struct ValidatedPostureRow {
+        let model: PostureMetric
+        let snapshot: PostureMetricSnapshot
+    }
+
+    private func validatedPostureRows() throws -> [ValidatedPostureRow] {
+        let models: [PostureMetric]
+        do {
+            models = try modelContext.fetch(FetchDescriptor<PostureMetric>())
+        } catch {
+            throw MetricsRepositoryOperationError.loadFailed
+        }
+
+        let grouped = Dictionary(grouping: models, by: \.id)
+        if let duplicate = grouped
+            .filter({ $0.value.count > 1 })
+            .sorted(by: { $0.key.uuidString < $1.key.uuidString })
+            .first {
+            throw MetricsRepositoryIntegrityError.duplicatePostureMetricIDs(
+                id: duplicate.key,
+                count: duplicate.value.count
+            )
+        }
+
+        return try models.map { model in
+            ValidatedPostureRow(
+                model: model,
+                snapshot: try validatedPostureSnapshot(from: model)
+            )
+        }
+    }
+
+    private func validatedPostureSnapshot(
+        from model: PostureMetric
+    ) throws -> PostureMetricSnapshot {
+        let input: PostureMetricInput
+        do {
+            input = try PostureMetricInput(
+                date: model.date,
+                wallTestPass: model.wallTestPass,
+                symptomScore: model.symptomScore,
+                region: model.region,
+                note: model.note
+            )
+        } catch {
+            throw MetricsRepositoryIntegrityError.invalidPersistedPostureMetric(id: model.id)
+        }
+
+        guard input.region == model.region, input.note == model.note else {
+            throw MetricsRepositoryIntegrityError.invalidPersistedPostureMetric(id: model.id)
+        }
+        return PostureMetricSnapshot(
+            id: model.id,
+            createdAt: model.createdAt,
+            updatedAt: model.updatedAt,
+            date: input.date,
+            wallTestPass: input.wallTestPass,
+            symptomScore: input.symptomScore,
+            region: input.region,
+            note: input.note
+        )
+    }
+
+    private func saveOrRollback() throws {
+        do {
+            try saveOperation()
+        } catch {
+            rollbackOperation()
+            throw MetricsRepositoryOperationError.saveFailed
+        }
+    }
+
     private func validatedRows() throws -> [ValidatedRow] {
         let models: [BodyMetric]
         do {
@@ -216,5 +393,15 @@ public final class SwiftDataMetricsRepository: MetricsRepository {
             value: input.value,
             unit: input.unit
         )
+    }
+}
+
+private extension PostureMetricSnapshot {
+    func matches(_ input: PostureMetricInput) -> Bool {
+        date == input.date
+            && wallTestPass == input.wallTestPass
+            && symptomScore == input.symptomScore
+            && region == input.region
+            && note == input.note
     }
 }

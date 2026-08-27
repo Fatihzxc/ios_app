@@ -16,6 +16,7 @@ public struct TodayView: View {
     private let onAddMeal: @MainActor () -> Void
     private let onOpenTrackers: @MainActor () -> Void
     private let onOpenLifestyle: @MainActor () -> Void
+    private let onOpenPosture: @MainActor () -> Void
 
     public init(
         viewModel: TodayViewModel,
@@ -24,7 +25,8 @@ public struct TodayView: View {
         onPerformAction: @escaping @MainActor (TodayMainAction) -> Void = { _ in },
         onAddMeal: @escaping @MainActor () -> Void = {},
         onOpenTrackers: @escaping @MainActor () -> Void = {},
-        onOpenLifestyle: @escaping @MainActor () -> Void = {}
+        onOpenLifestyle: @escaping @MainActor () -> Void = {},
+        onOpenPosture: @escaping @MainActor () -> Void = {}
     ) {
         self.viewModel = viewModel
         self.nutritionState = nutritionState
@@ -33,6 +35,7 @@ public struct TodayView: View {
         self.onAddMeal = onAddMeal
         self.onOpenTrackers = onOpenTrackers
         self.onOpenLifestyle = onOpenLifestyle
+        self.onOpenPosture = onOpenPosture
     }
 
     public var body: some View {
@@ -178,6 +181,22 @@ public struct TodayView: View {
             .tint(AppColors.color(.accentAction, scheme: colorScheme))
             .accessibilityIdentifier("today.lifestyle.action")
             .accessibilityHint(text("today.lifestyle.action.hint"))
+
+            Button(action: onOpenPosture) {
+                Label(
+                    text("today.posture.action"),
+                    systemImage: "figure.stand"
+                )
+                .font(AppTypography.label)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.bordered)
+            .tint(AppColors.color(.accentAction, scheme: colorScheme))
+            .accessibilityIdentifier("today.posture.action")
+            .accessibilityHint(text("today.posture.action.hint"))
 
             nutritionCard(
                 state: nutritionState,

@@ -97,6 +97,10 @@ struct AppRootView: View {
                     trackerFeatureRouter.makeLifestyleEntryView(
                         onClose: { trackerEntryRoute = nil }
                     )
+                case .posture:
+                    trackerFeatureRouter.makePostureEntryView(
+                        onClose: { trackerEntryRoute = nil }
+                    )
                 }
             }
         }
@@ -143,7 +147,8 @@ struct AppRootView: View {
                 onPerformAction: performTodayAction,
                 onAddMeal: performTodayNutritionAction,
                 onOpenTrackers: performTodayTrackerAction,
-                onOpenLifestyle: performTodayLifestyleAction
+                onOpenLifestyle: performTodayLifestyleAction,
+                onOpenPosture: performTodayPostureAction
             )
         case .training:
             FoundationProgramView(
@@ -223,6 +228,11 @@ struct AppRootView: View {
         trackerEntryRoute = .lifestyle
     }
 
+    private func performTodayPostureAction() {
+        resolveTrackerFeatureBundle()
+        trackerEntryRoute = .posture
+    }
+
     private func resolveTrackerFeatureBundle() {
         guard trackerFeatureRouter == nil else { return }
         trackerFeatureRouter = makeTrackerFeatureRouter()
@@ -253,6 +263,7 @@ private struct SessionRoute: Identifiable {
 private enum TrackerEntryRoute: String, Identifiable {
     case bodyMetric
     case lifestyle
+    case posture
 
     var id: String { rawValue }
 }

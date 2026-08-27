@@ -72,6 +72,28 @@ final class OHPSafetyFlowUITests: XCTestCase {
         XCTAssertTrue(stop.label.lowercased().contains("durdur"))
         XCTAssertEqual(
             require(
+                app.staticTexts["medical.disclaimer.l1"],
+                "The permanent medical disclaimer must remain independently accessible."
+            ).label,
+            "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir."
+        )
+        let levelTwo = require(
+            app.staticTexts["medical.safety.l2"],
+            "The current OHP symptom must publish the event-triggered stop notice."
+        ).label
+        XCTAssertTrue(levelTwo.hasPrefix("Hareketi durdur."))
+        XCTAssertTrue(levelTwo.lowercased().contains("sağlık profesyoneli"))
+        require(
+            app.descendants(matching: .any)["session.ohp.journal.error"],
+            "A journal write failure must be visible without removing the safety stop."
+        )
+        tap("session.ohp.journal.retry", in: app)
+        require(
+            app.descendants(matching: .any)["session.ohp.journal.recorded"],
+            "Retry must complete the same stable symptom event."
+        )
+        XCTAssertEqual(
+            require(
                 app.staticTexts["session.exercise.name"],
                 "The existing safe alternative must replace only the OHP card."
             ).label,

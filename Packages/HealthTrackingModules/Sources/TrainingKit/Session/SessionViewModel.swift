@@ -12,10 +12,12 @@ public final class SessionViewModel {
     public private(set) var setSaveState: SessionSetSaveState = .idle
     public private(set) var recommendationReason: SessionRecommendationReason = .noPrefill
     public private(set) var ohpSafetyState: SessionOHPSafetyState = .notRequired
+    public private(set) var symptomJournalState: SymptomJournalState = .idle
     public private(set) var deloadState: SessionDeloadState = .notRequired
     public private(set) var isDeleteConfirmationPresented = false
     public private(set) var summaryRecovery: Int?
     public private(set) var summaryNote = ""
+    public let symptomSafetyPresentation: TrainingSymptomSafetyPresentation?
 
     @ObservationIgnored
     private let repository: any TrainingRepository
@@ -27,6 +29,8 @@ public final class SessionViewModel {
     private let now: @MainActor () -> Date
     @ObservationIgnored
     private let haptics: TrainingHapticController?
+    @ObservationIgnored
+    private let symptomEventClient: any SymptomEventClient
     @ObservationIgnored
     private var pendingSetRequest: SetLogSaveRequest?
     @ObservationIgnored
@@ -51,13 +55,17 @@ public final class SessionViewModel {
         repository: any TrainingRepository,
         calendar: Calendar = .current,
         now: @escaping @MainActor () -> Date = { .now },
-        haptics: TrainingHapticController? = nil
+        haptics: TrainingHapticController? = nil,
+        symptomEventClient: any SymptomEventClient = NoOpSymptomEventClient.shared,
+        symptomSafetyPresentation: TrainingSymptomSafetyPresentation? = nil
     ) {
         self.repository = repository
         coordinator = SessionCoordinator(repository: repository)
         self.calendar = calendar
         self.now = now
         self.haptics = haptics
+        self.symptomEventClient = symptomEventClient
+        self.symptomSafetyPresentation = symptomSafetyPresentation
     }
 
     public func start(workoutDayID: UUID) async {
@@ -67,6 +75,7 @@ public final class SessionViewModel {
         setSaveState = .idle
         recommendationReason = .noPrefill
         ohpSafetyState = .notRequired
+        symptomJournalState = .idle
         deloadState = .notRequired
         isDeleteConfirmationPresented = false
         summaryRecovery = nil
@@ -122,6 +131,17 @@ public final class SessionViewModel {
                 )
             )
             configureDraft()
+
+            if session.ohpSymptomResponse == .symptomsPresent,
+               let occurredAt = session.ohpSymptomCheckedAt {
+                await recordSymptomEvent(
+                    SymptomJournalEvent(
+                        id: session.id,
+                        occurredAt: occurredAt,
+                        source: .overheadPressCurrentSymptom
+                    )
+                )
+            }
 
             if existing == nil || source != .stored {
                 await persistProgress(progress)
@@ -239,10 +259,11 @@ public final class SessionViewModel {
             return
         }
         do {
+            let reportedAt = now()
             let updatedCurrent = try await coordinator.recordOHPSymptomResponse(
                 sessionID: presentation.session.id,
                 response: .symptomsPresent,
-                at: now()
+                at: reportedAt
             )
             replaceActiveSession(updatedCurrent)
             let previous = latestCompletedOHPHistory?.session
@@ -251,12 +272,24 @@ public final class SessionViewModel {
                 previousSession: previous
             )
             configureDraft()
+            await recordSymptomEvent(
+                SymptomJournalEvent(
+                    id: updatedCurrent.id,
+                    occurredAt: updatedCurrent.ohpSymptomCheckedAt ?? reportedAt,
+                    source: .overheadPressCurrentSymptom
+                )
+            )
         } catch {
             haptics?.handle(.repositoryError)
             state = .failed(.ohpSafety)
             currentSetDraft = nil
             currentVariantOptions = []
         }
+    }
+
+    public func retrySymptomJournal() async {
+        guard case let .failed(event) = symptomJournalState else { return }
+        await recordSymptomEvent(event)
     }
 
     public func respondToDeload(_ action: SessionDeloadAction) async {
@@ -609,6 +642,19 @@ public final class SessionViewModel {
 
     private func nonScheduledWeek(_ week: Int) -> Int {
         week.isMultiple(of: 5) ? week + 1 : week
+    }
+
+    private func recordSymptomEvent(_ event: SymptomJournalEvent) async {
+        if case .recording = symptomJournalState { return }
+        symptomJournalState = .recording(event: event)
+        do {
+            try await symptomEventClient.record(event)
+            guard symptomJournalState == .recording(event: event) else { return }
+            symptomJournalState = .recorded(event: event)
+        } catch {
+            guard symptomJournalState == .recording(event: event) else { return }
+            symptomJournalState = .failed(event: event)
+        }
     }
 
     private func prepareOHPSafety(

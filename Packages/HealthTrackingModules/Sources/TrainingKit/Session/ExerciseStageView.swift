@@ -184,18 +184,64 @@ public struct ExerciseStageView: View {
                         systemImage: "hand.raised.fill",
                         style: .danger
                     )
+                    .accessibilityIdentifier("session.ohp.stop")
                     Text(localized("session.ohp.stop.message"))
                         .font(AppTypography.body)
                         .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(localized("session.ohp.medicalDisclaimer"))
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
-                        .fixedSize(horizontal: false, vertical: true)
+                    if let safety = viewModel.symptomSafetyPresentation {
+                        Text(safety.disclaimer)
+                            .font(AppTypography.caption)
+                            .foregroundStyle(
+                                AppColors.color(.inkSecondary, scheme: colorScheme)
+                            )
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("medical.disclaimer.l1")
+                        Text(safety.levelTwoMessage)
+                            .font(AppTypography.body)
+                            .foregroundStyle(AppColors.color(.stateDanger, scheme: colorScheme))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("medical.safety.l2")
+                    }
+                    symptomJournalStatus
                 }
             }
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    @ViewBuilder
+    private var symptomJournalStatus: some View {
+        switch viewModel.symptomJournalState {
+        case .idle:
+            EmptyView()
+        case .recording:
+            HStack(spacing: AppSpacing.small) {
+                ProgressView()
+                Text(localized("session.ohp.journal.recording"))
+            }
             .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("session.ohp.stop")
+            .accessibilityIdentifier("session.ohp.journal.recording")
+        case .recorded:
+            Text(localized("session.ohp.journal.recorded"))
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColors.color(.stateSuccess, scheme: colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("session.ohp.journal.recorded")
+        case .failed:
+            VStack(alignment: .leading, spacing: AppSpacing.small) {
+                Text(localized("session.ohp.journal.error"))
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColors.color(.stateDanger, scheme: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("session.ohp.journal.error")
+                Button(localized("session.ohp.journal.retry")) {
+                    Task { await viewModel.retrySymptomJournal() }
+                }
+                .buttonStyle(.bordered)
+                .frame(minHeight: 52)
+                .accessibilityIdentifier("session.ohp.journal.retry")
+            }
         }
     }
 

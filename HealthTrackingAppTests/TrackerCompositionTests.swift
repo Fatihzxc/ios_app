@@ -80,6 +80,33 @@ private final class TrackerLifestyleRepositoryStub: LifestyleRepository {
 
 @MainActor
 private final class TrackerMetricsRepositoryStub: MetricsRepository {
+    func fetchPostureMetrics() async throws -> [PostureMetricSnapshot] { [] }
+
+    func createPostureMetric(
+        _ input: PostureMetricInput
+    ) async throws -> PostureMetricSnapshot {
+        throw StubFailure.unexpectedMutation
+    }
+
+    func updatePostureMetric(
+        id: UUID,
+        expectedUpdatedAt: Date,
+        input: PostureMetricInput
+    ) async throws -> PostureMetricSnapshot {
+        throw StubFailure.unexpectedMutation
+    }
+
+    func deletePostureMetric(id: UUID, expectedUpdatedAt: Date) async throws {
+        throw StubFailure.unexpectedMutation
+    }
+
+    func upsertPostureMetric(
+        id: UUID,
+        input: PostureMetricInput
+    ) async throws -> PostureMetricSnapshot {
+        throw StubFailure.unexpectedMutation
+    }
+
     func fetchBodyMetrics() async throws -> [BodyMetricSnapshot] { [] }
 
     func createBodyMetrics(
