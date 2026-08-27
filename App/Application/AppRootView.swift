@@ -66,6 +66,10 @@ struct AppRootView: View {
     @State private var nutritionQuickAddIntent: NutritionQuickAddIntent?
     @State private var trackerFeatureRouter: (any TrackerFeatureRouting)?
     @State private var trackerEntryRoute: TrackerEntryRoute?
+    #if DEBUG
+    @StateObject private var notificationAuthorizationEvidence =
+        AppUITestLaunchConfiguration.notificationAuthorizationEvidence
+    #endif
 
     var body: some View {
         Group {
@@ -92,6 +96,16 @@ struct AppRootView: View {
                     .frame(width: 1, height: 1)
                     .accessibilityIdentifier("today.performance.breakdown")
                     .accessibilityValue(evidence)
+                    .allowsHitTesting(false)
+            }
+            if exposesNotificationAuthorizationEvidence {
+                Text(String(notificationAuthorizationEvidence.requestCount))
+                    .font(.system(size: 1))
+                    .foregroundStyle(.clear)
+                    .frame(width: 1, height: 1)
+                    .accessibilityIdentifier(
+                        "health-check.notifications.permission.request-count"
+                    )
                     .allowsHitTesting(false)
             }
             #endif
@@ -144,7 +158,11 @@ struct AppRootView: View {
                 case .healthChecks:
                     trackerFeatureRouter.makeHealthCheckListView(
                         onCommittedMutation: {
-                            Task { await todayViewModel.load() }
+                            Task {
+                                try? await trackerFeatureRouter
+                                    .reconcileHealthCheckNotificationsAfterCommittedMutation()
+                                await todayViewModel.load()
+                            }
                         },
                         onClose: { trackerEntryRoute = nil }
                     )
@@ -344,6 +362,14 @@ struct AppRootView: View {
     private var exposesLaunchPerformanceEvidence: Bool {
         #if DEBUG
         AppUITestLaunchConfiguration.resolve()?.exposesLaunchPerformanceEvidence == true
+        #else
+        false
+        #endif
+    }
+
+    private var exposesNotificationAuthorizationEvidence: Bool {
+        #if DEBUG
+        AppUITestLaunchConfiguration.resolve()?.scenario == .m3HealthChecks
         #else
         false
         #endif

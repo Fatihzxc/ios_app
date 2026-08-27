@@ -693,6 +693,7 @@ from pathlib import Path
 path = Path(__import__('sys').argv[1])
 target = '''        .target(
             name: "NotificationsKit",
+            resources: [.process("Resources")],
             swiftSettings: strictConcurrency
         ),
 '''

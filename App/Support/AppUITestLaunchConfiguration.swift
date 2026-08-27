@@ -2,6 +2,15 @@ import Foundation
 import SwiftUI
 
 #if DEBUG
+@MainActor
+final class NotificationAuthorizationUITestEvidence: ObservableObject {
+    @Published private(set) var requestCount = 0
+
+    func recordRequest() {
+        requestCount += 1
+    }
+}
+
 enum AppUITestScenario: String {
     case seeded
     case emptyOnce = "empty-once"
@@ -49,6 +58,18 @@ struct AppUITestLaunchConfiguration {
     static let launchPerformanceEvidenceFlag = "-ui-test-launch-performance-evidence"
     static let medicalSafetyFirstUseEvidenceFlag =
         "-ui-test-medical-safety-first-use-evidence"
+    static let notificationAuthorizationRequestCountIdentifier =
+        "health-check.notifications.permission.request-count"
+    @MainActor static let notificationAuthorizationEvidence =
+        NotificationAuthorizationUITestEvidence()
+    @MainActor static var notificationAuthorizationRequestCount: Int {
+        notificationAuthorizationEvidence.requestCount
+    }
+
+    @MainActor
+    static func recordNotificationAuthorizationRequest() {
+        notificationAuthorizationEvidence.recordRequest()
+    }
 
     enum Appearance: String {
         case light

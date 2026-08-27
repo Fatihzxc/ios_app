@@ -3,6 +3,20 @@ import Foundation
 import HealthSafetyKit
 import SwiftUI
 
+struct HealthCheckNotificationPermissionGate: Equatable, Sendable {
+    private(set) var isDisabled = false
+
+    mutating func beginRequest() -> Bool {
+        guard !isDisabled else { return false }
+        isDisabled = true
+        return true
+    }
+
+    mutating func completeRequest(allowsRetry: Bool) {
+        isDisabled = !allowsRetry
+    }
+}
+
 @MainActor
 public struct HealthCheckListView: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -10,21 +24,36 @@ public struct HealthCheckListView: View {
     private let calendar: Calendar
     private let now: @MainActor () -> Date
     private let onCommittedMutation: @MainActor () -> Void
+    private let onNotificationPermissionPresentation: @MainActor () -> Void
+    private let onNotificationPermissionDismissal: @MainActor () -> Void
+    private let onRequestNotificationAuthorization: @MainActor () async -> Bool
     private let onClose: @MainActor () -> Void
 
     @State private var selectedID: UUID?
+    @State private var notificationPermissionGate =
+        HealthCheckNotificationPermissionGate()
 
     public init(
         viewModel: HealthChecksViewModel,
         calendar: Calendar,
         now: @escaping @MainActor () -> Date = { .now },
         onCommittedMutation: @escaping @MainActor () -> Void = {},
+        onNotificationPermissionPresentation: @escaping @MainActor () -> Void = {},
+        onNotificationPermissionDismissal: @escaping @MainActor () -> Void = {},
+        onRequestNotificationAuthorization: @escaping @MainActor () async -> Bool = {
+            false
+        },
         onClose: @escaping @MainActor () -> Void
     ) {
         self.viewModel = viewModel
         self.calendar = calendar
         self.now = now
         self.onCommittedMutation = onCommittedMutation
+        self.onNotificationPermissionPresentation =
+            onNotificationPermissionPresentation
+        self.onNotificationPermissionDismissal = onNotificationPermissionDismissal
+        self.onRequestNotificationAuthorization =
+            onRequestNotificationAuthorization
         self.onClose = onClose
     }
 
@@ -56,6 +85,8 @@ public struct HealthCheckListView: View {
                 await viewModel.load()
             }
         }
+        .onAppear(perform: onNotificationPermissionPresentation)
+        .onDisappear(perform: onNotificationPermissionDismissal)
     }
 
     @ViewBuilder
@@ -77,6 +108,19 @@ public struct HealthCheckListView: View {
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
                     .accessibilityIdentifier("health-check.list.loaded")
+                Button(localized("health-check.notifications.permission")) {
+                    guard notificationPermissionGate.beginRequest() else { return }
+                    Task {
+                        let allowsRetry = await onRequestNotificationAuthorization()
+                        notificationPermissionGate.completeRequest(
+                            allowsRetry: allowsRetry
+                        )
+                    }
+                }
+                .buttonStyle(.bordered)
+                .frame(minHeight: 44)
+                .disabled(notificationPermissionGate.isDisabled)
+                .accessibilityIdentifier("health-check.notifications.permission")
                 if viewModel.snapshots.isEmpty {
                     AppCard {
                         Text(localized("health-check.empty"))

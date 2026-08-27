@@ -2,6 +2,10 @@ import SwiftUI
 
 @MainActor
 protocol TrackerFeatureRouting: AnyObject {
+    func reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent() async throws
+    func reconcileHealthCheckNotificationsAfterCommittedMutation() async throws
+    func requestHealthCheckNotificationAuthorizationFromExplicitUserAction() async
+
     func makeBodyMetricEntryView(
         onClose: @escaping @MainActor () -> Void
     ) -> AnyView

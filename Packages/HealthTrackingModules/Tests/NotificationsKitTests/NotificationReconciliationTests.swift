@@ -228,6 +228,61 @@ final class NotificationReconciliationTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(snapshot.pending[desired.identifier]).repeats)
     }
 
+    func testDuplicateOwnedPendingIdentifiersFailClosedToOneCanonicalRequest() async throws {
+        let reminderID = try XCTUnwrap(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000397")
+        )
+        let dueDate = Date(timeIntervalSince1970: 1_804_060_800)
+        let descriptor = HealthCheckNotificationDescriptor(
+            reminderID: reminderID,
+            dueDate: dueDate,
+            isEligible: true
+        )
+        let desired = try XCTUnwrap(
+            HealthCheckNotificationPlanner().request(for: descriptor)
+        )
+        let staleDuplicate = NotificationRequestValue(
+            identifier: desired.identifier,
+            title: desired.title,
+            body: desired.body,
+            deliveryDate: desired.deliveryDate.addingTimeInterval(-60),
+            userInfo: desired.userInfo,
+            repeats: true
+        )
+        let center = DuplicatePendingNotificationCenterFake(pending: [
+            PendingNotificationRequestValue(
+                identifier: staleDuplicate.identifier,
+                request: staleDuplicate
+            ),
+            PendingNotificationRequestValue(
+                identifier: desired.identifier,
+                request: desired
+            ),
+        ])
+        let reconciler = HealthCheckNotificationReconciler(
+            center: center,
+            now: { dueDate.addingTimeInterval(-120) }
+        )
+
+        let result = try await reconciler.reconcile([descriptor])
+        let snapshot = await center.snapshot()
+
+        XCTAssertEqual(result, .converged(added: 1, removedPending: 1, removedDelivered: 0))
+        XCTAssertEqual(snapshot.operations, [
+            .authorizationStatus,
+            .pendingRequests,
+            .deliveredRequestIdentifiers,
+            .removePending([desired.identifier]),
+            .add(desired),
+        ])
+        XCTAssertEqual(snapshot.pending, [
+            PendingNotificationRequestValue(
+                identifier: desired.identifier,
+                request: desired
+            ),
+        ])
+    }
+
     func testCancellationAfterSuspendedSystemReadPreventsCleanupAndAdds() async throws {
         let fixture = try makeReconciliationFixture()
         let center = NotificationCenterFake(
@@ -389,6 +444,74 @@ final class NotificationReconciliationTests: XCTestCase {
             removedPendingIDs: removedPendingIDs,
             removedDeliveredIDs: removedDeliveredIDs
         )
+    }
+}
+
+private actor DuplicatePendingNotificationCenterFake: NotificationCenterClient {
+    enum Operation: Equatable, Sendable {
+        case authorizationStatus
+        case pendingRequests
+        case deliveredRequestIdentifiers
+        case removePending([String])
+        case removeDelivered([String])
+        case add(NotificationRequestValue)
+        case requestAuthorization
+    }
+
+    struct Snapshot: Sendable {
+        let pending: [PendingNotificationRequestValue]
+        let operations: [Operation]
+    }
+
+    private var pending: [PendingNotificationRequestValue]
+    private var operations: [Operation] = []
+
+    init(pending: [PendingNotificationRequestValue]) {
+        self.pending = pending
+    }
+
+    func authorizationStatus() async throws -> NotificationAuthorizationStatus {
+        operations.append(.authorizationStatus)
+        return .authorized
+    }
+
+    func pendingRequests() async throws -> [PendingNotificationRequestValue] {
+        operations.append(.pendingRequests)
+        return pending
+    }
+
+    func deliveredRequestIdentifiers() async throws -> Set<String> {
+        operations.append(.deliveredRequestIdentifiers)
+        return []
+    }
+
+    func removePendingRequests(withIdentifiers identifiers: [String]) async throws {
+        operations.append(.removePending(identifiers))
+        let identifiers = Set(identifiers)
+        pending.removeAll { identifiers.contains($0.identifier) }
+    }
+
+    func removeDeliveredRequests(withIdentifiers identifiers: [String]) async throws {
+        operations.append(.removeDelivered(identifiers))
+    }
+
+    func add(_ request: NotificationRequestValue) async throws {
+        operations.append(.add(request))
+        pending.append(
+            PendingNotificationRequestValue(
+                identifier: request.identifier,
+                request: request
+            )
+        )
+    }
+
+    func requestAuthorization() async throws -> Bool {
+        operations.append(.requestAuthorization)
+        return false
+    }
+
+    func snapshot() -> Snapshot {
+        Snapshot(pending: pending, operations: operations)
     }
 }
 

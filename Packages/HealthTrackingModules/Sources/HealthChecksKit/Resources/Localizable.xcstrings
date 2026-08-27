@@ -38,6 +38,7 @@
     "health-check.history.heading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Sağlık kontrolü geçmişi" } } } },
     "health-check.list.loaded" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Sağlık kontrolleri yüklendi." } } } },
     "health-check.load.error" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Sağlık kontrolleri yüklenemedi." } } } },
+    "health-check.notifications.permission" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Hatırlatma bildirimlerine izin ver" } } } },
     "health-check.status.done" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yapıldı" } } } },
     "health-check.status.due" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Zamanı geldi" } } } },
     "health-check.status.pending" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Bekliyor" } } } },

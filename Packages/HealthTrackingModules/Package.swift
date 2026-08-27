@@ -69,6 +69,7 @@ let package = Package(
         ),
         .target(
             name: "NotificationsKit",
+            resources: [.process("Resources")],
             swiftSettings: strictConcurrency
         ),
         .target(

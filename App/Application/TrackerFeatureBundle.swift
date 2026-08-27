@@ -2,11 +2,43 @@ import CoreModels
 import Foundation
 import HealthChecksKit
 import MetricsKit
+import NotificationsKit
 import PersistenceKit
 import ProgressPhotosKit
 import SleepMoodKit
 import SwiftData
 import SwiftUI
+
+@MainActor
+struct HealthCheckListNotificationActions {
+    private let controller: HealthCheckNotificationAuthorizationController
+
+    init(controller: HealthCheckNotificationAuthorizationController) {
+        self.controller = controller
+    }
+
+    var authorizationState: HealthCheckNotificationAuthorizationState {
+        controller.state
+    }
+
+    func onPresentation() {
+        controller.beginPresentation()
+    }
+
+    func onDismissal() {
+        controller.dismiss()
+    }
+
+    func onRequestNotificationAuthorization() async -> Bool {
+        #if DEBUG
+        if AppUITestLaunchConfiguration.resolve()?.scenario == .m3HealthChecks {
+            AppUITestLaunchConfiguration.recordNotificationAuthorizationRequest()
+        }
+        #endif
+        await controller.requestFromExplicitUserAction()
+        return controller.state == .failed
+    }
+}
 
 @MainActor
 final class TrackerFeatureBundle: TrackerFeatureRouting {
@@ -16,6 +48,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
     let bloodworkRepository: any BloodworkRepository
     let progressPhotoRepository: any ProgressPhotoRepository
     let progressPhotoAssetSynchronizer: any CloudPhotoAssetSynchronizing
+    let healthCheckNotificationComposition: HealthCheckNotificationComposition
     let bodyMetricViewModel: BodyMetricViewModel
     let postureViewModel: PostureViewModel
     let lifestyleViewModel: LifestyleViewModel
@@ -35,12 +68,45 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         progressPhotoRepository: any ProgressPhotoRepository = NoOpProgressPhotoRepository.shared,
         progressPhotoAssetSynchronizer: any CloudPhotoAssetSynchronizing = NoOpCloudPhotoAssetCoordinator.shared,
         progressPhotoFixtureData: Data? = nil,
+        notificationCenter: any NotificationCenterClient =
+            SystemNotificationCenterAdapter(),
+        healthCheckNotificationComposition: HealthCheckNotificationComposition? = nil,
         calendar: Calendar,
         now: @escaping @MainActor () -> Date = { .now }
     ) {
         repository = metricsRepository
         self.lifestyleRepository = lifestyleRepository
-        self.healthChecksRepository = healthChecksRepository
+        let notificationComposition: HealthCheckNotificationComposition
+        if let healthCheckNotificationComposition {
+            notificationComposition = healthCheckNotificationComposition
+        } else {
+            let reconciler = HealthCheckNotificationReconciler(
+                center: notificationCenter
+            )
+            let authorization = HealthCheckNotificationAuthorizationController(
+                center: notificationCenter
+            )
+            notificationComposition = HealthCheckNotificationComposition(
+                repository: healthChecksRepository,
+                reconciler: reconciler,
+                authorizationController: authorization,
+                notificationCenter: notificationCenter
+            )
+        }
+        self.healthCheckNotificationComposition = notificationComposition
+        let lifecycleCoordinator: HealthCheckNotificationLifecycleCoordinator =
+            notificationComposition.lifecycleCoordinator
+        let notificationRepository: NotificationReconcilingHealthChecksRepository =
+            notificationComposition.healthChecksRepository
+        _ = lifecycleCoordinator
+        let resolvedHealthChecksRepository: any HealthChecksRepository
+        if ObjectIdentifier(healthChecksRepository)
+            == ObjectIdentifier(notificationComposition.repository) {
+            resolvedHealthChecksRepository = notificationRepository
+        } else {
+            resolvedHealthChecksRepository = healthChecksRepository
+        }
+        self.healthChecksRepository = resolvedHealthChecksRepository
         self.bloodworkRepository = bloodworkRepository
         self.progressPhotoRepository = progressPhotoRepository
         self.progressPhotoAssetSynchronizer = progressPhotoAssetSynchronizer
@@ -50,6 +116,7 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         bodyMetricViewModel = BodyMetricViewModel(repository: metricsRepository)
         postureViewModel = PostureViewModel(repository: metricsRepository)
         lifestyleViewModel = LifestyleViewModel(repository: lifestyleRepository)
+        let healthChecksRepository = resolvedHealthChecksRepository
         healthChecksViewModel = HealthChecksViewModel(repository: healthChecksRepository)
         bloodworkViewModel = BloodworkViewModel(repository: bloodworkRepository)
         progressPhotoImportViewModel = ProgressPhotoImportViewModel(
@@ -100,15 +167,48 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         onCommittedMutation: @escaping @MainActor () -> Void,
         onClose: @escaping @MainActor () -> Void
     ) -> AnyView {
-        AnyView(
+        let notificationActions = makeHealthCheckListNotificationActions(
+            onCommittedMutation
+        )
+        return AnyView(
             HealthCheckListView(
                 viewModel: healthChecksViewModel,
                 calendar: calendar,
                 now: now,
                 onCommittedMutation: onCommittedMutation,
+                onNotificationPermissionPresentation:
+                    notificationActions.onPresentation,
+                onNotificationPermissionDismissal:
+                    notificationActions.onDismissal,
+                onRequestNotificationAuthorization:
+                    notificationActions.onRequestNotificationAuthorization,
                 onClose: onClose
             )
         )
+    }
+
+    func makeHealthCheckListNotificationActions(
+        _ onCommittedMutation: @escaping @MainActor () -> Void
+    ) -> HealthCheckListNotificationActions {
+        _ = onCommittedMutation
+        return HealthCheckListNotificationActions(
+            controller: healthCheckNotificationComposition.authorizationController
+        )
+    }
+
+    func reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent() async throws {
+        _ = try await healthCheckNotificationComposition.lifecycleCoordinator
+            .reconcileAfterFirstMeaningfulTodayContent()
+    }
+
+    func reconcileHealthCheckNotificationsAfterCommittedMutation() async throws {
+        try await healthCheckNotificationComposition.lifecycleCoordinator
+            .reconcileAfterHealthCheckMutation()
+    }
+
+    func requestHealthCheckNotificationAuthorizationFromExplicitUserAction() async {
+        await healthCheckNotificationComposition.authorizationController
+            .requestFromExplicitUserAction()
     }
 
     func makeBloodworkListView(
@@ -168,17 +268,29 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
 enum DefaultTrackerFeatureFactory {
     static func make(
         environment: AppEnvironment,
-        modelContext: ModelContext
+        modelContext: ModelContext,
+        healthCheckNotificationCenter: any NotificationCenterClient =
+            SystemNotificationCenterAdapter(),
+        healthCheckNotificationComposition: HealthCheckNotificationComposition? = nil
     ) -> any TrackerFeatureRouting {
         let calendar = AppDomainContext.makeCalendar()
         let now: @MainActor () -> Date = { AppDomainContext.now() }
         let metricsRepository = SwiftDataMetricsRepository(modelContext: modelContext)
         let lifestyleRepository = SwiftDataLifestyleRepository(modelContext: modelContext)
-        let healthChecksRepository = SwiftDataHealthChecksRepository(
+        let baseHealthChecksRepository = SwiftDataHealthChecksRepository(
             modelContext: modelContext,
             calendar: calendar,
             now: now
         )
+        let resolvedHealthCheckNotificationComposition =
+            healthCheckNotificationComposition
+            ?? HealthCheckNotificationComposition(
+                repository: baseHealthChecksRepository,
+                notificationCenter: healthCheckNotificationCenter,
+                now: { .now }
+            )
+        let healthChecksRepository = resolvedHealthCheckNotificationComposition
+            .healthChecksRepository
         let bloodworkRepository = SwiftDataBloodworkRepository(
             modelContext: modelContext,
             now: now
@@ -253,6 +365,8 @@ enum DefaultTrackerFeatureFactory {
                     lifestyleRepository: lifestyleRepository,
                     healthChecksRepository: healthChecksRepository,
                     bloodworkRepository: bloodworkRepository,
+                    healthCheckNotificationComposition:
+                        resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
                     now: now
                 )
@@ -266,6 +380,8 @@ enum DefaultTrackerFeatureFactory {
                     ),
                     healthChecksRepository: healthChecksRepository,
                     bloodworkRepository: bloodworkRepository,
+                    healthCheckNotificationComposition:
+                        resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
                     now: now
                 )
@@ -280,6 +396,8 @@ enum DefaultTrackerFeatureFactory {
                     lifestyleRepository: lifestyleRepository,
                     healthChecksRepository: healthChecksRepository,
                     bloodworkRepository: bloodworkRepository,
+                    healthCheckNotificationComposition:
+                        resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
                     now: now
                 )
@@ -293,6 +411,8 @@ enum DefaultTrackerFeatureFactory {
                         failsFirstCompletion: true
                     ),
                     bloodworkRepository: bloodworkRepository,
+                    healthCheckNotificationComposition:
+                        resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
                     now: now
                 )
@@ -311,6 +431,8 @@ enum DefaultTrackerFeatureFactory {
                         failsFirstLoad: true,
                         failsFirstCreate: true
                     ),
+                    healthCheckNotificationComposition:
+                        resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
                     now: now
                 )
@@ -325,6 +447,8 @@ enum DefaultTrackerFeatureFactory {
                     progressPhotoFixtureData: Data(
                         base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2Z7sAAAAASUVORK5CYII="
                     ),
+                    healthCheckNotificationComposition:
+                        resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
                     now: now
                 )
@@ -336,6 +460,8 @@ enum DefaultTrackerFeatureFactory {
                     healthChecksRepository: healthChecksRepository,
                     bloodworkRepository: bloodworkRepository,
                     progressPhotoRepository: UITestProgressPhotoGalleryRepository(),
+                    healthCheckNotificationComposition:
+                        resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
                     now: now
                 )
@@ -349,6 +475,8 @@ enum DefaultTrackerFeatureFactory {
             bloodworkRepository: bloodworkRepository,
             progressPhotoRepository: progressPhotoRepository,
             progressPhotoAssetSynchronizer: progressPhotoAssetSynchronizer,
+            healthCheckNotificationComposition:
+                resolvedHealthCheckNotificationComposition,
             calendar: calendar,
             now: now
         )

@@ -4,6 +4,34 @@ import Foundation
 import XCTest
 
 final class SystemNotificationCenterAdapterTests: XCTestCase {
+    func testAdapterAddPreservesTrueRepeatsIntoSystemBoundary() async throws {
+        let backend = NotificationCenterSystemBackendFake(
+            status: .authorized,
+            pending: [],
+            delivered: [],
+            authorizationResult: true
+        )
+        let adapter = SystemNotificationCenterAdapter(backend: backend)
+        let request = NotificationRequestValue(
+            identifier: "health-check-detail.v1.00000000-0000-0000-0000-000000000359",
+            title: "Hatırlatma",
+            body: "Planladığınız hatırlatmayı uygulamada görüntüleyin.",
+            deliveryDate: Date(timeIntervalSince1970: 1_804_060_800),
+            userInfo: [
+                "version": "1",
+                "route": "health-check-detail",
+                "reminderID": "00000000-0000-0000-0000-000000000359",
+            ],
+            repeats: true
+        )
+
+        try await adapter.add(request)
+        let snapshot = await backend.snapshot()
+
+        XCTAssertEqual(snapshot.addedRequests.count, 1)
+        XCTAssertTrue(try XCTUnwrap(snapshot.addedRequests.first).repeats)
+    }
+
     func testAdapterDelegatesEveryNotificationCenterOperationWithoutLiveCenter() async throws {
         let dueDate = Date(timeIntervalSince1970: 1_804_060_800)
         let existing = NotificationSystemRequest(

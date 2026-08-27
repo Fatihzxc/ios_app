@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import NotificationsKit
 import NutritionKit
 import PersistenceKit
 import SettingsKit
@@ -27,6 +28,8 @@ final class AppDependencies: AppDependencyLoading {
     private var didLoad = false
     private let trackerFeatureBundleFactory:
         @MainActor (ModelContext) -> any TrackerFeatureRouting
+    let healthCheckNotificationComposition: HealthCheckNotificationComposition
+    private let notificationLaunchGate: HealthCheckNotificationLaunchGate
     let trainingRepository: any TrainingRepository
     let todayViewModel: TodayViewModel
     private lazy var deferredTrainingDependencies = DeferredTrainingDependencies(
@@ -92,7 +95,11 @@ final class AppDependencies: AppDependencyLoading {
     lazy var todayNutritionViewModel = TodayNutritionViewModel(
         repository: nutritionRepository
     )
-    private lazy var trackerFeatureRouter = trackerFeatureBundleFactory(mainContext)
+    private(set) var trackerFeatureRouterInstantiationCount = 0
+    private lazy var trackerFeatureRouter: any TrackerFeatureRouting = {
+        trackerFeatureRouterInstantiationCount += 1
+        return trackerFeatureBundleFactory(mainContext)
+    }()
     private lazy var trainingSymptomEventClient: any SymptomEventClient = {
         let adapter = DefaultTrainingSymptomEventFactory.make(
             modelContext: mainContext
@@ -125,23 +132,27 @@ final class AppDependencies: AppDependencyLoading {
         hapticClient: (any TrainingHapticClient)? = nil,
         makeTrackerFeatureBundle: (
             @MainActor (ModelContext) -> any TrackerFeatureRouting
-        )? = nil
+        )? = nil,
+        reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent: (
+            @MainActor () async throws -> Void
+        )? = nil,
+        healthCheckNotificationCenter: any NotificationCenterClient =
+            SystemNotificationCenterAdapter(),
+        healthCheckNotificationComposition: HealthCheckNotificationComposition? = nil
     ) throws {
         let persistence = try Self.persistencePreparation(for: environment)
         let modelContainer = try ModelContainerFactory.make(for: persistence.mode)
         AppLaunchPerformance.record(.container)
-        let trackerFactory = makeTrackerFeatureBundle ?? { modelContext in
-            DefaultTrackerFeatureFactory.make(
-                environment: environment,
-                modelContext: modelContext
-            )
-        }
         self.init(
             environment: environment,
             persistence: persistence,
             modelContainer: modelContainer,
             hapticClient: hapticClient,
-            makeTrackerFeatureBundle: trackerFactory
+            makeTrackerFeatureBundle: makeTrackerFeatureBundle,
+            reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent:
+                reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent,
+            healthCheckNotificationCenter: healthCheckNotificationCenter,
+            healthCheckNotificationComposition: healthCheckNotificationComposition
         )
     }
 
@@ -150,8 +161,14 @@ final class AppDependencies: AppDependencyLoading {
         persistence: PersistencePreparation,
         modelContainer: ModelContainer,
         hapticClient: (any TrainingHapticClient)?,
-        makeTrackerFeatureBundle:
-            @escaping @MainActor (ModelContext) -> any TrackerFeatureRouting
+        makeTrackerFeatureBundle: (
+            @MainActor (ModelContext) -> any TrackerFeatureRouting
+        )?,
+        reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent: (
+            @MainActor () async throws -> Void
+        )?,
+        healthCheckNotificationCenter: any NotificationCenterClient,
+        healthCheckNotificationComposition: HealthCheckNotificationComposition?
     ) {
         AppLaunchPerformance.record(.dependencyEntry)
         let mainContext = ModelContext(modelContainer)
@@ -163,7 +180,41 @@ final class AppDependencies: AppDependencyLoading {
         trainingHapticController = nil
         let hapticControllerReference = TrainingHapticControllerReference()
         self.hapticControllerReference = hapticControllerReference
-        trackerFeatureBundleFactory = makeTrackerFeatureBundle
+        let resolvedHealthCheckNotificationComposition =
+            healthCheckNotificationComposition
+            ?? DefaultHealthCheckNotificationFactory.make(
+                modelContext: mainContext,
+                notificationCenter: healthCheckNotificationCenter
+            )
+        self.healthCheckNotificationComposition =
+            resolvedHealthCheckNotificationComposition
+        let launchReconciliation: @MainActor () async throws -> Bool
+        if let injectedLaunchReconciliation =
+            reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent {
+            launchReconciliation = {
+                try await injectedLaunchReconciliation()
+                return true
+            }
+        } else {
+            launchReconciliation = {
+                try await resolvedHealthCheckNotificationComposition
+                    .lifecycleCoordinator
+                    .reconcileAfterFirstMeaningfulTodayContent()
+            }
+        }
+        let notificationLaunchGate = HealthCheckNotificationLaunchGate(
+            reconcile: launchReconciliation
+        )
+        self.notificationLaunchGate = notificationLaunchGate
+        trackerFeatureBundleFactory = makeTrackerFeatureBundle ?? { modelContext in
+            DefaultTrackerFeatureFactory.make(
+                environment: environment,
+                modelContext: modelContext,
+                healthCheckNotificationCenter: healthCheckNotificationCenter,
+                healthCheckNotificationComposition:
+                    resolvedHealthCheckNotificationComposition
+            )
+        }
         seedLoader = SwiftDataSeedLoader(modelContext: mainContext)
         let repository = SwiftDataTrainingRepository(modelContext: mainContext)
         AppLaunchPerformance.record(.dependencyRepository)
@@ -237,6 +288,8 @@ final class AppDependencies: AppDependencyLoading {
             launchStartedAt: AppLaunchPerformance.startedAt,
             onFirstMeaningfulContent: { elapsed in
                 AppLaunchPerformance.finish(elapsed)
+                notificationLaunchGate.markTodayContentMeaningful()
+                Task { await notificationLaunchGate.reconcileIfNeeded() }
             }
         )
         AppLaunchPerformance.record(.dependencyViewModel)
@@ -313,6 +366,7 @@ final class AppDependencies: AppDependencyLoading {
         if shouldLoadFoundation, todayViewModel.state == .loading {
             await todayViewModel.load()
         }
+        await notificationLaunchGate.reconcileIfNeeded()
         let hapticController = ensureTrainingHapticController()
         hapticController.loadPreference()
     }
@@ -397,9 +451,18 @@ final class AppDependencyPrewarmer {
 
     init(
         environment: AppEnvironment,
+        healthCheckNotificationCenter: any NotificationCenterClient =
+            SystemNotificationCenterAdapter(),
+        healthCheckNotificationComposition: HealthCheckNotificationComposition? = nil,
         buildDependencies: (@MainActor (AppEnvironment) throws -> AppDependencies)? = nil
     ) {
-        let dependencyBuilder = buildDependencies ?? Self.prepareDependencies
+        let dependencyBuilder = buildDependencies ?? { environment in
+            try Self.prepareDependencies(
+                for: environment,
+                healthCheckNotificationCenter: healthCheckNotificationCenter,
+                healthCheckNotificationComposition: healthCheckNotificationComposition
+            )
+        }
         self.environment = environment
         self.buildDependencies = dependencyBuilder
         initialAttempt = Result {
@@ -416,7 +479,9 @@ final class AppDependencyPrewarmer {
     }
 
     private static func prepareDependencies(
-        for environment: AppEnvironment
+        for environment: AppEnvironment,
+        healthCheckNotificationCenter: any NotificationCenterClient,
+        healthCheckNotificationComposition: HealthCheckNotificationComposition?
     ) throws -> AppDependencies {
         let persistence = try AppDependencies.persistencePreparation(for: environment)
         let modelContainer = try ModelContainerFactory.make(for: persistence.mode)
@@ -426,12 +491,10 @@ final class AppDependencyPrewarmer {
             persistence: persistence,
             modelContainer: modelContainer,
             hapticClient: nil,
-            makeTrackerFeatureBundle: { modelContext in
-                DefaultTrackerFeatureFactory.make(
-                    environment: environment,
-                    modelContext: modelContext
-                )
-            }
+            makeTrackerFeatureBundle: nil,
+            reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent: nil,
+            healthCheckNotificationCenter: healthCheckNotificationCenter,
+            healthCheckNotificationComposition: healthCheckNotificationComposition
         )
         try dependencies.prepareInitialContentForLaunch()
         return dependencies

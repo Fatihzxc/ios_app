@@ -4793,6 +4793,8 @@ m311_tests = {
         "testDeniedAndNotDeterminedPerformCleanupWithoutAddingPromptingOrMutatingInput",
         "testCancellationAfterSuspendedSystemReadPreventsCleanupAndAdds",
         "testRecurringOwnedRequestIsReplacedByCanonicalNonRepeatingRequest",
+        "testDuplicateOwnedPendingIdentifiersFailClosedToOneCanonicalRequest",
+        "DuplicatePendingNotificationCenterFake",
         "failingOrdinal in 1...operationBoundaryCount",
         "reconciliation.cancel()",
         "resumeSuspendedOperation(ordinal: 2)",
@@ -4817,6 +4819,8 @@ m311_tests = {
         "initialUnprojectablePendingIdentifiers",
         "repeats: true",
         "XCTAssertFalse(try XCTUnwrap(snapshot.pending[desired.identifier]).repeats)",
+        "pending.removeAll { identifiers.contains($0.identifier) }",
+        "XCTAssertEqual(result, .converged(added: 1, removedPending: 1, removedDelivered: 0))",
     },
     "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationAuthorizationTests.swift": {
         "testConstructionPresentationDismissAndRelaunchNeverPromptAutomatically",
@@ -4843,6 +4847,7 @@ m311_tests = {
     },
     "Packages/HealthTrackingModules/Tests/NotificationsKitTests/SystemNotificationCenterAdapterTests.swift": {
         "testAdapterDelegatesEveryNotificationCenterOperationWithoutLiveCenter",
+        "testAdapterAddPreservesTrueRepeatsIntoSystemBoundary",
         "testPureSystemProjectionPreservesExactCalendarInstantContentAndNonRepeatingPolicy",
         "testDefaultBackendBuilderCopiesProjectionIntoActualSystemRequestWithoutLiveCenter",
         "testDefaultBackendMapsAuthorizationAndRoundTripsPendingRequestWithoutLiveCenter",
@@ -4876,6 +4881,7 @@ m311_tests = {
         "notificationAuthorizationStatus(",
         "from: .provisional",
         "XCTAssertEqual(pendingRoundTrip.request, request)",
+        "XCTAssertTrue(try XCTUnwrap(snapshot.addedRequests.first).repeats)",
         "DefaultNotificationCenterSystemBackend.LiveOperations(",
         ".live(operations: operations)",
         "for failingOrdinal in 1...7",
@@ -4893,6 +4899,15 @@ m311_tests = {
         "identifier: unprojectableSystemPending.identifier",
         "DeferredNotificationCenterProviderProbe",
         "XCTAssertEqual(probe.callCount, 0)",
+    },
+    "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/HealthCheckNotificationPermissionGateTests.swift": {
+        "testFailureReenablesExplicitPermissionActionAndTerminalResultKeepsItDisabled",
+        "HealthCheckNotificationPermissionGate",
+        "gate.beginRequest()",
+        "gate.completeRequest(allowsRetry: true)",
+        "gate.completeRequest(allowsRetry: false)",
+        "XCTAssertFalse(gate.isDisabled)",
+        "XCTAssertTrue(gate.isDisabled)",
     },
     "Packages/HealthTrackingModules/Tests/TrainingKitTests/TodayViewModelTests.swift": {
         "testApplyingPreloadedSnapshotPublishesContentWithoutRepositoryFetch",
@@ -5479,6 +5494,9 @@ m311_production = {
         "request.deliveryDate <= now()",
         "pending.request",
         "pending.identifier",
+        "Dictionary(grouping: pending)",
+        "pendingValues.count == 1",
+        "pendingByIdentifier[request.identifier]?.count != 1",
     },
     "Packages/HealthTrackingModules/Sources/NotificationsKit/Authorization/HealthCheckNotificationAuthorizationController.swift": {
         "public final class HealthCheckNotificationAuthorizationController",
@@ -5526,6 +5544,7 @@ m311_production = {
         "UNNotificationRequest",
         "content.userInfo",
         "repeats: projection.repeats",
+        "repeats: request.repeats",
         "center.notificationSettings()",
         "settings.authorizationStatus",
         "center.pendingNotificationRequests()",
@@ -5941,6 +5960,7 @@ m311_app_wiring = {
         "NotificationReconcilingHealthChecksRepository",
         "onNotificationPermissionPresentation",
         "onNotificationPermissionDismissal",
+        "return controller.state == .failed",
     },
     "App/Application/AppRootView.swift": {
         "reconcileHealthCheckNotificationsAfterCommittedMutation",
@@ -5953,6 +5973,11 @@ m311_app_wiring = {
         ".onAppear(perform: onNotificationPermissionPresentation)",
         ".onDisappear(perform: onNotificationPermissionDismissal)",
         'accessibilityIdentifier("health-check.notifications.permission")',
+        "HealthCheckNotificationPermissionGate",
+        "beginRequest()",
+        "completeRequest(allowsRetry:",
+        "@MainActor () async -> Bool",
+        ".disabled(notificationPermissionGate.isDisabled)",
     },
     "App/Support/AppUITestLaunchConfiguration.swift": {
         "notificationAuthorizationRequestCount",
@@ -5984,7 +6009,7 @@ if not m311_is_marker_only_red:
         "letnotificationActions=makeHealthCheckListNotificationActions(",
         "onNotificationPermissionPresentation:notificationActions.onPresentation",
         "onNotificationPermissionDismissal:notificationActions.onDismissal",
-        "onRequestNotificationAuthorization:{Task{awaitnotificationActions.onRequestNotificationAuthorization()}}",
+        "onRequestNotificationAuthorization:notificationActions.onRequestNotificationAuthorization",
     ):
         if callback_contract not in m311_compact_bundle:
             raise SystemExit(
@@ -8713,6 +8738,7 @@ for m311_test_path in (
     "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationAuthorizationTests.swift",
     "Packages/HealthTrackingModules/Tests/NotificationsKitTests/NotificationRouteCodecTests.swift",
     "Packages/HealthTrackingModules/Tests/NotificationsKitTests/SystemNotificationCenterAdapterTests.swift",
+    "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/HealthCheckNotificationPermissionGateTests.swift",
     "Packages/HealthTrackingModules/Tests/TrainingKitTests/TodayViewModelTests.swift",
     "HealthTrackingAppTests/HealthCheckNotificationCompositionTests.swift",
     "HealthTrackingAppUITests/HealthCheckNotificationFlowUITests.swift",
@@ -8827,6 +8853,9 @@ fixture_files.update(
                 "let delivered = try await center.deliveredRequestIdentifiers()",
                 "let identifier = pending.identifier",
                 "let request = pending.request",
+                "let pendingByIdentifier = Dictionary(grouping: pending) { $0.identifier }",
+                "guard pendingValues.count == 1 else { return identifier }",
+                "let duplicate = pendingByIdentifier[request.identifier]?.count != 1",
                 "try Task.checkCancellation()",
                 "try await center.removePendingRequests(withIdentifiers: pendingIDs)",
                 "try await center.removeDeliveredRequests(withIdentifiers: deliveredIDs)",
@@ -8908,6 +8937,7 @@ fixture_files.update(
                 "func userNotificationProjection(calendar: Calendar) {}",
                 "let components = calendar.dateComponents([], from: request.deliveryDate)",
                 "let projection = request.userNotificationProjection(calendar: calendar)",
+                "let mapped = NotificationSystemRequest(repeats: request.repeats)",
                 "let content = UNMutableNotificationContent()",
                 "content.title = projection.title",
                 "content.body = projection.body",
@@ -9068,7 +9098,8 @@ fixture_files["App/Application/TrackerFeatureBundle.swift"] += "\n" + "\n".join(
         "let notificationActions = makeHealthCheckListNotificationActions(",
         "onNotificationPermissionPresentation: notificationActions.onPresentation,",
         "onNotificationPermissionDismissal: notificationActions.onDismissal,",
-        "onRequestNotificationAuthorization: { Task { await notificationActions.onRequestNotificationAuthorization() } },",
+        "onRequestNotificationAuthorization: notificationActions.onRequestNotificationAuthorization,",
+        "return controller.state == .failed",
     ]
 )
 fixture_files["App/Application/AppRootView.swift"] += (
@@ -9084,6 +9115,11 @@ fixture_files[
         ".onAppear(perform: onNotificationPermissionPresentation)",
         ".onDisappear(perform: onNotificationPermissionDismissal)",
         '.accessibilityIdentifier("health-check.notifications.permission")',
+        "struct HealthCheckNotificationPermissionGate {}",
+        "beginRequest()",
+        "completeRequest(allowsRetry:",
+        "let callback: @MainActor () async -> Bool",
+        ".disabled(notificationPermissionGate.isDisabled)",
     ]
 )
 fixture_files["App/Support/AppUITestLaunchConfiguration.swift"] += "\n" + "\n".join(
@@ -9261,6 +9297,14 @@ with tempfile.TemporaryDirectory() as temporary:
             "testRecurringOwnedRequestIsReplacedByCanonicalNonRepeatingRequest",
             "testRecurringOwnedRequestIsReplacedByCanonicalNonRepeatingRequest",
         ),
+        (
+            "testDuplicateOwnedPendingIdentifiersFailClosedToOneCanonicalRequest",
+            "testDuplicateOwnedPendingIdentifiersFailClosedToOneCanonicalRequest",
+        ),
+        (
+            "pending.removeAll { identifiers.contains($0.identifier) }",
+            "pending.removeAll { identifiers.contains($0.identifier) }",
+        ),
     ):
         m311_reconciliation_test.write_text(
             original_m311_reconciliation_test.replace(token, "m311ContractRemoved", 1),
@@ -9354,6 +9398,8 @@ with tempfile.TemporaryDirectory() as temporary:
     m311_adapter_test.write_text(original_m311_adapter_test, encoding="utf-8")
 
     for token in (
+        "testAdapterAddPreservesTrueRepeatsIntoSystemBoundary",
+        "XCTAssertTrue(try XCTUnwrap(snapshot.addedRequests.first).repeats)",
         "testDefaultBackendBuilderCopiesProjectionIntoActualSystemRequestWithoutLiveCenter",
         "testDefaultBackendMapsAuthorizationAndRoundTripsPendingRequestWithoutLiveCenter",
         "testPendingSystemProjectionPreservesIdentifierWhenRawRequestIsUnprojectable",
@@ -9382,6 +9428,91 @@ with tempfile.TemporaryDirectory() as temporary:
         )
         run(root, token)
         m311_adapter_test.write_text(original_m311_adapter_test, encoding="utf-8")
+
+    m311_system_adapter_source = (
+        root
+        / "Packages/HealthTrackingModules/Sources/NotificationsKit/SystemAdapter/SystemNotificationCenterAdapter.swift"
+    )
+    original_m311_system_adapter_source = m311_system_adapter_source.read_text(
+        encoding="utf-8"
+    )
+    m311_system_adapter_source.write_text(
+        original_m311_system_adapter_source.replace(
+            "repeats: request.repeats",
+            "repeats: false",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "repeats: request.repeats")
+    m311_system_adapter_source.write_text(
+        original_m311_system_adapter_source,
+        encoding="utf-8",
+    )
+
+    m311_reconciler_source = (
+        root
+        / "Packages/HealthTrackingModules/Sources/NotificationsKit/Planner/HealthCheckNotificationReconciler.swift"
+    )
+    original_m311_reconciler_source = m311_reconciler_source.read_text(encoding="utf-8")
+    for token in (
+        "Dictionary(grouping: pending)",
+        "pendingValues.count == 1",
+        "pendingByIdentifier[request.identifier]?.count != 1",
+    ):
+        m311_reconciler_source.write_text(
+            original_m311_reconciler_source.replace(token, "m311DuplicateGuardRemoved", 1),
+            encoding="utf-8",
+        )
+        run(root, token)
+        m311_reconciler_source.write_text(
+            original_m311_reconciler_source,
+            encoding="utf-8",
+        )
+
+    m311_permission_gate_test = (
+        root
+        / "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/HealthCheckNotificationPermissionGateTests.swift"
+    )
+    original_m311_permission_gate_test = m311_permission_gate_test.read_text(
+        encoding="utf-8"
+    )
+    for token in (
+        "testFailureReenablesExplicitPermissionActionAndTerminalResultKeepsItDisabled",
+        "gate.completeRequest(allowsRetry: true)",
+        "gate.completeRequest(allowsRetry: false)",
+    ):
+        m311_permission_gate_test.write_text(
+            original_m311_permission_gate_test.replace(token, "m311PermissionRetryRemoved", 1),
+            encoding="utf-8",
+        )
+        run(root, token)
+        m311_permission_gate_test.write_text(
+            original_m311_permission_gate_test,
+            encoding="utf-8",
+        )
+
+    m311_permission_view_source = (
+        root
+        / "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecks/HealthCheckListView.swift"
+    )
+    original_m311_permission_view_source = m311_permission_view_source.read_text(
+        encoding="utf-8"
+    )
+    for token in (
+        "completeRequest(allowsRetry:",
+        "@MainActor () async -> Bool",
+        ".disabled(notificationPermissionGate.isDisabled)",
+    ):
+        m311_permission_view_source.write_text(
+            original_m311_permission_view_source.replace(token, "m311PermissionViewRemoved", 1),
+            encoding="utf-8",
+        )
+        run(root, token)
+        m311_permission_view_source.write_text(
+            original_m311_permission_view_source,
+            encoding="utf-8",
+        )
 
     m311_today_test = (
         root
