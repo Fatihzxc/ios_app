@@ -32,8 +32,29 @@ final class TrainingSymptomMetricsAdapter: SymptomEventClient {
 
 enum TrainingSymptomSafetyMapper {
     static func overheadPressSymptom() -> TrainingSymptomSafetyPresentation? {
+        presentation(for: .currentOverheadPressResponse(.symptomsPresent))
+    }
+
+    static func presentation(
+        for context: TrainingSymptomSafetyContext
+    ) -> TrainingSymptomSafetyPresentation? {
+        let trigger: MedicalSafetyTrigger
+        switch context {
+        case .priorOverheadPressResponse(.notAsked),
+             .priorOverheadPressResponse(.uncertain):
+            trigger = .missingSymptomAnswer
+        case .priorOverheadPressResponse(.symptomsPresent),
+             .currentOverheadPressResponse(.symptomsPresent):
+            trigger = .overheadPressSymptom
+        case .priorOverheadPressResponse(.symptomFree),
+             .currentOverheadPressResponse(.notAsked),
+             .currentOverheadPressResponse(.symptomFree),
+             .currentOverheadPressResponse(.uncertain):
+            return nil
+        }
+
         let central = MedicalSafetyPresentation.resolve(
-            triggers: [.overheadPressSymptom]
+            triggers: [trigger]
         )
         guard let levelTwo = central.levelTwo else { return nil }
         return TrainingSymptomSafetyPresentation(

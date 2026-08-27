@@ -111,6 +111,7 @@ final class AppDependencies: AppDependencyLoading {
         { self.trackerFeatureRouter }
     }
     private(set) var trainingHapticController: TrainingHapticController?
+    let medicalSafetyAcknowledgementController: MedicalSafetyAcknowledgementController
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
 
@@ -198,8 +199,15 @@ final class AppDependencies: AppDependencyLoading {
             case .loading:
                 trainingRepository = repository
                 shouldLoadFoundation = false
+            case .ohpSafety:
+                trainingRepository = UITestFoundationRepository(
+                    repository: repository,
+                    failsFirstCurrentOHPSymptomWrite: true,
+                    failsFirstSessionDeletion: true
+                )
+                shouldLoadFoundation = true
             case .seeded, .fatalConfiguration, .sessionFlow, .sessionFamilies, .sessionResume,
-                 .progressionMissingRIR, .weeklyPallof, .ohpSafety, .deloadScheduled,
+                 .progressionMissingRIR, .weeklyPallof, .deloadScheduled,
                  .deloadReactive, .phaseTransition, .trainingHistory, .todayTrain,
                  .todayRest, .todayResume, .todayDeload, .todayPhase, .todayReminder,
                  .todayPriority, .m1AcceptanceCatalog, .m1PRBaseline, .m1PRNew,
@@ -243,6 +251,16 @@ final class AppDependencies: AppDependencyLoading {
         }
         #else
         installUITestFixture = {}
+        #endif
+        medicalSafetyAcknowledgementController = MedicalSafetyAcknowledgementController(
+            store: SwiftDataMedicalSafetyAcknowledgementStore(modelContext: mainContext)
+        )
+        #if DEBUG
+        if environment == .uiTesting,
+           let launchConfiguration = AppUITestLaunchConfiguration.resolve(),
+           !launchConfiguration.exposesMedicalSafetyFirstUseEvidence {
+            _ = medicalSafetyAcknowledgementController.acknowledge()
+        }
         #endif
         AppLaunchPerformance.record(.dependencies)
     }
@@ -456,8 +474,9 @@ private final class DeferredTrainingDependencies {
                 repository: repository,
                 haptics: hapticControllerReference.value,
                 symptomEventClient: makeSymptomEventClient(),
-                symptomSafetyPresentation:
-                    TrainingSymptomSafetyMapper.overheadPressSymptom()
+                symptomSafetyPresentationProvider: { context in
+                    TrainingSymptomSafetyMapper.presentation(for: context)
+                }
             )
         }
     }
@@ -1549,15 +1568,22 @@ private final class UITestFoundationRepository: TrainingRepository {
     private let todayInitialOutcome: InitialOutcome?
     private var foundationLoadAttempt = 0
     private var todayLoadAttempt = 0
+    private var failsNextCurrentOHPSymptomWrite: Bool
+    private var failsNextSessionDeletion: Bool
+    private var currentSessionID: UUID?
 
     init(
         repository: any TrainingRepository,
         foundationInitialOutcome: InitialOutcome? = nil,
-        todayInitialOutcome: InitialOutcome? = nil
+        todayInitialOutcome: InitialOutcome? = nil,
+        failsFirstCurrentOHPSymptomWrite: Bool = false,
+        failsFirstSessionDeletion: Bool = false
     ) {
         self.repository = repository
         self.foundationInitialOutcome = foundationInitialOutcome
         self.todayInitialOutcome = todayInitialOutcome
+        failsNextCurrentOHPSymptomWrite = failsFirstCurrentOHPSymptomWrite
+        failsNextSessionDeletion = failsFirstSessionDeletion
     }
 
     func fetchTodaySnapshot() async throws -> TodayRepositorySnapshot? {
@@ -1632,7 +1658,9 @@ private final class UITestFoundationRepository: TrainingRepository {
     }
 
     func fetchInProgressWorkoutSession() async throws -> WorkoutSessionSnapshot? {
-        try await repository.fetchInProgressWorkoutSession()
+        let session = try await repository.fetchInProgressWorkoutSession()
+        currentSessionID = session?.id
+        return session
     }
 
     func transitionWorkoutSession(
@@ -1640,7 +1668,17 @@ private final class UITestFoundationRepository: TrainingRepository {
         to status: WorkoutSessionStatus,
         at date: Date
     ) async throws -> WorkoutSessionSnapshot {
-        try await repository.transitionWorkoutSession(id: id, to: status, at: date)
+        let session = try await repository.transitionWorkoutSession(
+            id: id,
+            to: status,
+            at: date
+        )
+        if status == .inProgress {
+            currentSessionID = session.id
+        } else if currentSessionID == id {
+            currentSessionID = nil
+        }
+        return session
     }
 
     func fetchWorkoutSessionProgress(
@@ -1692,7 +1730,13 @@ private final class UITestFoundationRepository: TrainingRepository {
         response: OHPSymptomResponse,
         at date: Date
     ) async throws -> WorkoutSessionSnapshot {
-        try await repository.updateWorkoutSessionOHPSymptomResponse(
+        if failsNextCurrentOHPSymptomWrite,
+           response == .symptomsPresent,
+           id == currentSessionID {
+            failsNextCurrentOHPSymptomWrite = false
+            throw UITestFoundationRepositoryError.ohpSymptomWrite
+        }
+        return try await repository.updateWorkoutSessionOHPSymptomResponse(
             id: id,
             response: response,
             at: date
@@ -1714,11 +1758,20 @@ private final class UITestFoundationRepository: TrainingRepository {
     }
 
     func deleteWorkoutSession(id: UUID) async throws {
+        if failsNextSessionDeletion, id == currentSessionID {
+            failsNextSessionDeletion = false
+            throw UITestFoundationRepositoryError.sessionDeletion
+        }
         try await repository.deleteWorkoutSession(id: id)
+        if currentSessionID == id {
+            currentSessionID = nil
+        }
     }
 }
 
 private enum UITestFoundationRepositoryError: Error {
     case initialLoad
+    case ohpSymptomWrite
+    case sessionDeletion
 }
 #endif

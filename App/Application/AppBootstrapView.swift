@@ -36,7 +36,9 @@ struct AppBootstrapView: View {
                     makeTrackerFeatureRouter: dependencies.makeTrackerFeatureRouter,
                     trainingHapticController: dependencies.trainingHapticController,
                     shouldLoadFoundation: dependencies.shouldLoadFoundation,
-                    persistencePresentation: dependencies.persistencePresentation
+                    persistencePresentation: dependencies.persistencePresentation,
+                    medicalSafetyAcknowledgementController:
+                        dependencies.medicalSafetyAcknowledgementController
                 )
             )
         }

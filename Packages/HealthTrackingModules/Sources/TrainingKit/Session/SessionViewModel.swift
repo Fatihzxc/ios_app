@@ -12,12 +12,25 @@ public final class SessionViewModel {
     public private(set) var setSaveState: SessionSetSaveState = .idle
     public private(set) var recommendationReason: SessionRecommendationReason = .noPrefill
     public private(set) var ohpSafetyState: SessionOHPSafetyState = .notRequired
+    public private(set) var ohpSymptomWriteState: SessionOHPSymptomWriteState = .idle
     public private(set) var symptomJournalState: SymptomJournalState = .idle
     public private(set) var deloadState: SessionDeloadState = .notRequired
     public private(set) var isDeleteConfirmationPresented = false
+    public private(set) var hasSessionDeletionFailure = false
+    public private(set) var isSessionRouteMutationInFlight = false
+    public private(set) var isSessionDeletionInFlight = false
+    private var sessionMutationOwners: Set<UUID> = []
     public private(set) var summaryRecovery: Int?
     public private(set) var summaryNote = ""
-    public let symptomSafetyPresentation: TrainingSymptomSafetyPresentation?
+    public private(set) var symptomSafetyPresentation: TrainingSymptomSafetyPresentation?
+
+    public var activeSessionMutationCount: Int {
+        sessionMutationOwners.count
+    }
+
+    public var isSessionMutationInFlight: Bool {
+        !sessionMutationOwners.isEmpty
+    }
 
     @ObservationIgnored
     private let repository: any TrainingRepository
@@ -32,7 +45,12 @@ public final class SessionViewModel {
     @ObservationIgnored
     private let symptomEventClient: any SymptomEventClient
     @ObservationIgnored
+    private let symptomSafetyPresentationProvider:
+        @MainActor (TrainingSymptomSafetyContext) -> TrainingSymptomSafetyPresentation?
+    @ObservationIgnored
     private var pendingSetRequest: SetLogSaveRequest?
+    @ObservationIgnored
+    private var pendingOHPSymptomWriteRequest: SessionOHPSymptomWriteRequest?
     @ObservationIgnored
     private var completedHistoryByExerciseID: [UUID: [CompletedExerciseHistorySnapshot]] = [:]
     @ObservationIgnored
@@ -57,7 +75,8 @@ public final class SessionViewModel {
         now: @escaping @MainActor () -> Date = { .now },
         haptics: TrainingHapticController? = nil,
         symptomEventClient: any SymptomEventClient = NoOpSymptomEventClient.shared,
-        symptomSafetyPresentation: TrainingSymptomSafetyPresentation? = nil
+        symptomSafetyPresentationProvider: @escaping @MainActor
+            (TrainingSymptomSafetyContext) -> TrainingSymptomSafetyPresentation? = { _ in nil }
     ) {
         self.repository = repository
         coordinator = SessionCoordinator(repository: repository)
@@ -65,22 +84,35 @@ public final class SessionViewModel {
         self.now = now
         self.haptics = haptics
         self.symptomEventClient = symptomEventClient
-        self.symptomSafetyPresentation = symptomSafetyPresentation
+        self.symptomSafetyPresentationProvider = symptomSafetyPresentationProvider
+        symptomSafetyPresentation = nil
+    }
+
+    public func resolveSymptomSafetyPresentation(
+        for context: TrainingSymptomSafetyContext
+    ) -> TrainingSymptomSafetyPresentation? {
+        symptomSafetyPresentationProvider(context)
     }
 
     public func start(workoutDayID: UUID) async {
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
         state = .loading
         currentSetDraft = nil
         currentVariantOptions = []
         setSaveState = .idle
         recommendationReason = .noPrefill
         ohpSafetyState = .notRequired
+        ohpSymptomWriteState = .idle
         symptomJournalState = .idle
+        symptomSafetyPresentation = nil
         deloadState = .notRequired
         isDeleteConfirmationPresented = false
+        hasSessionDeletionFailure = false
         summaryRecovery = nil
         summaryNote = ""
         pendingSetRequest = nil
+        pendingOHPSymptomWriteRequest = nil
         completedHistoryByExerciseID = [:]
         weeklyPallofHistory = WeeklyPallofHistorySnapshot(
             eligibleExerciseTemplateIDs: [],
@@ -164,6 +196,8 @@ public final class SessionViewModel {
               presentation.plan.warmupItems.contains(where: { $0.id == id }) else {
             return
         }
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
         var completed = presentation.progress.completedWarmupItemIDs
         if !completed.insert(id).inserted {
             completed.remove(id)
@@ -180,10 +214,14 @@ public final class SessionViewModel {
     }
 
     public func completeWarmup() async {
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
         await leaveWarmup(disposition: .completed)
     }
 
     public func skipWarmup() async {
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
         await leaveWarmup(disposition: .skipped)
     }
 
@@ -218,7 +256,9 @@ public final class SessionViewModel {
     }
 
     public var canReportCurrentOHPSymptom: Bool {
-        guard activePresentation?.currentExercise?.progressionRule == .gradedEntryOHP else {
+        guard !isSessionRouteMutationInFlight,
+              !isSessionDeletionInFlight,
+              activePresentation?.currentExercise?.progressionRule == .gradedEntryOHP else {
             return false
         }
         if case .stopped = ohpSafetyState {
@@ -227,12 +267,32 @@ public final class SessionViewModel {
         return true
     }
 
+    public var hasPendingCurrentOHPSymptomWrite: Bool {
+        guard pendingOHPSymptomWriteRequest != nil else { return false }
+        switch ohpSymptomWriteState {
+        case .saving, .failed:
+            return true
+        case .idle:
+            return false
+        }
+    }
+
+    public var isCurrentOHPSymptomWriteSaving: Bool {
+        guard pendingOHPSymptomWriteRequest != nil else { return false }
+        if case .saving = ohpSymptomWriteState {
+            return true
+        }
+        return false
+    }
+
     public func answerPreviousOHPSymptom(_ response: OHPSymptomResponse) async {
         guard response != .notAsked,
               case let .awaitingPreviousSessionResponse(sessionID, _) = ohpSafetyState,
               let presentation = activePresentation else {
             return
         }
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
         do {
             let updatedPrevious = try await coordinator.recordOHPSymptomResponse(
                 sessionID: sessionID,
@@ -254,37 +314,46 @@ public final class SessionViewModel {
     }
 
     public func reportCurrentOHPSymptom() async {
-        guard canReportCurrentOHPSymptom,
-              let presentation = activePresentation else {
+        guard !isSessionRouteMutationInFlight,
+              !isSessionDeletionInFlight,
+              canReportCurrentOHPSymptom,
+              let presentation = activePresentation,
+              pendingOHPSymptomWriteRequest == nil else {
             return
         }
-        do {
-            let reportedAt = now()
-            let updatedCurrent = try await coordinator.recordOHPSymptomResponse(
-                sessionID: presentation.session.id,
-                response: .symptomsPresent,
-                at: reportedAt
-            )
-            replaceActiveSession(updatedCurrent)
-            let previous = latestCompletedOHPHistory?.session
-            resolveOHPSafety(
-                currentSession: updatedCurrent,
-                previousSession: previous
-            )
-            configureDraft()
-            await recordSymptomEvent(
-                SymptomJournalEvent(
-                    id: updatedCurrent.id,
-                    occurredAt: updatedCurrent.ohpSymptomCheckedAt ?? reportedAt,
-                    source: .overheadPressCurrentSymptom
-                )
-            )
-        } catch {
-            haptics?.handle(.repositoryError)
-            state = .failed(.ohpSafety)
-            currentSetDraft = nil
-            currentVariantOptions = []
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
+        let request = SessionOHPSymptomWriteRequest(
+            sessionID: presentation.session.id,
+            response: .symptomsPresent,
+            reportedAt: now()
+        )
+        pendingOHPSymptomWriteRequest = request
+        let optimisticCurrent = currentOHPSymptomSnapshot(
+            from: presentation.session,
+            request: request
+        )
+        replaceActiveSession(optimisticCurrent)
+        let previous = latestCompletedOHPHistory?.session
+        resolveOHPSafety(
+            currentSession: optimisticCurrent,
+            previousSession: previous
+        )
+        configureDraft()
+        ohpSymptomWriteState = .saving(request: request)
+        await persistCurrentOHPSymptomWrite(request)
+    }
+
+    public func retryCurrentOHPSymptomWrite() async {
+        guard !isSessionDeletionInFlight,
+              case let .failed(request) = ohpSymptomWriteState,
+              pendingOHPSymptomWriteRequest == request else {
+            return
         }
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
+        ohpSymptomWriteState = .saving(request: request)
+        await persistCurrentOHPSymptomWrite(request)
     }
 
     public func retrySymptomJournal() async {
@@ -292,11 +361,65 @@ public final class SessionViewModel {
         await recordSymptomEvent(event)
     }
 
+    private func persistCurrentOHPSymptomWrite(
+        _ request: SessionOHPSymptomWriteRequest
+    ) async {
+        guard pendingOHPSymptomWriteRequest == request else { return }
+        do {
+            let updatedCurrent = try await coordinator.recordOHPSymptomResponse(
+                sessionID: request.sessionID,
+                response: request.response,
+                at: request.reportedAt
+            )
+            guard pendingOHPSymptomWriteRequest == request else { return }
+            replaceActiveSession(updatedCurrent)
+            let previous = latestCompletedOHPHistory?.session
+            resolveOHPSafety(
+                currentSession: updatedCurrent,
+                previousSession: previous
+            )
+            configureDraft()
+            pendingOHPSymptomWriteRequest = nil
+            ohpSymptomWriteState = .idle
+            await recordSymptomEvent(
+                SymptomJournalEvent(
+                    id: request.sessionID,
+                    occurredAt: request.reportedAt,
+                    source: .overheadPressCurrentSymptom
+                )
+            )
+        } catch {
+            guard pendingOHPSymptomWriteRequest == request else { return }
+            haptics?.handle(.repositoryError)
+            ohpSymptomWriteState = .failed(request: request)
+        }
+    }
+
+    private func currentOHPSymptomSnapshot(
+        from session: WorkoutSessionSnapshot,
+        request: SessionOHPSymptomWriteRequest
+    ) -> WorkoutSessionSnapshot {
+        WorkoutSessionSnapshot(
+            id: session.id,
+            createdAt: session.createdAt,
+            updatedAt: request.reportedAt,
+            date: session.date,
+            status: session.status,
+            workoutDayTemplateID: session.workoutDayTemplateID,
+            perceivedRecovery: session.perceivedRecovery,
+            note: session.note,
+            ohpSymptomResponse: request.response,
+            ohpSymptomCheckedAt: request.reportedAt
+        )
+    }
+
     public func respondToDeload(_ action: SessionDeloadAction) async {
         guard case let .recommendation(reason, trainingWeekIndex) = deloadState,
               let activeProgramID else {
             return
         }
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
         do {
             _ = try await repository.applyDeloadAction(
                 programID: activeProgramID,
@@ -323,11 +446,18 @@ public final class SessionViewModel {
 
     public func advanceExercise() async {
         guard let presentation = activePresentation,
+              !hasPendingCurrentOHPSymptomWrite,
+              !isSessionRouteMutationInFlight,
+              !isSessionDeletionInFlight,
               !isAwaitingDeloadResponse,
               presentation.progress.stage == .movement,
               let currentIndex = presentation.currentExerciseIndex else {
             return
         }
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
+        isSessionRouteMutationInFlight = true
+        defer { isSessionRouteMutationInFlight = false }
 
         if presentation.plan.exercises.indices.contains(currentIndex + 1) {
             await persistProgress(
@@ -355,7 +485,14 @@ public final class SessionViewModel {
 
     public func goBack() async {
         guard let presentation = activePresentation,
+              !hasPendingCurrentOHPSymptomWrite,
+              !isSessionRouteMutationInFlight,
+              !isSessionDeletionInFlight,
               !isAwaitingDeloadResponse else { return }
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
+        isSessionRouteMutationInFlight = true
+        defer { isSessionRouteMutationInFlight = false }
 
         switch presentation.progress.stage {
         case .warmup:
@@ -408,6 +545,8 @@ public final class SessionViewModel {
               presentation.plan.cooldownItems.contains(where: { $0.id == id }) else {
             return
         }
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
         var completed = presentation.progress.completedCooldownItemIDs
         if !completed.insert(id).inserted {
             completed.remove(id)
@@ -424,10 +563,14 @@ public final class SessionViewModel {
     }
 
     public func completeCooldown() async {
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
         await finishSession(cooldownDisposition: .completed)
     }
 
     public func skipCooldown() async {
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
         await finishSession(cooldownDisposition: .skipped)
     }
 
@@ -437,12 +580,16 @@ public final class SessionViewModel {
               presentation.progress.stage == .movement else {
             return
         }
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
         await finishSession(cooldownDisposition: presentation.progress.cooldownDisposition)
     }
 
     public func saveCurrentSet() async {
         guard !isAwaitingDeloadResponse,
               let draft = currentSetDraft else { return }
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
         do {
             let request = try draft.makeSaveRequest(completedAt: now())
             pendingSetRequest = request
@@ -455,11 +602,18 @@ public final class SessionViewModel {
 
     public func retrySetSave() async {
         guard let pendingSetRequest else { return }
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
         await performSave(pendingSetRequest)
     }
 
     public func requestDeletion() {
-        guard activePresentation != nil else { return }
+        guard !isCurrentOHPSymptomWriteSaving,
+              !isSessionRouteMutationInFlight,
+              !isSessionMutationInFlight,
+              !isSessionDeletionInFlight,
+              activePresentation != nil else { return }
+        hasSessionDeletionFailure = false
         isDeleteConfirmationPresented = true
     }
 
@@ -468,20 +622,35 @@ public final class SessionViewModel {
     }
 
     public func confirmDeletion() async {
-        guard let sessionID = activePresentation?.session.id else { return }
+        guard !isCurrentOHPSymptomWriteSaving,
+              !isSessionRouteMutationInFlight,
+              !isSessionMutationInFlight,
+              !isSessionDeletionInFlight,
+              let sessionID = activePresentation?.session.id else { return }
+        isSessionDeletionInFlight = true
+        defer { isSessionDeletionInFlight = false }
         do {
             try await repository.deleteWorkoutSession(id: sessionID)
+            pendingOHPSymptomWriteRequest = nil
+            ohpSymptomWriteState = .idle
+            hasSessionDeletionFailure = false
             isDeleteConfirmationPresented = false
             currentSetDraft = nil
             state = .dismissed
         } catch {
             haptics?.handle(.repositoryError)
+            if hasPendingCurrentOHPSymptomWrite {
+                hasSessionDeletionFailure = true
+            } else {
+                hasSessionDeletionFailure = false
+                state = .failed(.deletion)
+            }
             isDeleteConfirmationPresented = false
-            state = .failed(.deletion)
         }
     }
 
     public func selectRecovery(_ recovery: Int?) {
+        guard !isSessionDeletionInFlight else { return }
         if let recovery, !(1...10).contains(recovery) {
             return
         }
@@ -489,15 +658,18 @@ public final class SessionViewModel {
     }
 
     public func selectPerformedVariant(_ option: SessionVariantOption) {
+        guard !isSessionDeletionInFlight else { return }
         guard currentVariantOptions.contains(option) else { return }
         currentSetDraft?.selectPerformedVariant(option.rawValue)
     }
 
     public func stepperChanged() {
+        guard !isSessionDeletionInFlight else { return }
         haptics?.handle(.stepperChanged)
     }
 
     public func updateSummaryNote(_ note: String) {
+        guard !isSessionDeletionInFlight else { return }
         summaryNote = note
     }
 
@@ -506,6 +678,8 @@ public final class SessionViewModel {
               presentation.progress.stage == .summary else {
             return
         }
+        guard let sessionMutationOwner = beginSessionMutation() else { return }
+        defer { endSessionMutation(sessionMutationOwner) }
         let trimmedNote = summaryNote.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             _ = try await repository.updateWorkoutSessionSummary(
@@ -525,6 +699,17 @@ public final class SessionViewModel {
     private var activePresentation: SessionPresentation? {
         guard case let .active(presentation) = state else { return nil }
         return presentation
+    }
+
+    private func beginSessionMutation() -> UUID? {
+        guard !isSessionDeletionInFlight else { return nil }
+        let owner = UUID()
+        sessionMutationOwners.insert(owner)
+        return owner
+    }
+
+    private func endSessionMutation(_ owner: UUID) {
+        sessionMutationOwners.remove(owner)
     }
 
     private var isAwaitingPreviousOHPSymptomResponse: Bool {
@@ -689,6 +874,18 @@ public final class SessionViewModel {
         currentSession: WorkoutSessionSnapshot,
         previousSession: WorkoutSessionSnapshot?
     ) {
+        if currentSession.ohpSymptomResponse == .symptomsPresent {
+            symptomSafetyPresentation = resolveSymptomSafetyPresentation(
+                for: .currentOverheadPressResponse(.symptomsPresent)
+            )
+        } else if let previousSession {
+            symptomSafetyPresentation = resolveSymptomSafetyPresentation(
+                for: .priorOverheadPressResponse(previousSession.ohpSymptomResponse)
+            )
+        } else {
+            symptomSafetyPresentation = nil
+        }
+
         let wasStopped: Bool
         if case .stopped = ohpSafetyState {
             wasStopped = true
@@ -803,10 +1000,15 @@ public final class SessionViewModel {
         cooldownDisposition: WorkoutChecklistDisposition
     ) async {
         guard let presentation = activePresentation,
+              !hasPendingCurrentOHPSymptomWrite,
+              !isSessionRouteMutationInFlight,
+              !isSessionDeletionInFlight,
               !isAwaitingDeloadResponse,
               presentation.session.status == .inProgress else {
             return
         }
+        isSessionRouteMutationInFlight = true
+        defer { isSessionRouteMutationInFlight = false }
         let summaryProgress = SessionProgressState(
             stage: .summary,
             completedWarmupItemIDs: presentation.progress.completedWarmupItemIDs,

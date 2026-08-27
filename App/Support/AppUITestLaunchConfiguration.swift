@@ -47,6 +47,8 @@ enum AppUITestScenario: String {
 
 struct AppUITestLaunchConfiguration {
     static let launchPerformanceEvidenceFlag = "-ui-test-launch-performance-evidence"
+    static let medicalSafetyFirstUseEvidenceFlag =
+        "-ui-test-medical-safety-first-use-evidence"
 
     enum Appearance: String {
         case light
@@ -64,6 +66,7 @@ struct AppUITestLaunchConfiguration {
     let appearance: Appearance
     let persistentStoreIdentifier: UUID?
     let exposesLaunchPerformanceEvidence: Bool
+    let exposesMedicalSafetyFirstUseEvidence: Bool
 
     static func resolve(arguments: [String] = ProcessInfo.processInfo.arguments) -> Self? {
         guard arguments.filter({ $0 == "-ui-testing" }).count == 1,
@@ -71,7 +74,10 @@ struct AppUITestLaunchConfiguration {
               let scenario = AppUITestScenario(rawValue: scenarioValue),
               let appearanceValue = uniqueValue(after: "-ui-test-appearance", in: arguments),
               let appearance = Appearance(rawValue: appearanceValue),
-              arguments.filter({ $0 == launchPerformanceEvidenceFlag }).count <= 1 else {
+              arguments.filter({ $0 == launchPerformanceEvidenceFlag }).count <= 1,
+              arguments.filter({
+                  $0 == medicalSafetyFirstUseEvidenceFlag
+              }).count <= 1 else {
             return nil
         }
 
@@ -92,6 +98,9 @@ struct AppUITestLaunchConfiguration {
             persistentStoreIdentifier: persistentStoreIdentifier,
             exposesLaunchPerformanceEvidence: arguments.contains(
                 launchPerformanceEvidenceFlag
+            ),
+            exposesMedicalSafetyFirstUseEvidence: arguments.contains(
+                medicalSafetyFirstUseEvidenceFlag
             )
         )
     }

@@ -5,16 +5,25 @@ import SwiftUI
 @MainActor
 public struct OHPPriorSymptomQuestionView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @AccessibilityFocusState private var isQuestionFocused: Bool
+    @AccessibilityFocusState private var levelTwoHeadingFocused: Bool
+    private let safetyPresentation: TrainingSymptomSafetyPresentation?
     private let answer: (OHPSymptomResponse) -> Void
 
-    public init(answer: @escaping (OHPSymptomResponse) -> Void) {
+    public init(
+        safetyPresentation: TrainingSymptomSafetyPresentation? = nil,
+        answer: @escaping (OHPSymptomResponse) -> Void
+    ) {
+        self.safetyPresentation = safetyPresentation
         self.answer = answer
     }
 
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppSpacing.large) {
+                safetyContent
+
                 Text(localized("session.ohp.question.title"))
                     .font(AppTypography.titleLarge)
                     .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
@@ -49,11 +58,12 @@ public struct OHPPriorSymptomQuestionView: View {
                         prominent: false
                     )
                 }
-
-                Text(localized("session.ohp.medicalDisclaimer"))
-                    .font(AppTypography.caption)
-                    .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
+                if safetyPresentation == nil {
+                    Text(localized("session.ohp.medicalDisclaimer"))
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .padding(.horizontal, AppSpacing.screenHorizontal)
             .padding(.top, AppSpacing.large)
@@ -61,8 +71,58 @@ public struct OHPPriorSymptomQuestionView: View {
         }
         .accessibilityIdentifier("session.ohp.question")
         .task {
-            isQuestionFocused = true
+            isQuestionFocused = !isLevelTwoPresented
         }
+        .onChange(of: isLevelTwoPresented) { _, isPresented in
+            updateLevelTwoHeadingFocus(isPresented: isPresented)
+        }
+    }
+
+    @ViewBuilder
+    private var safetyContent: some View {
+        if let safetyPresentation {
+            VStack(alignment: .leading, spacing: AppSpacing.compact) {
+                Text(safetyPresentation.disclaimer)
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("medical.disclaimer.l1")
+                Text(localized("medical.safety.l2.heading"))
+                    .font(AppTypography.label)
+                    .foregroundStyle(AppColors.color(.stateDanger, scheme: colorScheme))
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("medical.safety.l2.heading")
+                    .accessibilityFocused($levelTwoHeadingFocused)
+                Text(safetyPresentation.levelTwoMessage)
+                    .font(AppTypography.body)
+                    .foregroundStyle(AppColors.color(.stateDanger, scheme: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("medical.safety.l2")
+            }
+            .onAppear {
+                updateLevelTwoHeadingFocus(isPresented: true)
+            }
+            .transition(levelTwoTransition)
+        }
+    }
+
+    private var isLevelTwoPresented: Bool {
+        safetyPresentation != nil
+    }
+
+    private var levelTwoTransition: AnyTransition {
+        MedicalSafetyMotionPolicy.transition(
+            reduceMotion: accessibilityReduceMotion,
+            identity: .identity,
+            opacity: .opacity
+        )
+    }
+
+    private func updateLevelTwoHeadingFocus(isPresented: Bool) {
+        levelTwoHeadingFocused = MedicalSafetyFocusPolicy.headingFocused(
+            isLevelTwoPresented: isPresented
+        )
+        isQuestionFocused = !isPresented
     }
 
     @ViewBuilder

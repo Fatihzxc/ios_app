@@ -2,6 +2,9 @@ import Foundation
 import XCTest
 
 final class HealthCheckFlowUITests: XCTestCase {
+    private let disclaimer =
+        "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir."
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
@@ -17,7 +20,7 @@ final class HealthCheckFlowUITests: XCTestCase {
         todayAction.tap()
 
         require(identified("health-check.list.loaded", in: app))
-        require(identified("medical.disclaimer.l1", in: app))
+        assertDisclaimer(in: app)
         let pendingRow = require(
             firstIdentified(prefix: "health-check.row.", labelContaining: "Genel", in: app)
         )
@@ -88,7 +91,7 @@ final class HealthCheckFlowUITests: XCTestCase {
         let todayAction = require(identified("today.health-check.action", in: app))
         makeHittable(todayAction, in: app)
         todayAction.tap()
-        require(identified("medical.disclaimer.l1", in: app))
+        assertDisclaimer(in: app)
         let row = require(
             firstIdentified(prefix: "health-check.row.", labelContaining: "Genel", in: app)
         )
@@ -115,6 +118,13 @@ final class HealthCheckFlowUITests: XCTestCase {
         ] + extraArguments
         app.launch()
         return app
+    }
+
+    private func assertDisclaimer(in app: XCUIApplication) {
+        XCTAssertEqual(
+            require(identified("medical.disclaimer.l1", in: app)).label,
+            disclaimer
+        )
     }
 
     private func makeHittable(_ element: XCUIElement, in app: XCUIApplication) {

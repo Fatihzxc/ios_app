@@ -106,7 +106,9 @@ final class PostureViewModelTests: XCTestCase {
         XCTAssertEqual(repository.createdInputs[1].date, originalDate)
     }
 
-    func testLoadOrdersHistoryAndSafetyUsesOnlyThePreviousExplicitScore() async {
+    // Mutation caught: interpreting a valid wall-test-only record as a missing OHP
+    // answer would incorrectly publish L2 and discard the prior explicit comparison.
+    func testLoadOrdersHistoryAndWallTestOnlyRecordDoesNotTriggerSafety() async {
         let noScore = snapshot(
             id: uuid("00000000-0000-4000-8000-000000000424"),
             score: nil,

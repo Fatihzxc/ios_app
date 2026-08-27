@@ -2849,7 +2849,1287 @@ if "CloudPhotoAssetReferenceSnapshotProviding" in m39_domain_source:
             raise SystemExit(
                 f"M3.9 cloud domain is missing persisted identity/provider contract: {required}"
             )
+m310_general_message = (
+    "Hareketi durdur. Kalıcı veya kötüleşen belirtiler bir sağlık profesyoneli "
+    "tarafından değerlendirilmelidir. Yeni veya belirgin şekilde kötüleşen kol veya "
+    "bacakta güçsüzlük ya da uyuşma, el becerisinde kayıp, denge veya yürümede "
+    "değişiklik ya da mesane veya bağırsak işlevinde değişiklik acil tıbbi "
+    "değerlendirme gerektirir."
+)
+m310_urgent_message = (
+    "Hareketi durdur. Yeni veya belirgin şekilde kötüleşen kol veya bacakta "
+    "güçsüzlük ya da uyuşma, el becerisinde kayıp, denge veya yürümede "
+    "değişiklik ya da mesane veya bağırsak işlevinde değişiklik acil tıbbi "
+    "değerlendirme gerektirir."
+)
 
+
+def swift_assigned_string(source: str, name: str, seen: set[str] | None = None) -> str | None:
+    match = re.search(
+        rf"\b(?:private\s+)?(?:static\s+)?let\s+{re.escape(name)}\s*=",
+        source,
+    )
+    if match is None:
+        return None
+
+    expression_lines = []
+    started = False
+    for line in source[match.end():].splitlines():
+        stripped = line.strip()
+        if not stripped and not started:
+            continue
+        if stripped.startswith('"') or stripped.startswith("+"):
+            expression_lines.append(stripped)
+            started = True
+            continue
+        break
+
+    pieces = re.findall(r'"((?:\\.|[^"\\])*)"', "\n".join(expression_lines))
+    if not pieces:
+        return None
+    value = "".join(pieces)
+
+    visited = set() if seen is None else set(seen)
+    if name in visited:
+        return None
+    visited.add(name)
+
+    def resolve_interpolation(interpolation: re.Match[str]) -> str:
+        dependency = interpolation.group(1)
+        resolved = swift_assigned_string(source, dependency, visited)
+        return interpolation.group(0) if resolved is None else resolved
+
+    value = re.sub(r"\\\(([A-Za-z_][A-Za-z0-9_]*)\)", resolve_interpolation, value)
+    return (
+        value.replace(r"\n", "\n")
+        .replace(r"\t", "\t")
+        .replace(r'\"', '"')
+        .replace(r"\\", "\\")
+    )
+
+
+m310_tests = {
+    "Packages/HealthTrackingModules/Tests/HealthSafetyKitTests/MedicalSafetyPresentationTests.swift": {
+        "testOHPAndIncreasingSymptomsPublishCompleteGeneralLevelTwoInformation",
+        "testMissingSymptomAnswerPublishesCompleteNonUrgentFailClosedLevelTwo",
+        ".missingSymptomAnswer",
+        "expectedGeneralMessage",
+        "expectedUrgentMessage",
+        "notice.message,\n            expectedGeneralMessage",
+        "testEachCervicalRedFlagAlonePublishesExactUrgentMessageAndOverridesEveryGeneralTrigger",
+        "for flag in CervicalRedFlag.allCases",
+        "triggers: [.cervicalRedFlags([flag])]",
+        "for generalTrigger in generalTriggers",
+        "triggers: [generalTrigger, .cervicalRedFlags([flag])]",
+        "XCTAssertEqual(notice.kind, .urgentAssessmentInformation",
+        "XCTAssertTrue(notice.requiresUrgentAssessment",
+        "XCTAssertEqual(notice.message, expectedUrgentMessage",
+        "assertContainsNoNumericMedicalThreshold",
+    },
+    "Packages/HealthTrackingModules/Tests/DesignSystemTests/MedicalSafetyMotionPolicyTests.swift": {
+        "testReduceMotionSelectsIdentityAndDefaultSelectsOpacity",
+        "TransitionProbe.identity",
+        "TransitionProbe.opacity",
+        "identity:",
+        "opacity:",
+    },
+    "Packages/HealthTrackingModules/Tests/DesignSystemTests/MedicalSafetyFocusPolicyTests.swift": {
+        "testLevelTwoAppearanceActivatesHeadingFocusAndRemovalClearsIt",
+        "MedicalSafetyFocusPolicy.headingFocused(isLevelTwoPresented: true)",
+        "MedicalSafetyFocusPolicy.headingFocused(isLevelTwoPresented: false)",
+        "XCTAssertTrue(",
+        "XCTAssertFalse(",
+    },
+    "Packages/HealthTrackingModules/Tests/MetricsKitTests/PostureViewModelTests.swift": {
+        "testLoadOrdersHistoryAndWallTestOnlyRecordDoesNotTriggerSafety",
+        "XCTAssertNil(viewModel.safetyPresentation.levelTwo)",
+        "viewModel.previousExplicitSymptomScore, 3",
+    },
+    "Packages/HealthTrackingModules/Tests/GuidanceKitTests/OHPSafetyGateTests.swift": {
+        "testOnlyExplicitSymptomFreeResponseAllowsLoadIncrease",
+        "safetyStop: OHPSafetyGate.SafetyStop?",
+        ".symptomsPresent,",
+        ".blocked(.previousSymptomsPresent),",
+        ".uncertain,",
+        ".blocked(.previousResponseUncertain),",
+        ".init(alternative: .halfKneelingDBPress)",
+        "XCTAssertEqual(decision.safetyStop, expectation.safetyStop)",
+    },
+    "Packages/HealthTrackingModules/Tests/TrainingKitTests/SessionViewModelTests.swift": {
+        "TrainingSymptomSafetyContext",
+        "symptomSafetyPresentationProvider",
+        ".priorOverheadPressResponse(.notAsked)",
+        ".priorOverheadPressResponse(.uncertain)",
+        "missingAnswerSafetyPresentation",
+        "An explicit symptom-free answer must clear only the fail-closed missing-answer L2.",
+        ".stopped(alternative: heldRepository.ohpSafeAlternative)",
+        "testStoredPriorSymptomsAndUncertaintyStopOHPAtTheSafeAlternative",
+        "testAnsweringPriorSymptomsOrUncertaintyStopsOHPAtTheSafeAlternative",
+        "testCurrentOHPSymptomStopsBeforeTheRepositoryWriteCompletes",
+        "waitUntilOHPSymptomUpdateIsSuspended",
+        ".saving(request: expectedRequest)",
+        "A pending exact write must reject a second write or retry.",
+        "testCurrentOHPSymptomWriteFailureRetainsStopAndRetriesTheExactRequestOnce",
+        ".failed(request: request)",
+        "XCTAssertTrue(viewModel.hasPendingCurrentOHPSymptomWrite)",
+        "Pending current-symptom persistence must block exercise progress and completion.",
+        "A failed pending write must keep route actions fail closed until exact retry succeeds.",
+        "repository.deletedSessionIDs.count",
+        "retryCurrentOHPSymptomWrite",
+        "[request.repositoryUpdate, request.repositoryUpdate]",
+        "Retry must preserve the original session, response, and timestamp.",
+        "XCTAssertEqual(symptomClient.events, [expectedEvent])",
+        "testAdvanceRouteFirstRejectsSymptomAndDuplicateRoutesUntilChosenProgressCompletes",
+        "testGoBackRouteFirstRejectsSymptomUntilChosenProgressCompletes",
+        "testFinishRouteFirstKeepsTheLockThroughProgressAndTransition",
+        "testRouteLockClearsAfterAppliedProgressFailureWithoutAcceptingSymptom",
+        "waitUntilProgressUpdateIsSuspended",
+        "waitUntilTransitionIsSuspended",
+        "XCTAssertTrue(viewModel.isSessionRouteMutationInFlight)",
+        "XCTAssertFalse(viewModel.canReportCurrentOHPSymptom)",
+        "XCTAssertTrue(repository.ohpSymptomUpdates.isEmpty)",
+        "XCTAssertEqual(repository.progressUpdates.count, progressCount + 1)",
+        "XCTAssertEqual(repository.progress?.stage, .cooldown)",
+        "XCTAssertEqual(repository.progress?.stage, .warmup)",
+        "XCTAssertEqual(repository.progress?.stage, .summary)",
+        "XCTAssertEqual(viewModel.state, .failed(.progress))",
+        "testDeletionFailurePreservesStoppedSymptomRetryAndExactRequest",
+        "testSuccessfulDeletionIsTheOnlyDeletionPathThatDiscardsPendingSymptomRetry",
+        "testDeleteFirstLeaseRejectsSymptomRoutesAndDuplicateDeleteUntilSuccess",
+        "testSuspendedDeletionFailureRetainsStoppedExactRetryUntilLeaseReleases",
+        "testRouteFirstLeaseRejectsDeletionRequestAndConfirmationBeforeRepositoryAwait",
+        "testCancelledDeletionReleasesLeaseAndPreservesExactStoppedRetry",
+        "waitUntilDeletionIsSuspended",
+        "repository.suspendNextDeletion()",
+        "repository.resumeSuspendedDeletion()",
+        "deletion.cancel()",
+        "try Task.checkCancellation()",
+        "deleteAttempts.append(id)",
+        "XCTAssertTrue(viewModel.isSessionDeletionInFlight)",
+        "XCTAssertEqual(repository.deleteAttempts, [sessionID])",
+        "XCTAssertTrue(viewModel.hasSessionDeletionFailure)",
+        "XCTAssertEqual(viewModel.state, stoppedState)",
+        "XCTAssertTrue(repository.deletedSessionIDs.isEmpty)",
+        "XCTAssertEqual(repository.deletedSessionIDs, [sessionID])",
+        "testOrdinaryDeletionFailureRetainsTheExistingRecoverableFailureRoute",
+        "XCTAssertEqual(viewModel.state, .failed(.deletion))",
+        "testStartTailOwnsSessionUntilInitialProgressFinishesAndDeleteFirstRejectsRestart",
+        "testRestoredStartKeepsItsOwnerThroughTheActiveSymptomJournalTail",
+        "testWarmupAndCooldownChecklistOwnersBlockDeletionUntilProgressReturns",
+        "testPriorResponseAndDeloadOwnersBlockDeletionThroughRepositoryStateWrites",
+        "testSetSaveAndExactRetryEachOwnTheirWholeRepositoryLifetime",
+        "testSummarySaveOwnerBlocksDeletionUntilItsDismissalCommits",
+        "testOverlappingOwnersReleaseOnlyTheirExactTokenBeforeDeletionBecomesAvailable",
+        "testCancelledSessionMutationReleasesOnlyItsOwnerAndAllowsDeletion",
+        "testJournalRetryMayFinishAfterDeletionWithoutRepublishingSessionState",
+        "XCTAssertEqual(viewModel.activeSessionMutationCount, 2)",
+        '"The first completion must remove only its exact owner token."',
+        '"Metrics-only journal retry must not own the session deletion boundary."',
+        "assertDeletionRejectedWhileSessionMutationOwned",
+        "suspendNextDeloadUpdate",
+        "suspendNextSetSave",
+        "suspendNextSummaryUpdate",
+        "suspendNextRecord",
+        "OneShotSuspensionGate",
+    },
+    "HealthTrackingAppTests/TodayCompositionTests.swift": {
+        "testAppRootExplicitInitializerSupportsComposedAndDefaultMedicalSafetyController",
+        "testMedicalSafetyFirstUseEvidenceRequiresOneExplicitUITestFlag",
+        "AppUITestLaunchConfiguration.medicalSafetyFirstUseEvidenceFlag",
+        ".exposesMedicalSafetyFirstUseEvidence",
+        "Duplicate medical-safety evidence flags must fail closed.",
+        "rootInitializerIsTypeChecked",
+        "rootInitializerWithMedicalSafetyControllerIsTypeChecked",
+        "medicalSafetyAcknowledgementController:",
+        "dependencies.medicalSafetyAcknowledgementController",
+    },
+    "HealthTrackingAppTests/SymptomJournalAdapterTests.swift": {
+        "testStructuredMissingOHPSessionResponsesMapToCentralFailClosedPresentation",
+        "OHPSymptomResponse.notAsked, .uncertain",
+        "TrainingSymptomSafetyMapper.presentation",
+        ".priorOverheadPressResponse(response)",
+        ".priorOverheadPressResponse(.symptomFree)",
+        "expectedGeneralMessage",
+        "XCTAssertEqual(presentation.levelTwoMessage, expectedGeneralMessage)",
+        "testAppDependenciesComposesStructuredSafetyProviderIntoSessionViewModel",
+        "AppDependencies(environment: .uiTesting)",
+        "dependencies.makeSessionViewModel()",
+        "session.resolveSymptomSafetyPresentation(for: context)",
+        "session.resolveSymptomSafetyPresentation(",
+    },
+    "HealthTrackingAppTests/MedicalSafetyAcknowledgementTests.swift": {
+        "testSuccessfulAcknowledgementPersistsAcrossControllerRecreationWithoutChangingLevelOne",
+        "testFailedAcknowledgementWriteKeepsLevelZeroVisibleAndLevelOnePermanent",
+        "MedicalSafetyAcknowledgementController",
+        "MedicalSafetyAcknowledgementStore",
+        "XCTAssertFalse(controller.acknowledge())",
+        "XCTAssertTrue(controller.isLevelZeroVisible)",
+        "levelOnePresentation, .permanent",
+    },
+    "HealthTrackingAppUITests/MedicalSafetyFlowUITests.swift": {
+        "testFirstUseExplanationPersistsIndependentlyFromPermanentReminderDisclaimer",
+        "-ui-test-medical-safety-first-use-evidence",
+        "medical.explanation.l0",
+        "medical.explanation.l0.acknowledge",
+        "acknowledgement.frame.height + 0.01",
+        "The shipped L0 acknowledgement target must remain at least 52 points high.",
+        "firstLaunch.terminate()",
+        "medical.disclaimer.l1",
+    },
+    "HealthTrackingAppUITests/TrainingAccessibilityUITests.swift": {
+        "acknowledgeFirstUseExplanationIfNeeded(in: app)",
+        "-ui-test-medical-safety-first-use-evidence",
+        "The first-use L0 acknowledgement must retain its 52-point target at AX5.",
+    },
+    "HealthTrackingAppUITests/OHPSafetyFlowUITests.swift": {
+        "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir.",
+        "medical.safety.l2.heading",
+        "-UIAccessibilityReduceMotionEnabled",
+        "assertCompleteGeneralLevelTwo",
+        "An unanswered prior OHP response must fail closed before it is answered.",
+        "An explicit symptom-free answer must clear the missing-answer L2.",
+        "The stable heading must not replace the complete L2 message.",
+        "expectedGeneralMessage",
+        "XCTAssertEqual(",
+        "testAnsweredPriorSymptomsAndUncertaintyRenderTheShippedStoppedRoute",
+        "-ui-test-store-identifier",
+        "A stored prior response must not reopen the unanswered question.",
+        "must restore the stopped route.",
+        "session.ohp.prior.symptoms-present",
+        "session.ohp.prior.uncertain",
+        "A prior safety stop must not expose the current-symptom action.",
+        "session.ohp.persistence.error",
+        "session.ohp.persistence.retry",
+        "persistenceRetry.frame.height + 0.01",
+        "The shipped persistence retry target must remain at least 52 points high.",
+        "session.exercise.finish-incomplete",
+        "session.close",
+        "app.buttons.matching(identifier: identifier).firstMatch",
+        "Pending OHP persistence must disable the route control:",
+        "Successful exact retry must re-enable the route control:",
+        "session.delete.confirm.action",
+        "session.delete.error",
+        "A failed deletion must stay on the stopped route and expose a separate error.",
+        "A failed deletion must not replace the current OHP safety stop.",
+        "A failed deletion must preserve the exact symptom persistence retry.",
+        "Deletion failure must keep the pending route control disabled:",
+        "The journal must start only after the exact pending training-state write succeeds.",
+    },
+    "HealthTrackingAppUITests/PostureFlowUITests.swift": {
+        "medical.disclaimer.l1",
+        '.matching(identifier: "medical.disclaimer.l1")',
+        ".firstMatch",
+        "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir.",
+        "assertDisclaimer(in: app)",
+        "assertCompleteGeneralLevelTwo",
+        "The final symptom input must immediately publish the complete L2.",
+        "medical.safety.l2.heading",
+        "dismissKeyboardAfterTyping: false",
+        "The stable heading must not replace the complete L2 message.",
+        "expectedGeneralMessage",
+        "XCTAssertEqual(",
+        "-UIAccessibilityReduceMotionEnabled",
+    },
+    "HealthTrackingAppUITests/BloodworkFlowUITests.swift": {
+        "bloodwork.disclaimer.l1",
+        "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir.",
+        "assertDisclaimer(in: app)",
+    },
+    "HealthTrackingAppUITests/HealthCheckFlowUITests.swift": {
+        "medical.disclaimer.l1",
+        "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir.",
+        "assertDisclaimer(in: app)",
+    },
+}
+
+for relative_path, tokens in m310_tests.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.10 RED test file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.10 RED contracts: {absent}")
+    async_autoclosure_lines = async_xctest_autoclosure_lines(text)
+    if async_autoclosure_lines:
+        locations = ", ".join(
+            f"{relative_path}:{line}" for line in async_autoclosure_lines
+        )
+        raise SystemExit(
+            "M3.10 XCTest autoclosures must evaluate async values first: "
+            f"{locations}"
+        )
+
+medical_safety_ui_test_text = (
+    root / "HealthTrackingAppUITests/MedicalSafetyFlowUITests.swift"
+).read_text(encoding="utf-8")
+compact_medical_safety_ui_test = re.sub(r"\s+", "", medical_safety_ui_test_text)
+if (
+    "XCTAssertGreaterThanOrEqual(acknowledgement.frame.height+0.01,52,"
+    not in compact_medical_safety_ui_test
+):
+    raise SystemExit(
+        "M3.10 shipped L0 acknowledgement UI test must measure a real 52-point target"
+    )
+
+ohp_safety_ui_test_text = (
+    root / "HealthTrackingAppUITests/OHPSafetyFlowUITests.swift"
+).read_text(encoding="utf-8")
+compact_ohp_safety_ui_test = re.sub(r"\s+", "", ohp_safety_ui_test_text)
+if (
+    "XCTAssertGreaterThanOrEqual(persistenceRetry.frame.height+0.01,52,"
+    not in compact_ohp_safety_ui_test
+):
+    raise SystemExit(
+        "M3.10 shipped OHP persistence retry UI test must measure a real 52-point target"
+    )
+required_pending_route_test = {
+    'letblockedRouteControls=["session.exercise.next","session.exercise.back",'
+    '"session.exercise.finish-incomplete","session.close",]',
+    "PendingOHPpersistencemustdisabletheroutecontrol:\\(identifier).",
+    "Successfulexactretrymustre-enabletheroutecontrol:\\(identifier).",
+}
+absent = sorted(
+    token for token in required_pending_route_test
+    if token not in compact_ohp_safety_ui_test
+)
+if absent:
+    raise SystemExit(
+        "M3.10 shipped OHP UI test must keep every normal route control disabled "
+        f"until the exact pending write succeeds: {absent}"
+    )
+scoped_route_query = "app.buttons.matching(identifier: identifier).firstMatch"
+if ohp_safety_ui_test_text.count(scoped_route_query) != 3:
+    raise SystemExit(
+        "M3.10 OHP route assertions must use the exact button-scoped query in all "
+        "three pending/deletion/retry loops"
+    )
+
+motion_policy_test_text = (
+    root
+    / "Packages/HealthTrackingModules/Tests/DesignSystemTests/MedicalSafetyMotionPolicyTests.swift"
+).read_text(encoding="utf-8")
+compact_motion_test = re.sub(r"\s+", "", motion_policy_test_text)
+for reduce_motion, expected_transition in (("true", "identity"), ("false", "opacity")):
+    expected_contract = (
+        "XCTAssertEqual(MedicalSafetyMotionPolicy.transition("
+        f"reduceMotion:{reduce_motion},"
+        "identity:TransitionProbe.identity,"
+        "opacity:TransitionProbe.opacity"
+        f"),.{expected_transition})"
+    )
+    if expected_contract not in compact_motion_test:
+        raise SystemExit(
+            "M3.10 motion behavior test must require Reduce Motion true -> identity "
+            "and false -> opacity through the production-facing selector"
+        )
+
+focus_policy_test_text = (
+    root
+    / "Packages/HealthTrackingModules/Tests/DesignSystemTests/MedicalSafetyFocusPolicyTests.swift"
+).read_text(encoding="utf-8")
+compact_focus_test = re.sub(r"\s+", "", focus_policy_test_text)
+required_focus_behavior = {
+    "XCTAssertTrue(MedicalSafetyFocusPolicy.headingFocused(isLevelTwoPresented:true))",
+    "XCTAssertFalse(MedicalSafetyFocusPolicy.headingFocused(isLevelTwoPresented:false))",
+}
+absent = sorted(
+    contract for contract in required_focus_behavior
+    if contract not in compact_focus_test
+)
+if absent:
+    raise SystemExit(
+        "M3.10 focus behavior test must activate heading focus when L2 appears "
+        "and clear it when L2 is removed"
+    )
+
+for relative_path in (
+    "HealthTrackingAppUITests/OHPSafetyFlowUITests.swift",
+    "HealthTrackingAppUITests/PostureFlowUITests.swift",
+):
+    ui_test_text = (root / relative_path).read_text(encoding="utf-8")
+    for unsupported_focus_claim in (
+        "hasFocus",
+        "UIAccessibilityVoiceOver",
+        "VoiceOverEnabled",
+    ):
+        if unsupported_focus_claim in ui_test_text:
+            raise SystemExit(
+                f"{relative_path} must not claim focus through inactive or "
+                f"unverified VoiceOver state: {unsupported_focus_claim}"
+            )
+
+posture_ui_test_text = (
+    root / "HealthTrackingAppUITests/PostureFlowUITests.swift"
+).read_text(encoding="utf-8")
+posture_order_tokens = (
+    'in: textField("posture.entry.region"',
+    'in: textField("posture.entry.note"',
+    'in: textField("posture.entry.symptom"',
+    "assertCompleteGeneralLevelTwo(",
+)
+posture_positions = [posture_ui_test_text.find(token) for token in posture_order_tokens]
+if any(position < 0 for position in posture_positions) or posture_positions != sorted(
+    posture_positions
+):
+    raise SystemExit(
+        "M3.10 posture UI must enter region/note first, make symptom the final "
+        "trigger, then assert the L2 immediately"
+    )
+symptom_to_assertion = posture_ui_test_text[
+    posture_positions[2]:posture_positions[3]
+]
+symptom_call_start = posture_ui_test_text.rfind(
+    "replaceText(", 0, posture_positions[2]
+)
+symptom_call_end = None
+depth = 0
+for index in range(symptom_call_start, posture_positions[3]):
+    character = posture_ui_test_text[index]
+    if character == "(":
+        depth += 1
+    elif character == ")":
+        depth -= 1
+        if depth == 0:
+            symptom_call_end = index
+            break
+if (
+    "dismissKeyboardAfterTyping: false" not in symptom_to_assertion
+    or symptom_call_start < 0
+    or symptom_call_end is None
+    or ".tap(" in symptom_to_assertion
+    or posture_ui_test_text[symptom_call_end + 1:posture_positions[3]].strip()
+):
+    raise SystemExit(
+        "M3.10 posture UI must perform no focus-stealing tap between the final "
+        "symptom trigger and the immediate L2 assertion"
+    )
+
+medical_safety_test_text = (
+    root
+    / "Packages/HealthTrackingModules/Tests/HealthSafetyKitTests/MedicalSafetyPresentationTests.swift"
+).read_text(encoding="utf-8")
+for message_name, expected_message in (
+    ("expectedGeneralMessage", m310_general_message),
+    ("expectedUrgentMessage", m310_urgent_message),
+):
+    actual_message = swift_assigned_string(medical_safety_test_text, message_name)
+    if actual_message != expected_message:
+        raise SystemExit(
+            f"M3.10 RED test {message_name} must freeze the complete exact Turkish copy"
+        )
+
+m310_support = {
+    ".github/workflows/ios.yml": {
+        "Targeted M3.10 pure medical safety tests",
+        "scripts/test-ios.sh --only-testing HealthSafetyKitTests",
+        "Targeted M3.10 medical safety focus and motion policy tests",
+        "scripts/test-ios.sh --only-testing DesignSystemTests",
+        "Targeted M3.10 shipped session safety tests",
+        "scripts/test-ios.sh --only-testing TrainingKitTests",
+        "Targeted M3.10 app safety composition tests",
+        "scripts/test-ios.sh --only-testing HealthTrackingAppTests",
+    },
+}
+
+for relative_path, tokens in m310_support.items():
+    path = root / relative_path
+    if not path.is_file():
+        raise SystemExit(f"Missing M3.10 support file: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    absent = sorted(token for token in tokens if token not in text)
+    if absent:
+        raise SystemExit(f"{relative_path} is missing M3.10 test wiring: {absent}")
+
+medical_safety_source = (
+    root / "Packages/HealthTrackingModules/Sources/HealthSafetyKit/HealthSafetyKitModule.swift"
+)
+medical_safety_text = medical_safety_source.read_text(encoding="utf-8")
+frozen_l1_copy = "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir."
+if frozen_l1_copy not in medical_safety_text:
+    raise SystemExit("M3.10 frozen L1 Turkish safety copy changed or is missing")
+
+if "case missingSymptomAnswer" in medical_safety_text:
+    required_m310_safety_copy = {
+        "Kalıcı veya kötüleşen belirtiler",
+        "sağlık profesyoneli tarafından değerlendirilmelidir.",
+        "Yeni veya belirgin şekilde kötüleşen",
+        "kol veya bacakta güçsüzlük ya da uyuşma",
+        "el becerisinde kayıp",
+        "denge veya yürümede değişiklik",
+        "mesane veya bağırsak işlevinde değişiklik",
+        "requiresUrgentAssessment: false",
+        "requiresUrgentAssessment: true",
+    }
+    absent = sorted(
+        token for token in required_m310_safety_copy
+        if token not in medical_safety_text
+    )
+    if absent:
+        raise SystemExit(f"M3.10 required general/urgent safety copy is incomplete: {absent}")
+
+    for message_name, expected_message in (
+        ("generalStopMessage", m310_general_message),
+        ("urgentMessage", m310_urgent_message),
+    ):
+        actual_message = swift_assigned_string(medical_safety_text, message_name)
+        if actual_message != expected_message:
+            raise SystemExit(
+                f"M3.10 {message_name} must match the complete exact Turkish safety copy"
+            )
+
+for prohibited in (
+    "diagnosis", "diagnose", "diagnostic", "disease", "condition",
+    "normal", "abnormal", "threshold", "tanı", "teşhis", "hastalık",
+    "durumunuz",
+):
+    if prohibited.casefold() in medical_safety_text.casefold():
+        raise SystemExit(
+            "M3.10 safety presentation must not diagnose, classify, or interpret: "
+            f"{prohibited}"
+        )
+
+m310_training_mapper = (
+    root / "App/Application/TrainingSymptomMetricsAdapter.swift"
+)
+m310_training_mapper_text = m310_training_mapper.read_text(encoding="utf-8")
+if "static func presentation(" in m310_training_mapper_text:
+    required_mapping = {
+        ".priorOverheadPressResponse(.notAsked)",
+        ".priorOverheadPressResponse(.uncertain)",
+        ".currentOverheadPressResponse(.symptomsPresent)",
+        ".missingSymptomAnswer",
+        ".overheadPressSymptom",
+    }
+    absent = sorted(
+        token for token in required_mapping
+        if token not in m310_training_mapper_text
+    )
+    if absent:
+        raise SystemExit(f"M3.10 structured OHP safety mapping is incomplete: {absent}")
+
+
+
+def swift_braced_declaration(source: str, name: str) -> str | None:
+    declaration = re.search(rf"\b(?:var|func)\s+{re.escape(name)}\b[^{{]*{{", source)
+    if declaration is None:
+        return None
+    opening = declaration.end() - 1
+    depth = 0
+    for index in range(opening, len(source)):
+        character = source[index]
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0:
+                return source[opening:index + 1]
+    return None
+
+
+if "case missingSymptomAnswer" in medical_safety_text:
+    ui_test_launch_configuration_text = (
+        root / "App/Support/AppUITestLaunchConfiguration.swift"
+    ).read_text(encoding="utf-8")
+    compact_ui_test_launch_configuration = re.sub(
+        r"\s+", "", ui_test_launch_configuration_text
+    )
+    required_first_use_evidence_configuration = {
+        'staticletmedicalSafetyFirstUseEvidenceFlag="-ui-test-medical-safety-first-use-evidence"',
+        "letexposesMedicalSafetyFirstUseEvidence:Bool",
+        "arguments.filter({$0==medicalSafetyFirstUseEvidenceFlag}).count<=1",
+        "exposesMedicalSafetyFirstUseEvidence:arguments.contains(medicalSafetyFirstUseEvidenceFlag)",
+    }
+    absent = sorted(
+        token for token in required_first_use_evidence_configuration
+        if token not in compact_ui_test_launch_configuration
+    )
+    if absent:
+        raise SystemExit(
+            "M3.10 UI-test medical-safety first-use evidence configuration is incomplete: "
+            f"{absent}"
+        )
+
+    dependencies_text = (root / "App/Application/AppDependencies.swift").read_text(
+        encoding="utf-8"
+    )
+    debug_ui_test_acknowledgement = re.compile(
+        r"#if\s+DEBUG\s+"
+        r"if\s+environment\s*==\s*\.uiTesting\s*,\s*"
+        r"let\s+launchConfiguration\s*=\s*"
+        r"AppUITestLaunchConfiguration\.resolve\(\)\s*,\s*"
+        r"!launchConfiguration\.exposesMedicalSafetyFirstUseEvidence\s*\{\s*"
+        r"_\s*=\s*medicalSafetyAcknowledgementController\.acknowledge\(\)\s*"
+        r"\}\s*#endif",
+        re.DOTALL,
+    )
+    if debug_ui_test_acknowledgement.search(dependencies_text) is None:
+        raise SystemExit(
+            "M3.10 ordinary valid UI tests must acknowledge L0 only inside DEBUG "
+            "while the explicit medical-safety evidence launch remains unacknowledged"
+        )
+
+    app_root_text = (root / "App/Application/AppRootView.swift").read_text(
+        encoding="utf-8"
+    )
+    compact_app_root = re.sub(r"\s+", "", app_root_text)
+    required_app_root_init = {
+        "medicalSafetyAcknowledgementController:MedicalSafetyAcknowledgementController?=nil",
+        "self.medicalSafetyAcknowledgementController=medicalSafetyAcknowledgementController",
+    }
+    absent = sorted(
+        token for token in required_app_root_init if token not in compact_app_root
+    )
+    if absent or re.search(
+        r"\blet\s+medicalSafetyAcknowledgementController\s*:[^\n=]+\s*=\s*nil",
+        app_root_text,
+    ):
+        raise SystemExit(
+            "M3.10 AppRootView must expose an explicit immutable initializer with "
+            "a defaulted medical safety acknowledgement controller"
+        )
+    bootstrap_text = (root / "App/Application/AppBootstrapView.swift").read_text(
+        encoding="utf-8"
+    )
+    if (
+        "medicalSafetyAcknowledgementController:" not in bootstrap_text
+        or "dependencies.medicalSafetyAcknowledgementController" not in bootstrap_text
+    ):
+        raise SystemExit(
+            "M3.10 AppBootstrapView must pass the composed acknowledgement controller "
+            "through the explicit AppRootView initializer"
+        )
+    l0_acknowledgement_label_contract = (
+        'Button{controller.acknowledge()}label:{Text(String(localized:'
+        '"medical.explanation.l0.acknowledge")).frame(maxWidth:.infinity,'
+        'minHeight:52).contentShape(Rectangle())}'
+    )
+    if l0_acknowledgement_label_contract not in compact_app_root:
+        raise SystemExit(
+            "M3.10 L0 acknowledgement must place the 52-point frame and content "
+            "shape inside the explicit Button label"
+        )
+
+    ohp_gate_text = (
+        root / "Packages/HealthTrackingModules/Sources/GuidanceKit/Safety/OHPSafetyGate.swift"
+    ).read_text(encoding="utf-8")
+    for response_case, next_case in (
+        ("case .symptomsPresent:", "case .uncertain:"),
+        ("case .uncertain:", None),
+    ):
+        start = ohp_gate_text.find(response_case)
+        end = len(ohp_gate_text) if next_case is None else ohp_gate_text.find(next_case, start)
+        segment = ohp_gate_text[start:end] if start >= 0 and end > start else ""
+        if "safetyStop: SafetyStop(alternative: .halfKneelingDBPress)" not in segment:
+            raise SystemExit(
+                "M3.10 prior OHP symptoms and uncertainty must produce the reviewed "
+                "half-kneeling safety stop"
+            )
+
+    session_snapshot_text = (
+        root / "Packages/HealthTrackingModules/Sources/TrainingKit/Snapshots/TrainingSnapshots.swift"
+    ).read_text(encoding="utf-8")
+    required_write_contract = {
+        "SessionOHPSymptomWriteRequest",
+        "let sessionID: UUID",
+        "let response: OHPSymptomResponse",
+        "let reportedAt: Date",
+        "SessionOHPSymptomWriteState",
+        "case idle",
+        "case saving(request: SessionOHPSymptomWriteRequest)",
+        "case failed(request: SessionOHPSymptomWriteRequest)",
+    }
+    absent = sorted(
+        token for token in required_write_contract if token not in session_snapshot_text
+    )
+    if absent:
+        raise SystemExit(
+            f"M3.10 current OHP write state must retain one exact retry request: {absent}"
+        )
+
+    session_view_model_text = (
+        root / "Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionViewModel.swift"
+    ).read_text(encoding="utf-8")
+    route_lock_contract = "public private(set) var isSessionRouteMutationInFlight = false"
+    if route_lock_contract not in session_view_model_text:
+        raise SystemExit(
+            "M3.10 reverse-order OHP safety requires an observable MainActor route lock"
+        )
+    deletion_lock_contract = "public private(set) var isSessionDeletionInFlight = false"
+    if deletion_lock_contract not in session_view_model_text:
+        raise SystemExit(
+            "M3.10 deletion arbitration requires an observable MainActor deletion lease"
+        )
+    broad_owner_contracts = {
+        "private var sessionMutationOwners: Set<UUID> = []",
+        "public var activeSessionMutationCount: Int",
+        "sessionMutationOwners.count",
+        "public var isSessionMutationInFlight: Bool",
+        "!sessionMutationOwners.isEmpty",
+        "private func beginSessionMutation() -> UUID?",
+        "private func endSessionMutation(_ owner: UUID)",
+    }
+    absent = sorted(
+        token for token in broad_owner_contracts
+        if token not in session_view_model_text
+    )
+    if absent:
+        raise SystemExit(
+            "M3.10 deletion finality requires exact broad session mutation owners: "
+            f"{absent}"
+        )
+    begin_mutation_body = swift_braced_declaration(
+        session_view_model_text, "beginSessionMutation"
+    ) or ""
+    end_mutation_body = swift_braced_declaration(
+        session_view_model_text, "endSessionMutation"
+    ) or ""
+    if (
+        "guard !isSessionDeletionInFlight else { return nil }" not in begin_mutation_body
+        or "let owner = UUID()" not in begin_mutation_body
+        or "sessionMutationOwners.insert(owner)" not in begin_mutation_body
+        or "return owner" not in begin_mutation_body
+        or "sessionMutationOwners.remove(owner)" not in end_mutation_body
+        or "removeAll" in end_mutation_body
+    ):
+        raise SystemExit(
+            "M3.10 broad session mutation owner must be an exact inserted/removed token"
+        )
+
+    session_mutation_entries = (
+        "start",
+        "toggleWarmupItem",
+        "completeWarmup",
+        "skipWarmup",
+        "answerPreviousOHPSymptom",
+        "respondToDeload",
+        "reportCurrentOHPSymptom",
+        "retryCurrentOHPSymptomWrite",
+        "advanceExercise",
+        "goBack",
+        "toggleCooldownItem",
+        "completeCooldown",
+        "skipCooldown",
+        "finishIncomplete",
+        "saveCurrentSet",
+        "retrySetSave",
+        "saveSummary",
+    )
+    owner_acquire = (
+        "guard let sessionMutationOwner = beginSessionMutation() else { return }"
+    )
+    owner_release = "defer { endSessionMutation(sessionMutationOwner) }"
+    for action_name in session_mutation_entries:
+        action_body = swift_braced_declaration(session_view_model_text, action_name) or ""
+        acquire_position = action_body.find(owner_acquire)
+        release_position = action_body.find(owner_release)
+        first_await = action_body.find("await ")
+        if (
+            min(acquire_position, release_position, first_await) < 0
+            or not acquire_position < release_position < first_await
+            or action_body.count(owner_acquire) != 1
+            or action_body.count(owner_release) != 1
+        ):
+            raise SystemExit(
+                "M3.10 session mutation entry must acquire and defer-release one exact "
+                f"broad owner before awaiting: {action_name}"
+            )
+
+    retry_journal_body = swift_braced_declaration(
+        session_view_model_text, "retrySymptomJournal"
+    ) or ""
+    if "beginSessionMutation" in retry_journal_body or "state =" in retry_journal_body:
+        raise SystemExit(
+            "M3.10 metrics-only symptom journal retry must not own or republish session state"
+        )
+    for action_name in (
+        "selectRecovery",
+        "selectPerformedVariant",
+        "stepperChanged",
+        "updateSummaryNote",
+    ):
+        action_body = swift_braced_declaration(session_view_model_text, action_name) or ""
+        if "guard !isSessionDeletionInFlight else { return }" not in action_body:
+            raise SystemExit(
+                "M3.10 delete-first safety must reject synchronous session mutation: "
+                f"{action_name}"
+            )
+    can_report_body = swift_braced_declaration(
+        session_view_model_text, "canReportCurrentOHPSymptom"
+    ) or ""
+    if (
+        "!isSessionRouteMutationInFlight" not in can_report_body
+        or "!isSessionDeletionInFlight" not in can_report_body
+    ):
+        raise SystemExit(
+            "M3.10 shipped symptom action availability must close during route or deletion ownership"
+        )
+    report_body = swift_braced_declaration(
+        session_view_model_text, "reportCurrentOHPSymptom"
+    ) or ""
+    report_lock = report_body.find("!isSessionRouteMutationInFlight")
+    report_delete_lock = report_body.find("!isSessionDeletionInFlight")
+    report_request = report_body.find("let request = SessionOHPSymptomWriteRequest(")
+    if (
+        min(report_lock, report_delete_lock, report_request) < 0
+        or report_lock > report_request
+        or report_delete_lock > report_request
+    ):
+        raise SystemExit(
+            "M3.10 current OHP report must reject route-first and delete-first races before creating a request"
+        )
+    report_order = (
+        "pendingOHPSymptomWriteRequest == nil",
+        "let request = SessionOHPSymptomWriteRequest(",
+        "pendingOHPSymptomWriteRequest = request",
+        "replaceActiveSession(",
+        "resolveOHPSafety(",
+        "ohpSymptomWriteState = .saving(request: request)",
+        "await persistCurrentOHPSymptomWrite(request)",
+    )
+    report_positions = [report_body.find(token) for token in report_order]
+    if any(position < 0 for position in report_positions) or report_positions != sorted(
+        report_positions
+    ):
+        raise SystemExit(
+            "M3.10 current OHP action must publish and retain the exact stopped request "
+            "before awaiting persistence"
+        )
+    persist_body = swift_braced_declaration(
+        session_view_model_text, "persistCurrentOHPSymptomWrite"
+    ) or ""
+    required_persist_tokens = {
+        "coordinator.recordOHPSymptomResponse(",
+        "pendingOHPSymptomWriteRequest = nil",
+        "ohpSymptomWriteState = .idle",
+        "ohpSymptomWriteState = .failed(request: request)",
+        "await recordSymptomEvent(",
+        "occurredAt: request.reportedAt",
+    }
+    absent = sorted(
+        token for token in required_persist_tokens if token not in persist_body
+    )
+    if absent or "state = .failed" in persist_body:
+        raise SystemExit(
+            "M3.10 current OHP write failure must retain the active stopped route and "
+            f"journal only after durable success: {absent}"
+        )
+    repository_write = persist_body.find("coordinator.recordOHPSymptomResponse(")
+    journal_write = persist_body.find("await recordSymptomEvent(")
+    if repository_write < 0 or journal_write < repository_write:
+        raise SystemExit(
+            "M3.10 current OHP symptom journal must start only after repository success"
+        )
+    retry_body = swift_braced_declaration(
+        session_view_model_text, "retryCurrentOHPSymptomWrite"
+    ) or ""
+    if (
+        "pendingOHPSymptomWriteRequest" not in retry_body
+        or "await persistCurrentOHPSymptomWrite(request)" not in retry_body
+        or "!isSessionDeletionInFlight" not in retry_body
+        or "now()" in retry_body
+    ):
+        raise SystemExit(
+            "M3.10 current OHP retry must reject deletion ownership and reuse the exact pending request"
+        )
+
+    pending_flag_body = swift_braced_declaration(
+        session_view_model_text, "hasPendingCurrentOHPSymptomWrite"
+    ) or ""
+    compact_pending_flag = re.sub(r"\s+", "", pending_flag_body)
+    required_pending_flag = {
+        "guardpendingOHPSymptomWriteRequest!=nilelse{returnfalse}",
+        "case.saving,.failed:returntrue",
+        "case.idle:returnfalse",
+    }
+    absent = sorted(
+        token for token in required_pending_flag if token not in compact_pending_flag
+    )
+    if absent:
+        raise SystemExit(
+            "M3.10 pending current OHP write flag must derive fail-closed from the "
+            f"exact retained request and write state: {absent}"
+        )
+
+    saving_flag_body = swift_braced_declaration(
+        session_view_model_text, "isCurrentOHPSymptomWriteSaving"
+    ) or ""
+    compact_saving_flag = re.sub(r"\s+", "", saving_flag_body)
+    if (
+        "guardpendingOHPSymptomWriteRequest!=nilelse{returnfalse}"
+        not in compact_saving_flag
+        or "case.saving=ohpSymptomWriteState" not in compact_saving_flag
+    ):
+        raise SystemExit(
+            "M3.10 destructive deletion guard must distinguish the exact saving "
+            "window from a failed retry-visible write"
+        )
+
+    for action_name in ("advanceExercise", "goBack", "finishSession"):
+        action_body = swift_braced_declaration(session_view_model_text, action_name) or ""
+        if "!hasPendingCurrentOHPSymptomWrite" not in action_body:
+            raise SystemExit(
+                "M3.10 pending current OHP write must block normal session route "
+                f"action: {action_name}"
+            )
+        if "!isSessionDeletionInFlight" not in action_body:
+            raise SystemExit(
+                "M3.10 delete-first safety must block normal session route action: "
+                f"{action_name}"
+            )
+        route_guard = action_body.find("!isSessionRouteMutationInFlight")
+        route_acquire = action_body.find("isSessionRouteMutationInFlight = true")
+        route_release = action_body.find(
+            "defer { isSessionRouteMutationInFlight = false }"
+        )
+        first_await = action_body.find("await ")
+        if (
+            min(route_guard, route_acquire, route_release, first_await) < 0
+            or not route_guard < route_acquire < route_release < first_await
+        ):
+            raise SystemExit(
+                "M3.10 route-first safety must acquire and defer-release the lock "
+                f"before awaiting: {action_name}"
+            )
+    for action_name in ("requestDeletion", "confirmDeletion"):
+        action_body = swift_braced_declaration(session_view_model_text, action_name) or ""
+        if "!isCurrentOHPSymptomWriteSaving" not in action_body:
+            raise SystemExit(
+                "M3.10 saving current OHP write must block destructive deletion race: "
+                f"{action_name}"
+            )
+        if (
+            "!isSessionRouteMutationInFlight" not in action_body
+            or "!isSessionDeletionInFlight" not in action_body
+            or "!isSessionMutationInFlight" not in action_body
+        ):
+            raise SystemExit(
+                "M3.10 deletion entry must reject route, broad mutation, and duplicate deletion ownership: "
+                f"{action_name}"
+            )
+
+    deletion_failure_contract = (
+        "public private(set) var hasSessionDeletionFailure = false"
+    )
+    if deletion_failure_contract not in session_view_model_text:
+        raise SystemExit(
+            "M3.10 deletion failure must remain observable without replacing the stopped route"
+        )
+    confirm_deletion_body = swift_braced_declaration(
+        session_view_model_text, "confirmDeletion"
+    ) or ""
+    delete_call = confirm_deletion_body.find("try await repository.deleteWorkoutSession(")
+    deletion_acquire = confirm_deletion_body.find("isSessionDeletionInFlight = true")
+    deletion_release = confirm_deletion_body.find(
+        "defer { isSessionDeletionInFlight = false }"
+    )
+    first_delete_await = confirm_deletion_body.find("await ")
+    if (
+        min(deletion_acquire, deletion_release, first_delete_await) < 0
+        or not deletion_acquire < deletion_release < first_delete_await
+    ):
+        raise SystemExit(
+            "M3.10 confirm deletion must acquire and defer-release its lease before the first await"
+        )
+    catch_start = confirm_deletion_body.find("} catch {")
+    success_clear_request = confirm_deletion_body.find(
+        "pendingOHPSymptomWriteRequest = nil"
+    )
+    success_clear_state = confirm_deletion_body.find("ohpSymptomWriteState = .idle")
+    if (
+        min(delete_call, catch_start, success_clear_request, success_clear_state) < 0
+        or not delete_call < success_clear_request < catch_start
+        or not delete_call < success_clear_state < catch_start
+    ):
+        raise SystemExit(
+            "M3.10 only successful session deletion may discard the exact symptom retry"
+        )
+    deletion_catch = confirm_deletion_body[catch_start:]
+    pending_branch = deletion_catch.find("if hasPendingCurrentOHPSymptomWrite {")
+    preserve_stopped = deletion_catch.find("hasSessionDeletionFailure = true")
+    ordinary_branch = deletion_catch.find("} else {")
+    ordinary_failure = deletion_catch.find("state = .failed(.deletion)")
+    if (
+        min(pending_branch, preserve_stopped, ordinary_branch, ordinary_failure) < 0
+        or not pending_branch < preserve_stopped < ordinary_branch < ordinary_failure
+        or "isDeleteConfirmationPresented = false" not in deletion_catch
+        or "pendingOHPSymptomWriteRequest = nil" in deletion_catch
+        or "ohpSymptomWriteState = .idle" in deletion_catch
+    ):
+        raise SystemExit(
+            "M3.10 deletion failure must preserve pending OHP safety without regressing ordinary failure recovery"
+        )
+
+    exercise_stage_text = (
+        root / "Packages/HealthTrackingModules/Sources/TrainingKit/Session/ExerciseStageView.swift"
+    ).read_text(encoding="utf-8")
+    required_write_ui = {
+        "ohpSymptomWriteState",
+        'accessibilityIdentifier("session.ohp.persistence.saving")',
+        'accessibilityIdentifier("session.ohp.persistence.error")',
+        'accessibilityIdentifier("session.ohp.persistence.retry")',
+        "retryCurrentOHPSymptomWrite",
+        "if viewModel.canReportCurrentOHPSymptom {",
+        "viewModel.hasSessionDeletionFailure",
+        'accessibilityIdentifier("session.delete.error")',
+    }
+    absent = sorted(token for token in required_write_ui if token not in exercise_stage_text)
+    if absent:
+        raise SystemExit(
+            f"M3.10 shipped stopped UI must expose current-response write retry: {absent}"
+        )
+    compact_exercise_stage = re.sub(r"\s+", "", exercise_stage_text)
+    retry_label_contract = (
+        'Button{Task{awaitviewModel.retryCurrentOHPSymptomWrite()}}label:{'
+        'Text(localized("session.ohp.persistence.retry")).frame('
+        'maxWidth:.infinity,minHeight:52).contentShape(Rectangle())}'
+    )
+    if retry_label_contract not in compact_exercise_stage:
+        raise SystemExit(
+            "M3.10 persistence retry must place the 52-point frame and content "
+            "shape inside the explicit Button label"
+        )
+    retry_delete_lock = (
+        'accessibilityIdentifier("session.ohp.persistence.retry").disabled('
+        'viewModel.isSessionDeletionInFlight)'
+    )
+    if retry_delete_lock not in compact_exercise_stage:
+        raise SystemExit(
+            "M3.10 shipped OHP retry must be disabled while deletion owns the session"
+        )
+    required_exercise_route_locks = {
+        'accessibilityIdentifier("session.exercise.next").disabled('
+        'viewModel.hasPendingCurrentOHPSymptomWrite||'
+        'viewModel.isSessionDeletionInFlight)',
+        'accessibilityIdentifier("session.exercise.back").disabled('
+        'viewModel.hasPendingCurrentOHPSymptomWrite||'
+        'viewModel.isSessionDeletionInFlight)',
+        'accessibilityIdentifier("session.exercise.finish-incomplete").disabled('
+        'viewModel.hasPendingCurrentOHPSymptomWrite||'
+        'viewModel.isSessionDeletionInFlight)',
+    }
+    absent = sorted(
+        token for token in required_exercise_route_locks
+        if token not in compact_exercise_stage
+    )
+    if absent:
+        raise SystemExit(
+            "M3.10 shipped exercise route controls must remain disabled while the "
+            f"exact OHP write is pending: {absent}"
+        )
+
+    training_session_text = (
+        root / "Packages/HealthTrackingModules/Sources/TrainingKit/Session/TrainingSessionView.swift"
+    ).read_text(encoding="utf-8")
+    compact_training_session = re.sub(r"\s+", "", training_session_text)
+    if 'accessibilityIdentifier("session.delete.confirm.action")' not in training_session_text:
+        raise SystemExit(
+            "M3.10 shipped deletion failure regression requires an addressable confirm action"
+        )
+    required_session_toolbar_locks = {
+        'accessibilityIdentifier("session.close").disabled('
+        'viewModel.hasPendingCurrentOHPSymptomWrite||'
+        'viewModel.isSessionMutationInFlight||'
+        'viewModel.isSessionDeletionInFlight)',
+        'accessibilityIdentifier("session.delete").disabled('
+        'viewModel.isCurrentOHPSymptomWriteSaving||'
+        'viewModel.isSessionRouteMutationInFlight||'
+        'viewModel.isSessionMutationInFlight||'
+        'viewModel.isSessionDeletionInFlight)',
+        'accessibilityIdentifier("session.delete.confirm.action").disabled('
+        'viewModel.isSessionRouteMutationInFlight||'
+        'viewModel.isSessionMutationInFlight||'
+        'viewModel.isSessionDeletionInFlight)',
+    }
+    absent = sorted(
+        token for token in required_session_toolbar_locks
+        if token not in compact_training_session
+    )
+    if absent:
+        raise SystemExit(
+            "M3.10 shipped session toolbar must preserve the pending write and block "
+            f"saving-time deletion races: {absent}"
+        )
+    active_content_body = swift_braced_declaration(
+        training_session_text, "activeContent"
+    ) or ""
+    if ".disabled(viewModel.isSessionDeletionInFlight)" not in re.sub(
+        r"\s+", "", active_content_body
+    ):
+        raise SystemExit(
+            "M3.10 shipped active session content must be disabled for the full deletion lease"
+        )
+
+    dependencies_text = (root / "App/Application/AppDependencies.swift").read_text(
+        encoding="utf-8"
+    )
+    required_ui_write_fixture = {
+        "case .ohpSafety:",
+        "failsFirstCurrentOHPSymptomWrite: true",
+        "private var failsNextCurrentOHPSymptomWrite",
+        "private var currentSessionID: UUID?",
+        "currentSessionID = session?.id",
+        "response == .symptomsPresent",
+        "id == currentSessionID",
+        "UITestFoundationRepositoryError.ohpSymptomWrite",
+        "failsFirstSessionDeletion: true",
+        "private var failsNextSessionDeletion",
+        "failsNextSessionDeletion = failsFirstSessionDeletion",
+        "if failsNextSessionDeletion, id == currentSessionID",
+        "UITestFoundationRepositoryError.sessionDeletion",
+    }
+    absent = sorted(
+        token for token in required_ui_write_fixture if token not in dependencies_text
+    )
+    if absent:
+        raise SystemExit(
+            f"M3.10 OHP UI fixture must fail the first current-response write: {absent}"
+        )
+    ui_fixture_write_body = swift_braced_declaration(
+        dependencies_text, "updateWorkoutSessionOHPSymptomResponse"
+    ) or ""
+    if (
+        "return try await repository.updateWorkoutSessionOHPSymptomResponse("
+        not in ui_fixture_write_body
+    ):
+        raise SystemExit(
+            "M3.10 DEBUG OHP UI repository must return its delegated snapshot"
+        )
+
+    focus_policy_path = (
+        root
+        / "Packages/HealthTrackingModules/Sources/DesignSystem/Accessibility/MedicalSafetyFocusPolicy.swift"
+    )
+    if not focus_policy_path.is_file():
+        raise SystemExit("Missing M3.10 MedicalSafetyFocusPolicy production contract")
+    focus_policy_text = focus_policy_path.read_text(encoding="utf-8")
+    required_focus_policy = {
+        "MedicalSafetyFocusPolicy",
+        "headingFocused",
+        "isLevelTwoPresented",
+    }
+    absent = sorted(
+        token for token in required_focus_policy if token not in focus_policy_text
+    )
+    if absent:
+        raise SystemExit(f"M3.10 focus policy contract is incomplete: {absent}")
+
+    motion_policy_path = (
+        root
+        / "Packages/HealthTrackingModules/Sources/DesignSystem/Motion/MedicalSafetyMotionPolicy.swift"
+    )
+    if not motion_policy_path.is_file():
+        raise SystemExit("Missing M3.10 MedicalSafetyMotionPolicy production contract")
+    motion_policy_text = motion_policy_path.read_text(encoding="utf-8")
+    required_motion_policy = {
+        "MedicalSafetyMotionPolicy",
+        "transition",
+        "reduceMotion",
+        "identity",
+        "opacity",
+    }
+    absent = sorted(
+        token for token in required_motion_policy if token not in motion_policy_text
+    )
+    if absent:
+        raise SystemExit(f"M3.10 motion policy contract is incomplete: {absent}")
+
+    m310_safety_ui_paths = (
+        "Packages/HealthTrackingModules/Sources/MetricsKit/Posture/PostureEntryView.swift",
+        "Packages/HealthTrackingModules/Sources/TrainingKit/Session/OHPPriorSymptomQuestionView.swift",
+        "Packages/HealthTrackingModules/Sources/TrainingKit/Session/ExerciseStageView.swift",
+    )
+    prohibited_transition_patterns = {
+        "move": r"\.move\s*\(",
+        "slide": r"\.slide\b",
+        "scale": r"\.scale(?:\s*\(|\b)",
+        "scaleEffect": r"\.scaleEffect\s*\(",
+        "offset": r"\.offset\s*\(",
+        "zoom": r"\.zoom\b",
+        "push": r"\.push\s*\(",
+    }
+    for relative_path in m310_safety_ui_paths:
+        source = root / relative_path
+        if not source.is_file():
+            raise SystemExit(f"Missing required M3.10 L2 UI consumer: {relative_path}")
+        text = source.read_text(encoding="utf-8")
+        required_focus_and_motion = {
+            "@AccessibilityFocusState",
+            "levelTwoHeadingFocused",
+            '"medical.safety.l2.heading"',
+            '"medical.safety.l2"',
+            ".accessibilityFocused($levelTwoHeadingFocused)",
+            ".accessibilityAddTraits(.isHeader)",
+            ".onAppear",
+            ".onChange(of: isLevelTwoPresented)",
+            "updateLevelTwoHeadingFocus(isPresented: true)",
+            "updateLevelTwoHeadingFocus(isPresented: isPresented)",
+            "accessibilityReduceMotion",
+            ".transition(levelTwoTransition)",
+        }
+        absent = sorted(
+            token for token in required_focus_and_motion if token not in text
+        )
+        if absent:
+            raise SystemExit(
+                f"{relative_path} must provide stable L2 heading focus, complete message, "
+                f"programmatic activation, and scoped motion: {absent}"
+            )
+        compact_consumer = re.sub(r"\s+", "", text)
+        expected_focus_assignment = (
+            "levelTwoHeadingFocused="
+            "MedicalSafetyFocusPolicy.headingFocused(isLevelTwoPresented:isPresented)"
+        )
+        if expected_focus_assignment not in compact_consumer:
+            raise SystemExit(
+                f"{relative_path} must bind L2 appearance/removal to the tested "
+                "MedicalSafetyFocusPolicy result"
+            )
+
+        transition_scope = swift_braced_declaration(text, "levelTwoTransition")
+        if transition_scope is None:
+            raise SystemExit(
+                f"{relative_path} must define a dedicated levelTwoTransition policy scope"
+            )
+        compact_transition_scope = re.sub(r"\s+", "", transition_scope)
+        required_scoped_motion = {
+            "MedicalSafetyMotionPolicy.transition(",
+            "reduceMotion:accessibilityReduceMotion",
+        }
+        absent = sorted(
+            token for token in required_scoped_motion
+            if token not in compact_transition_scope
+        )
+        if absent:
+            raise SystemExit(
+                f"{relative_path} must use the tested motion selector directly with "
+                f"identity/opacity mapped correctly: {absent}"
+            )
+        correct_identity_mapping = (
+            "identity:.identity" in compact_transition_scope
+            or "identity:AnyTransition.identity" in compact_transition_scope
+        )
+        correct_opacity_mapping = (
+            "opacity:.opacity" in compact_transition_scope
+            or "opacity:AnyTransition.opacity" in compact_transition_scope
+        )
+        if not correct_identity_mapping or not correct_opacity_mapping:
+            raise SystemExit(
+                f"{relative_path} must use the tested motion selector directly with "
+                "identity/opacity mapped correctly"
+            )
+        if (
+            "case.identity" in compact_transition_scope
+            or "case.opacity" in compact_transition_scope
+        ):
+            raise SystemExit(
+                f"{relative_path} must not remap motion policy cases in levelTwoTransition"
+            )
+        for transition_name, pattern in prohibited_transition_patterns.items():
+            if re.search(pattern, transition_scope):
+                raise SystemExit(
+                    f"{relative_path} must not use {transition_name} in levelTwoTransition"
+                )
 m32_production = {
     "Packages/HealthTrackingModules/Sources/MetricsKit/Domain/BodyMetricDomain.swift": {
         "value.isFinite, value > 0",
@@ -3455,6 +4735,40 @@ from pathlib import Path
 repo = Path(sys.argv[1])
 script = repo / "scripts/verify-trackers.sh"
 
+m310_safety_ui_fixture = "\n".join(
+    [
+        "@Environment(\\.accessibilityReduceMotion) var accessibilityReduceMotion",
+        "@AccessibilityFocusState var levelTwoHeadingFocused: Bool",
+        "let isLevelTwoPresented = true",
+        'Text("Güvenlik")',
+        '.accessibilityIdentifier("medical.safety.l2.heading")',
+        ".accessibilityAddTraits(.isHeader)",
+        ".accessibilityFocused($levelTwoHeadingFocused)",
+        'Text("Complete safety message")',
+        '.accessibilityIdentifier("medical.safety.l2")',
+        ".onAppear {",
+        "updateLevelTwoHeadingFocus(isPresented: true)",
+        "}",
+        ".onChange(of: isLevelTwoPresented) { _, isPresented in",
+        "updateLevelTwoHeadingFocus(isPresented: isPresented)",
+        "}",
+        ".transition(levelTwoTransition)",
+        ".scaleEffect(1.05) // unrelated layout effect outside the L2 transition scope",
+        "private func updateLevelTwoHeadingFocus(isPresented: Bool) {",
+        "levelTwoHeadingFocused = MedicalSafetyFocusPolicy.headingFocused(",
+        "isLevelTwoPresented: isPresented",
+        ")",
+        "}",
+        "private var levelTwoTransition: AnyTransition {",
+        "MedicalSafetyMotionPolicy.transition(",
+        "reduceMotion: accessibilityReduceMotion,",
+        "identity: .identity,",
+        "opacity: .opacity",
+        ")",
+        "}",
+    ]
+)
+
 fixture_files = {
     "Packages/HealthTrackingModules/Tests/DesignSystemTests/QuickEntryMutationStateMachineTests.swift": " ".join(
         [
@@ -3545,6 +4859,14 @@ fixture_files = {
             "Targeted M3.7-M3.9 photo lifecycle, gallery, and cloud asset tests",
             "scripts/test-ios.sh --only-testing ProgressPhotosKitTests",
             '"ProgressPhotoLifecycleUITests"',
+            "Targeted M3.10 pure medical safety tests",
+            "scripts/test-ios.sh --only-testing HealthSafetyKitTests",
+            "Targeted M3.10 medical safety focus and motion policy tests",
+            "scripts/test-ios.sh --only-testing DesignSystemTests",
+            "Targeted M3.10 shipped session safety tests",
+            "scripts/test-ios.sh --only-testing TrainingKitTests",
+            "Targeted M3.10 app safety composition tests",
+            "scripts/test-ios.sh --only-testing HealthTrackingAppTests",
         ]
     ),
     "project.yml": "\n".join(
@@ -3732,7 +5054,7 @@ fixture_files = {
             "m3-lifestyle-entry-ax5",
         ]
     ),
-    "Packages/HealthTrackingModules/Tests/HealthSafetyKitTests/MedicalSafetyPresentationTests.swift": " ".join(
+    "Packages/HealthTrackingModules/Tests/HealthSafetyKitTests/MedicalSafetyPresentationTests.swift": "\n".join(
         [
             "MedicalDisclaimerPresentation.permanent",
             "MedicalSafetyPresentation.resolve",
@@ -3741,6 +5063,59 @@ fixture_files = {
             "cervicalRedFlags",
             "urgentAssessmentInformation",
             "Hareketi durdur.",
+            "testOHPAndIncreasingSymptomsPublishCompleteGeneralLevelTwoInformation",
+            "testMissingSymptomAnswerPublishesCompleteNonUrgentFailClosedLevelTwo",
+            ".missingSymptomAnswer",
+            "private let expectedGeneralMessage =",
+            '"Hareketi durdur. Kalıcı veya kötüleşen belirtiler bir sağlık profesyoneli tarafından değerlendirilmelidir. Yeni veya belirgin şekilde kötüleşen kol veya bacakta güçsüzlük ya da uyuşma, el becerisinde kayıp, denge veya yürümede değişiklik ya da mesane veya bağırsak işlevinde değişiklik acil tıbbi değerlendirme gerektirir."',
+            "private let expectedUrgentMessage =",
+            '"Hareketi durdur. Yeni veya belirgin şekilde kötüleşen kol veya bacakta güçsüzlük ya da uyuşma, el becerisinde kayıp, denge veya yürümede değişiklik ya da mesane veya bağırsak işlevinde değişiklik acil tıbbi değerlendirme gerektirir."',
+            "notice.message,",
+            "            expectedGeneralMessage",
+            "testEachCervicalRedFlagAlonePublishesExactUrgentMessageAndOverridesEveryGeneralTrigger",
+            "for flag in CervicalRedFlag.allCases",
+            "triggers: [.cervicalRedFlags([flag])]",
+            "for generalTrigger in generalTriggers",
+            "triggers: [generalTrigger, .cervicalRedFlags([flag])]",
+            "XCTAssertEqual(notice.kind, .urgentAssessmentInformation",
+            "XCTAssertTrue(notice.requiresUrgentAssessment",
+            "XCTAssertEqual(notice.message, expectedUrgentMessage",
+            "assertContainsNoNumericMedicalThreshold",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/DesignSystemTests/MedicalSafetyMotionPolicyTests.swift": "\n".join(
+        [
+            "private enum TransitionProbe: Equatable { case identity, opacity }",
+            "func testReduceMotionSelectsIdentityAndDefaultSelectsOpacity() {",
+            "XCTAssertEqual(",
+            "MedicalSafetyMotionPolicy.transition(",
+            "reduceMotion: true,",
+            "identity: TransitionProbe.identity,",
+            "opacity: TransitionProbe.opacity",
+            "),",
+            ".identity",
+            ")",
+            "XCTAssertEqual(",
+            "MedicalSafetyMotionPolicy.transition(",
+            "reduceMotion: false,",
+            "identity: TransitionProbe.identity,",
+            "opacity: TransitionProbe.opacity",
+            "),",
+            ".opacity",
+            ")",
+            "}",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/DesignSystemTests/MedicalSafetyFocusPolicyTests.swift": "\n".join(
+        [
+            "func testLevelTwoAppearanceActivatesHeadingFocusAndRemovalClearsIt() {",
+            "XCTAssertTrue(",
+            "MedicalSafetyFocusPolicy.headingFocused(isLevelTwoPresented: true)",
+            ")",
+            "XCTAssertFalse(",
+            "MedicalSafetyFocusPolicy.headingFocused(isLevelTwoPresented: false)",
+            ")",
+            "}",
         ]
     ),
     "Packages/HealthTrackingModules/Tests/MetricsKitTests/PostureMetricInputTests.swift": " ".join(
@@ -3760,6 +5135,9 @@ fixture_files = {
             "previousExplicitSymptomScore",
             "expectedUpdatedAt",
             "posture.validation.empty",
+            "testLoadOrdersHistoryAndWallTestOnlyRecordDoesNotTriggerSafety",
+            "XCTAssertNil(viewModel.safetyPresentation.levelTwo)",
+            "viewModel.previousExplicitSymptomScore, 3",
         ]
     ),
     "Packages/HealthTrackingModules/Tests/PersistenceKitTests/PostureRepositoryTests.swift": " ".join(
@@ -3789,6 +5167,106 @@ fixture_files = {
             "retrySymptomJournal",
             "testJournalFailureKeepsOHPStoppedAndRetryDoesNotRewriteTrainingState",
             "testRestoringSymptomPresentSessionReemitsTheSameStableEvent",
+            "TrainingSymptomSafetyContext",
+            "symptomSafetyPresentationProvider",
+            ".priorOverheadPressResponse(.notAsked)",
+            ".priorOverheadPressResponse(.uncertain)",
+            "missingAnswerSafetyPresentation",
+            "An explicit symptom-free answer must clear only the fail-closed missing-answer L2.",
+            ".stopped(alternative: heldRepository.ohpSafeAlternative)",
+            "testStoredPriorSymptomsAndUncertaintyStopOHPAtTheSafeAlternative",
+            "testAnsweringPriorSymptomsOrUncertaintyStopsOHPAtTheSafeAlternative",
+            "testCurrentOHPSymptomStopsBeforeTheRepositoryWriteCompletes",
+            "waitUntilOHPSymptomUpdateIsSuspended",
+            ".saving(request: expectedRequest)",
+            "A pending exact write must reject a second write or retry.",
+            "testCurrentOHPSymptomWriteFailureRetainsStopAndRetriesTheExactRequestOnce",
+            ".failed(request: request)",
+            "XCTAssertTrue(viewModel.hasPendingCurrentOHPSymptomWrite)",
+            "Pending current-symptom persistence must block exercise progress and completion.",
+            "A failed pending write must keep route actions fail closed until exact retry succeeds.",
+            "repository.deletedSessionIDs.count",
+            "retryCurrentOHPSymptomWrite",
+            "[request.repositoryUpdate, request.repositoryUpdate]",
+            "Retry must preserve the original session, response, and timestamp.",
+            "XCTAssertEqual(symptomClient.events, [expectedEvent])",
+            "testAdvanceRouteFirstRejectsSymptomAndDuplicateRoutesUntilChosenProgressCompletes",
+            "testGoBackRouteFirstRejectsSymptomUntilChosenProgressCompletes",
+            "testFinishRouteFirstKeepsTheLockThroughProgressAndTransition",
+            "testRouteLockClearsAfterAppliedProgressFailureWithoutAcceptingSymptom",
+            "waitUntilProgressUpdateIsSuspended",
+            "waitUntilTransitionIsSuspended",
+            "XCTAssertTrue(viewModel.isSessionRouteMutationInFlight)",
+            "XCTAssertFalse(viewModel.canReportCurrentOHPSymptom)",
+            "XCTAssertTrue(repository.ohpSymptomUpdates.isEmpty)",
+            "XCTAssertEqual(repository.progressUpdates.count, progressCount + 1)",
+            "XCTAssertEqual(repository.progress?.stage, .cooldown)",
+            "XCTAssertEqual(repository.progress?.stage, .warmup)",
+            "XCTAssertEqual(repository.progress?.stage, .summary)",
+            "XCTAssertEqual(viewModel.state, .failed(.progress))",
+            "testDeletionFailurePreservesStoppedSymptomRetryAndExactRequest",
+            "testSuccessfulDeletionIsTheOnlyDeletionPathThatDiscardsPendingSymptomRetry",
+            "testDeleteFirstLeaseRejectsSymptomRoutesAndDuplicateDeleteUntilSuccess",
+            "testSuspendedDeletionFailureRetainsStoppedExactRetryUntilLeaseReleases",
+            "testRouteFirstLeaseRejectsDeletionRequestAndConfirmationBeforeRepositoryAwait",
+            "testCancelledDeletionReleasesLeaseAndPreservesExactStoppedRetry",
+            "waitUntilDeletionIsSuspended",
+            "repository.suspendNextDeletion()",
+            "repository.resumeSuspendedDeletion()",
+            "deletion.cancel()",
+            "try Task.checkCancellation()",
+            "deleteAttempts.append(id)",
+            "XCTAssertTrue(viewModel.isSessionDeletionInFlight)",
+            "XCTAssertEqual(repository.deleteAttempts, [sessionID])",
+            "XCTAssertTrue(viewModel.hasSessionDeletionFailure)",
+            "XCTAssertEqual(viewModel.state, stoppedState)",
+            "XCTAssertTrue(repository.deletedSessionIDs.isEmpty)",
+            "XCTAssertEqual(repository.deletedSessionIDs, [sessionID])",
+            "testOrdinaryDeletionFailureRetainsTheExistingRecoverableFailureRoute",
+            "XCTAssertEqual(viewModel.state, .failed(.deletion))",
+            "testStartTailOwnsSessionUntilInitialProgressFinishesAndDeleteFirstRejectsRestart",
+            "testRestoredStartKeepsItsOwnerThroughTheActiveSymptomJournalTail",
+            "testWarmupAndCooldownChecklistOwnersBlockDeletionUntilProgressReturns",
+            "testPriorResponseAndDeloadOwnersBlockDeletionThroughRepositoryStateWrites",
+            "testSetSaveAndExactRetryEachOwnTheirWholeRepositoryLifetime",
+            "testSummarySaveOwnerBlocksDeletionUntilItsDismissalCommits",
+            "testOverlappingOwnersReleaseOnlyTheirExactTokenBeforeDeletionBecomesAvailable",
+            "testCancelledSessionMutationReleasesOnlyItsOwnerAndAllowsDeletion",
+            "testJournalRetryMayFinishAfterDeletionWithoutRepublishingSessionState",
+            "XCTAssertEqual(viewModel.activeSessionMutationCount, 2)",
+            '"The first completion must remove only its exact owner token."',
+            '"Metrics-only journal retry must not own the session deletion boundary."',
+            "assertDeletionRejectedWhileSessionMutationOwned",
+            "suspendNextDeloadUpdate",
+            "suspendNextSetSave",
+            "suspendNextSummaryUpdate",
+            "suspendNextRecord",
+            "OneShotSuspensionGate",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Tests/GuidanceKitTests/OHPSafetyGateTests.swift": " ".join(
+        [
+            "testOnlyExplicitSymptomFreeResponseAllowsLoadIncrease",
+            "safetyStop: OHPSafetyGate.SafetyStop?",
+            ".symptomsPresent,",
+            ".blocked(.previousSymptomsPresent),",
+            ".uncertain,",
+            ".blocked(.previousResponseUncertain),",
+            ".init(alternative: .halfKneelingDBPress)",
+            "XCTAssertEqual(decision.safetyStop, expectation.safetyStop)",
+        ]
+    ),
+    "HealthTrackingAppTests/TodayCompositionTests.swift": " ".join(
+        [
+            "testAppRootExplicitInitializerSupportsComposedAndDefaultMedicalSafetyController",
+            "testMedicalSafetyFirstUseEvidenceRequiresOneExplicitUITestFlag",
+            "AppUITestLaunchConfiguration.medicalSafetyFirstUseEvidenceFlag",
+            ".exposesMedicalSafetyFirstUseEvidence",
+            "Duplicate medical-safety evidence flags must fail closed.",
+            "rootInitializerIsTypeChecked",
+            "rootInitializerWithMedicalSafetyControllerIsTypeChecked",
+            "medicalSafetyAcknowledgementController:",
+            "dependencies.medicalSafetyAcknowledgementController",
         ]
     ),
     "HealthTrackingAppTests/SymptomJournalAdapterTests.swift": " ".join(
@@ -3797,9 +5275,32 @@ fixture_files = {
             "TrainingSymptomSafetyMapper.overheadPressSymptom",
             "XCTAssertEqual(repository.upserts[0], repository.upserts[1])",
             'XCTAssertEqual(repository.upserts[0].input.region, "OHP")',
+            "testStructuredMissingOHPSessionResponsesMapToCentralFailClosedPresentation",
+            "OHPSymptomResponse.notAsked, .uncertain",
+            "TrainingSymptomSafetyMapper.presentation",
+            ".priorOverheadPressResponse(response)",
+            ".priorOverheadPressResponse(.symptomFree)",
+            "expectedGeneralMessage",
+            "XCTAssertEqual(presentation.levelTwoMessage, expectedGeneralMessage)",
+            "testAppDependenciesComposesStructuredSafetyProviderIntoSessionViewModel",
+            "AppDependencies(environment: .uiTesting)",
+            "dependencies.makeSessionViewModel()",
+            "session.resolveSymptomSafetyPresentation(for: context)",
+            "session.resolveSymptomSafetyPresentation(",
         ]
     ),
-    "HealthTrackingAppUITests/PostureFlowUITests.swift": " ".join(
+    "HealthTrackingAppTests/MedicalSafetyAcknowledgementTests.swift": " ".join(
+        [
+            "testSuccessfulAcknowledgementPersistsAcrossControllerRecreationWithoutChangingLevelOne",
+            "testFailedAcknowledgementWriteKeepsLevelZeroVisibleAndLevelOnePermanent",
+            "MedicalSafetyAcknowledgementController",
+            "MedicalSafetyAcknowledgementStore",
+            "XCTAssertFalse(controller.acknowledge())",
+            "XCTAssertTrue(controller.isLevelZeroVisible)",
+            "levelOnePresentation, .permanent",
+        ]
+    ),
+    "HealthTrackingAppUITests/PostureFlowUITests.swift": "\n".join(
         [
             '"-ui-test-scenario", "m3-posture"',
             "today.posture.action",
@@ -3807,9 +5308,33 @@ fixture_files = {
             "posture.entry.retry",
             "posture.history.loaded",
             "medical.disclaimer.l1",
+            '.matching(identifier: "medical.disclaimer.l1")',
+            ".firstMatch",
             "medical.safety.l2",
             "m3-posture-entry-ax5",
             "m3-posture-high-contrast",
+            "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir.",
+            "assertDisclaimer(in: app)",
+            "replaceText(",
+            'in: textField("posture.entry.region", in: app),',
+            'with: "Boyun"',
+            ")",
+            "replaceText(",
+            'in: textField("posture.entry.note", in: app),',
+            'with: "OHP sonrası takip"',
+            ")",
+            "replaceText(",
+            'in: textField("posture.entry.symptom", in: app),',
+            'with: "6",',
+            "dismissKeyboardAfterTyping: false",
+            ")",
+            "assertCompleteGeneralLevelTwo(",
+            "The final symptom input must immediately publish the complete L2.",
+            "medical.safety.l2.heading",
+            "The stable heading must not replace the complete L2 message.",
+            "expectedGeneralMessage",
+            "XCTAssertEqual(",
+            "-UIAccessibilityReduceMotionEnabled",
         ]
     ),
     "HealthTrackingAppUITests/OHPSafetyFlowUITests.swift": " ".join(
@@ -3819,6 +5344,66 @@ fixture_files = {
             "session.ohp.journal.recorded",
             "medical.disclaimer.l1",
             "medical.safety.l2",
+            "medical.safety.l2.heading",
+            "-UIAccessibilityReduceMotionEnabled",
+            "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir.",
+            "assertCompleteGeneralLevelTwo",
+            "An unanswered prior OHP response must fail closed before it is answered.",
+            "An explicit symptom-free answer must clear the missing-answer L2.",
+            "The stable heading must not replace the complete L2 message.",
+            "expectedGeneralMessage",
+            "XCTAssertEqual(",
+            "testAnsweredPriorSymptomsAndUncertaintyRenderTheShippedStoppedRoute",
+            "-ui-test-store-identifier",
+            "A stored prior response must not reopen the unanswered question.",
+            "must restore the stopped route.",
+            "session.ohp.prior.symptoms-present",
+            "session.ohp.prior.uncertain",
+            "A prior safety stop must not expose the current-symptom action.",
+            "session.ohp.persistence.error",
+            "session.ohp.persistence.retry",
+            "persistenceRetry.frame.height + 0.01",
+            "The shipped persistence retry target must remain at least 52 points high.",
+            "session.exercise.finish-incomplete",
+            "session.close",
+            "app.buttons.matching(identifier: identifier).firstMatch",
+            "app.buttons.matching(identifier: identifier).firstMatch",
+            "app.buttons.matching(identifier: identifier).firstMatch",
+            "Pending OHP persistence must disable the route control:",
+            "Successful exact retry must re-enable the route control:",
+            '"Pending OHP persistence must disable the route control: \\(identifier)."',
+            '"Successful exact retry must re-enable the route control: \\(identifier)."',
+            'let blockedRouteControls = ["session.exercise.next", '
+            '"session.exercise.back", "session.exercise.finish-incomplete", '
+            '"session.close", ]',
+            "XCTAssertGreaterThanOrEqual(persistenceRetry.frame.height + 0.01, 52,",
+            "The journal must start only after the exact pending training-state write succeeds.",
+            "session.delete.confirm.action",
+            "session.delete.error",
+            "A failed deletion must stay on the stopped route and expose a separate error.",
+            "A failed deletion must not replace the current OHP safety stop.",
+            "A failed deletion must preserve the exact symptom persistence retry.",
+            "Deletion failure must keep the pending route control disabled:",
+        ]
+    ),
+    "HealthTrackingAppUITests/MedicalSafetyFlowUITests.swift": " ".join(
+        [
+            "testFirstUseExplanationPersistsIndependentlyFromPermanentReminderDisclaimer",
+            "-ui-test-medical-safety-first-use-evidence",
+            "medical.explanation.l0",
+            "medical.explanation.l0.acknowledge",
+            "acknowledgement.frame.height + 0.01",
+            "The shipped L0 acknowledgement target must remain at least 52 points high.",
+            "XCTAssertGreaterThanOrEqual(acknowledgement.frame.height + 0.01, 52,",
+            "firstLaunch.terminate()",
+            "medical.disclaimer.l1",
+        ]
+    ),
+    "HealthTrackingAppUITests/TrainingAccessibilityUITests.swift": " ".join(
+        [
+            "acknowledgeFirstUseExplanationIfNeeded(in: app)",
+            "-ui-test-medical-safety-first-use-evidence",
+            "The first-use L0 acknowledgement must retain its 52-point target at AX5.",
         ]
     ),
     "Packages/HealthTrackingModules/Tests/HealthChecksKitTests/HealthCheckRecurrenceEngineTests.swift": " ".join(
@@ -3884,6 +5469,9 @@ fixture_files = {
             "health-check.history.loaded",
             "m3-health-check-detail-ax5",
             'buttons.matching(identifier: "health-check.close").firstMatch',
+            "medical.disclaimer.l1",
+            "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir.",
+            "assertDisclaimer(in: app)",
         ]
     ),
     "HealthTrackingAppUITests/AccessibilitySmokeUITests.swift": " ".join(
@@ -3951,6 +5539,7 @@ fixture_files = {
         [
             '"-ui-test-scenario", "m3-bloodwork"',
             "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir.",
+            "bloodwork.disclaimer.l1",
             "bloodwork.list.error",
             "bloodwork.list.empty",
             "bloodwork.editor.content",
@@ -3960,6 +5549,7 @@ fixture_files = {
             "health-check.history.error",
             "m3-bloodwork-editor-dark-high-contrast",
             "m3-bloodwork-editor-ax5",
+            "assertDisclaimer(in: app)",
         ]
     ),
     "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecksKitModule.swift": (
@@ -4134,12 +5724,313 @@ fixture_files = {
     "App/Application/AppDomainContext.swift": (
         "Calendar(identifier: .gregorian) calendar.timeZone = .autoupdatingCurrent"
     ),
-    "Packages/HealthTrackingModules/Sources/HealthSafetyKit/HealthSafetyKitModule.swift": " ".join(
+    "App/Application/TrainingSymptomMetricsAdapter.swift": "\n".join(
+        [
+            "enum TrainingSymptomSafetyMapper {",
+            "static func presentation(for context: TrainingSymptomSafetyContext) {",
+            "case .priorOverheadPressResponse(.notAsked)",
+            "case .priorOverheadPressResponse(.uncertain)",
+            "case .currentOverheadPressResponse(.symptomsPresent)",
+            "let missing = MedicalSafetyTrigger.missingSymptomAnswer",
+            "let current = MedicalSafetyTrigger.overheadPressSymptom",
+            "}",
+            "}",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/DesignSystem/Accessibility/MedicalSafetyFocusPolicy.swift": "\n".join(
+        [
+            "enum MedicalSafetyFocusPolicy {",
+            "static func headingFocused(isLevelTwoPresented: Bool) -> Bool {",
+            "isLevelTwoPresented",
+            "}",
+            "}",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/DesignSystem/Motion/MedicalSafetyMotionPolicy.swift": "\n".join(
+        [
+            "enum MedicalSafetyMotionPolicy {",
+            "static func transition<Value>(",
+            "reduceMotion: Bool,",
+            "identity: Value,",
+            "opacity: Value",
+            ") -> Value {",
+            "guard !reduceMotion else { return identity }",
+            "return opacity",
+            "}",
+            "}",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/MetricsKit/Posture/PostureEntryView.swift": (
+        m310_safety_ui_fixture
+    ),
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/OHPPriorSymptomQuestionView.swift": (
+        m310_safety_ui_fixture
+    ),
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/ExerciseStageView.swift": (
+        m310_safety_ui_fixture
+        + "\n"
+        + "ohpSymptomWriteState\n"
+        + 'accessibilityIdentifier("session.ohp.persistence.saving")\n'
+        + 'accessibilityIdentifier("session.ohp.persistence.error")\n'
+        + "Button { Task { await viewModel.retryCurrentOHPSymptomWrite() } } label: {\n"
+        + 'Text(localized("session.ohp.persistence.retry"))\n'
+        + ".frame(maxWidth: .infinity, minHeight: 52)\n"
+        + ".contentShape(Rectangle())\n"
+        + "}\n"
+        + 'accessibilityIdentifier("session.ohp.persistence.retry")\n'
+        + ".disabled(viewModel.isSessionDeletionInFlight)\n"
+        + "if viewModel.canReportCurrentOHPSymptom { }\n"
+        + "if viewModel.hasSessionDeletionFailure {\n"
+        + 'Text("delete failed").accessibilityIdentifier("session.delete.error")\n'
+        + "}\n"
+        + 'accessibilityIdentifier("session.exercise.next")\n'
+        + ".disabled(viewModel.hasPendingCurrentOHPSymptomWrite || viewModel.isSessionDeletionInFlight)\n"
+        + 'accessibilityIdentifier("session.exercise.back")\n'
+        + ".disabled(viewModel.hasPendingCurrentOHPSymptomWrite || viewModel.isSessionDeletionInFlight)\n"
+        + 'accessibilityIdentifier("session.exercise.finish-incomplete")\n'
+        + ".disabled(viewModel.hasPendingCurrentOHPSymptomWrite || viewModel.isSessionDeletionInFlight)"
+    ),
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/TrainingSessionView.swift": "\n".join(
+        [
+            'accessibilityIdentifier("session.close")',
+            ".disabled(viewModel.hasPendingCurrentOHPSymptomWrite || viewModel.isSessionMutationInFlight || viewModel.isSessionDeletionInFlight)",
+            'accessibilityIdentifier("session.delete")',
+            ".disabled(viewModel.isCurrentOHPSymptomWriteSaving || viewModel.isSessionRouteMutationInFlight || viewModel.isSessionMutationInFlight || viewModel.isSessionDeletionInFlight)",
+            'accessibilityIdentifier("session.delete.confirm.action")',
+            ".disabled(viewModel.isSessionRouteMutationInFlight || viewModel.isSessionMutationInFlight || viewModel.isSessionDeletionInFlight)",
+            "func activeContent() {",
+            "let content = true",
+            ".disabled(viewModel.isSessionDeletionInFlight)",
+            "}",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/GuidanceKit/Safety/OHPSafetyGate.swift": "\n".join(
+        [
+            "switch previousSession.response {",
+            "case .symptomsPresent:",
+            "let priorSymptoms = Decision(",
+            "safetyStop: SafetyStop(alternative: .halfKneelingDBPress)",
+            ")",
+            "case .uncertain:",
+            "let priorUncertain = Decision(",
+            "safetyStop: SafetyStop(alternative: .halfKneelingDBPress)",
+            ")",
+            "}",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Snapshots/TrainingSnapshots.swift": "\n".join(
+        [
+            "public struct SessionOHPSymptomWriteRequest {",
+            "public let sessionID: UUID",
+            "public let response: OHPSymptomResponse",
+            "public let reportedAt: Date",
+            "}",
+            "public enum SessionOHPSymptomWriteState {",
+            "case idle",
+            "case saving(request: SessionOHPSymptomWriteRequest)",
+            "case failed(request: SessionOHPSymptomWriteRequest)",
+            "}",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionViewModel.swift": "\n".join(
+        [
+            "var ohpSymptomWriteState = SessionOHPSymptomWriteState.idle",
+            "var pendingOHPSymptomWriteRequest: SessionOHPSymptomWriteRequest?",
+            "public private(set) var isSessionRouteMutationInFlight = false",
+            "public private(set) var isSessionDeletionInFlight = false",
+            "public private(set) var hasSessionDeletionFailure = false",
+            "private var sessionMutationOwners: Set<UUID> = []",
+            "public var activeSessionMutationCount: Int { sessionMutationOwners.count }",
+            "public var isSessionMutationInFlight: Bool { !sessionMutationOwners.isEmpty }",
+            "private func beginSessionMutation() -> UUID? {",
+            "guard !isSessionDeletionInFlight else { return nil }",
+            "let owner = UUID()",
+            "sessionMutationOwners.insert(owner)",
+            "return owner",
+            "}",
+            "private func endSessionMutation(_ owner: UUID) {",
+            "sessionMutationOwners.remove(owner)",
+            "}",
+            "var canReportCurrentOHPSymptom: Bool {",
+            "guard !isSessionRouteMutationInFlight, !isSessionDeletionInFlight else { return false }",
+            "return true",
+            "}",
+            "var hasPendingCurrentOHPSymptomWrite: Bool {",
+            "guard pendingOHPSymptomWriteRequest != nil else { return false }",
+            "switch ohpSymptomWriteState {",
+            "case .saving, .failed: return true",
+            "case .idle: return false",
+            "}",
+            "}",
+            "var isCurrentOHPSymptomWriteSaving: Bool {",
+            "guard pendingOHPSymptomWriteRequest != nil else { return false }",
+            "if case .saving = ohpSymptomWriteState { return true }",
+            "return false",
+            "}",
+            "func reportCurrentOHPSymptom() async {",
+            "guard !isSessionRouteMutationInFlight, !isSessionDeletionInFlight, pendingOHPSymptomWriteRequest == nil else { return }",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "let request = SessionOHPSymptomWriteRequest(",
+            "pendingOHPSymptomWriteRequest = request",
+            "replaceActiveSession(optimistic)",
+            "resolveOHPSafety(currentSession: optimistic, previousSession: nil)",
+            "ohpSymptomWriteState = .saving(request: request)",
+            "await persistCurrentOHPSymptomWrite(request)",
+            "}",
+            "func persistCurrentOHPSymptomWrite(_ request: SessionOHPSymptomWriteRequest) async {",
+            "do {",
+            "let updated = try await coordinator.recordOHPSymptomResponse(",
+            "pendingOHPSymptomWriteRequest = nil",
+            "ohpSymptomWriteState = .idle",
+            "await recordSymptomEvent(",
+            "occurredAt: request.reportedAt",
+            ")",
+            "} catch {",
+            "ohpSymptomWriteState = .failed(request: request)",
+            "}",
+            "}",
+            "func retryCurrentOHPSymptomWrite() async {",
+            "guard !isSessionDeletionInFlight, let request = pendingOHPSymptomWriteRequest else { return }",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "await persistCurrentOHPSymptomWrite(request)",
+            "}",
+            "func retrySymptomJournal() async {",
+            "await recordSymptomEvent(event)",
+            "}",
+            "func start() async {",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "await loadSession()",
+            "}",
+            "func toggleWarmupItem() async {",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "await persistProgress()",
+            "}",
+            "func completeWarmup() async {",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "await leaveWarmup()",
+            "}",
+            "func skipWarmup() async {",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "await leaveWarmup()",
+            "}",
+            "func answerPreviousOHPSymptom() async {",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "await savePreviousResponse()",
+            "}",
+            "func respondToDeload() async {",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "await saveDeloadResponse()",
+            "}",
+            "func advanceExercise() async {",
+            "guard !hasPendingCurrentOHPSymptomWrite, !isSessionRouteMutationInFlight, !isSessionDeletionInFlight else { return }",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "isSessionRouteMutationInFlight = true",
+            "defer { isSessionRouteMutationInFlight = false }",
+            "await persistProgress()",
+            "}",
+            "func goBack() async {",
+            "guard !hasPendingCurrentOHPSymptomWrite, !isSessionRouteMutationInFlight, !isSessionDeletionInFlight else { return }",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "isSessionRouteMutationInFlight = true",
+            "defer { isSessionRouteMutationInFlight = false }",
+            "await persistProgress()",
+            "}",
+            "func finishSession() async {",
+            "guard !hasPendingCurrentOHPSymptomWrite, !isSessionRouteMutationInFlight, !isSessionDeletionInFlight else { return }",
+            "isSessionRouteMutationInFlight = true",
+            "defer { isSessionRouteMutationInFlight = false }",
+            "await persistProgress()",
+            "}",
+            "func toggleCooldownItem() async {",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "await persistProgress()",
+            "}",
+            "func completeCooldown() async {",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "await finishSession()",
+            "}",
+            "func skipCooldown() async {",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "await finishSession()",
+            "}",
+            "func finishIncomplete() async {",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "await finishSession()",
+            "}",
+            "func saveCurrentSet() async {",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "await performSave()",
+            "}",
+            "func retrySetSave() async {",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "await performSave()",
+            "}",
+            "func saveSummary() async {",
+            "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+            "defer { endSessionMutation(sessionMutationOwner) }",
+            "await updateSummary()",
+            "}",
+            "func selectRecovery() { guard !isSessionDeletionInFlight else { return } }",
+            "func selectPerformedVariant() { guard !isSessionDeletionInFlight else { return } }",
+            "func stepperChanged() { guard !isSessionDeletionInFlight else { return } }",
+            "func updateSummaryNote() { guard !isSessionDeletionInFlight else { return } }",
+            "func requestDeletion() {",
+            "guard !isCurrentOHPSymptomWriteSaving, !isSessionRouteMutationInFlight, !isSessionMutationInFlight, !isSessionDeletionInFlight else { return }",
+            "}",
+            "func confirmDeletion() async {",
+            "guard !isCurrentOHPSymptomWriteSaving, !isSessionRouteMutationInFlight, !isSessionMutationInFlight, !isSessionDeletionInFlight else { return }",
+            "isSessionDeletionInFlight = true",
+            "defer { isSessionDeletionInFlight = false }",
+            "do {",
+            "try await repository.deleteWorkoutSession(id: sessionID)",
+            "pendingOHPSymptomWriteRequest = nil",
+            "ohpSymptomWriteState = .idle",
+            "hasSessionDeletionFailure = false",
+            "state = .dismissed",
+            "} catch {",
+            "if hasPendingCurrentOHPSymptomWrite {",
+            "hasSessionDeletionFailure = true",
+            "} else {",
+            "hasSessionDeletionFailure = false",
+            "state = .failed(.deletion)",
+            "}",
+            "isDeleteConfirmationPresented = false",
+            "}",
+            "}",
+        ]
+    ),
+    "Packages/HealthTrackingModules/Sources/HealthSafetyKit/HealthSafetyKitModule.swift": "\n".join(
         [
             "enum HealthSafetyKitModule {}",
-            "MedicalDisclaimerPresentation",
-            "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir.",
-            "isAlwaysVisible: true",
+            "struct MedicalDisclaimerPresentation {}",
+            'let disclaimer = "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir."',
+            "let permanent = MedicalDisclaimerPresentation() // isAlwaysVisible: true",
+            "enum MedicalSafetyTrigger { case missingSymptomAnswer }",
+            "private static let redFlagInformation =",
+            '"Yeni veya belirgin şekilde kötüleşen kol veya bacakta güçsüzlük ya da uyuşma, el becerisinde kayıp, denge veya yürümede değişiklik ya da mesane veya bağırsak işlevinde değişiklik acil tıbbi değerlendirme gerektirir."',
+            "private static let generalStopMessage =",
+            '"Hareketi durdur. Kalıcı veya kötüleşen belirtiler bir sağlık profesyoneli tarafından değerlendirilmelidir. "',
+            '+ "\\(redFlagInformation)"',
+            "private static let urgentMessage =",
+            '"Hareketi durdur. \\(redFlagInformation)"',
+            "let generalUrgency = (requiresUrgentAssessment: false)",
+            "let explicitUrgency = (requiresUrgentAssessment: true)",
         ]
     ),
     "Packages/HealthTrackingModules/Sources/HealthSafetyKit/Resources/Localizable.xcstrings": (
@@ -5311,6 +7202,30 @@ fixture_files = {
         prepareInitialContentForLaunch
         SynchronousTodaySnapshotRepository
         todayViewModel.state == .loading
+        symptomSafetyPresentationProvider: { context in TrainingSymptomSafetyMapper.presentation(for: context) }
+        case .ohpSafety:
+            trainingRepository = UITestFoundationRepository(
+                repository: repository,
+                failsFirstCurrentOHPSymptomWrite: true,
+                failsFirstSessionDeletion: true
+            )
+        private var failsNextCurrentOHPSymptomWrite
+        private var failsNextSessionDeletion
+        private var currentSessionID: UUID?
+        failsNextSessionDeletion = failsFirstSessionDeletion
+        currentSessionID = session?.id
+        response == .symptomsPresent
+        id == currentSessionID
+        UITestFoundationRepositoryError.ohpSymptomWrite
+        if failsNextSessionDeletion, id == currentSessionID
+        UITestFoundationRepositoryError.sessionDeletion
+        func updateWorkoutSessionOHPSymptomResponse() async throws {
+            return try await repository.updateWorkoutSessionOHPSymptomResponse(
+                id: id,
+                response: response,
+                at: date
+            )
+        }
         switch launchConfiguration.scenario {
         case .m3BodyMetrics, .m3SleepMood, .m3Posture, .m3HealthChecks,
              .m3Bloodwork, .m3ProgressPhotos, .m3PhotoGallery:
@@ -5325,6 +7240,16 @@ fixture_files = {
                 return
             }
         }
+        medicalSafetyAcknowledgementController = MedicalSafetyAcknowledgementController(
+            store: SwiftDataMedicalSafetyAcknowledgementStore(modelContext: mainContext)
+        )
+        #if DEBUG
+        if environment == .uiTesting,
+           let launchConfiguration = AppUITestLaunchConfiguration.resolve(),
+           !launchConfiguration.exposesMedicalSafetyFirstUseEvidence {
+            _ = medicalSafetyAcknowledgementController.acknowledge()
+        }
+        #endif
     """,
     "Packages/HealthTrackingModules/Sources/TrainingKit/Repository/TrainingRepository.swift": (
         "protocol SynchronousTodaySnapshotRepository fetchTodaySnapshotSynchronously"
@@ -5336,8 +7261,17 @@ fixture_files = {
         "applyInitialSnapshot publish(snapshot, evaluatedAt: date) "
         "calendar.startOfDay(for: date) reminder.dueDate < $0"
     ),
-    "App/Application/AppRootView.swift": " ".join(
+    "App/Application/AppRootView.swift": "\n".join(
         [
+            "let medicalSafetyAcknowledgementController: MedicalSafetyAcknowledgementController?",
+            "init(",
+            "medicalSafetyAcknowledgementController: MedicalSafetyAcknowledgementController? = nil",
+            "self.medicalSafetyAcknowledgementController = medicalSafetyAcknowledgementController",
+            "Button { controller.acknowledge() } label: {",
+            'Text(String(localized: "medical.explanation.l0.acknowledge"))',
+            ".frame(maxWidth: .infinity, minHeight: 52)",
+            ".contentShape(Rectangle())",
+            "}",
             "onOpenTrackers: performTodayTrackerAction",
             "onOpenLifestyle: performTodayLifestyleAction",
             "resolveTrackerFeatureBundle",
@@ -5360,6 +7294,10 @@ fixture_files = {
             "onOpenProgressPhotos",
         ]
     ),
+    "App/Application/AppBootstrapView.swift": (
+        "AppRootView( medicalSafetyAcknowledgementController: "
+        "dependencies.medicalSafetyAcknowledgementController"
+    ),
     "Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift": (
         "onOpenTrackers today.metrics.action onOpenLifestyle "
         "today.lifestyle.action today.lifestyle.action.hint "
@@ -5373,6 +7311,10 @@ fixture_files = {
     ),
     "App/Support/AppUITestLaunchConfiguration.swift": " ".join(
         [
+            'static let medicalSafetyFirstUseEvidenceFlag = "-ui-test-medical-safety-first-use-evidence"',
+            "let exposesMedicalSafetyFirstUseEvidence: Bool",
+            "arguments.filter({ $0 == medicalSafetyFirstUseEvidenceFlag }).count <= 1",
+            "exposesMedicalSafetyFirstUseEvidence: arguments.contains(medicalSafetyFirstUseEvidenceFlag)",
             'case m3BodyMetrics = "m3-body-metrics"',
             'case m3SleepMood = "m3-sleep-mood"',
             'case m3Posture = "m3-posture"',
@@ -5415,6 +7357,972 @@ with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     make_fixture(root)
     run(root)
+
+    launch_configuration = root / "App/Support/AppUITestLaunchConfiguration.swift"
+    original_launch_configuration = launch_configuration.read_text(encoding="utf-8")
+    launch_configuration.write_text(
+        original_launch_configuration.replace(
+            "arguments.filter({ $0 == medicalSafetyFirstUseEvidenceFlag }).count <= 1",
+            "arguments.contains(medicalSafetyFirstUseEvidenceFlag)",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.10 UI-test medical-safety first-use evidence configuration is incomplete")
+    launch_configuration.write_text(original_launch_configuration, encoding="utf-8")
+
+    launch_configuration.write_text(
+        original_launch_configuration.replace(
+            "exposesMedicalSafetyFirstUseEvidence: arguments.contains(medicalSafetyFirstUseEvidenceFlag)",
+            "exposesMedicalSafetyFirstUseEvidence: false",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.10 UI-test medical-safety first-use evidence configuration is incomplete")
+    launch_configuration.write_text(original_launch_configuration, encoding="utf-8")
+
+    dependencies_first_use = root / "App/Application/AppDependencies.swift"
+    original_dependencies_first_use = dependencies_first_use.read_text(encoding="utf-8")
+    dependencies_first_use.write_text(
+        original_dependencies_first_use.replace("#if DEBUG", "#if RELEASE", 1),
+        encoding="utf-8",
+    )
+    run(root, "must acknowledge L0 only inside DEBUG")
+    dependencies_first_use.write_text(original_dependencies_first_use, encoding="utf-8")
+
+    dependencies_first_use.write_text(
+        original_dependencies_first_use.replace(
+            "!launchConfiguration.exposesMedicalSafetyFirstUseEvidence",
+            "launchConfiguration.exposesMedicalSafetyFirstUseEvidence",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "explicit medical-safety evidence launch remains unacknowledged")
+    dependencies_first_use.write_text(original_dependencies_first_use, encoding="utf-8")
+
+    today_composition_test = root / "HealthTrackingAppTests/TodayCompositionTests.swift"
+    original_today_composition_test = today_composition_test.read_text(encoding="utf-8")
+    today_composition_test.write_text(
+        original_today_composition_test.replace(
+            "testMedicalSafetyFirstUseEvidenceRequiresOneExplicitUITestFlag",
+            "medicalSafetyEvidenceCoverageWasRemoved",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testMedicalSafetyFirstUseEvidenceRequiresOneExplicitUITestFlag")
+    today_composition_test.write_text(original_today_composition_test, encoding="utf-8")
+
+    today_composition_test.write_text(
+        original_today_composition_test.replace(
+            "testAppRootExplicitInitializerSupportsComposedAndDefaultMedicalSafetyController",
+            "explicitRootInitializerCoverageWasRemoved",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testAppRootExplicitInitializerSupportsComposedAndDefaultMedicalSafetyController")
+    today_composition_test.write_text(original_today_composition_test, encoding="utf-8")
+
+    training_accessibility_test = (
+        root / "HealthTrackingAppUITests/TrainingAccessibilityUITests.swift"
+    )
+    original_training_accessibility_test = training_accessibility_test.read_text(
+        encoding="utf-8"
+    )
+    training_accessibility_test.write_text(
+        original_training_accessibility_test.replace(
+            "-ui-test-medical-safety-first-use-evidence",
+            "-ui-test-medical-safety-evidence-was-removed",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "-ui-test-medical-safety-first-use-evidence")
+    training_accessibility_test.write_text(
+        original_training_accessibility_test,
+        encoding="utf-8",
+    )
+
+    ohp_gate_test = (
+        root / "Packages/HealthTrackingModules/Tests/GuidanceKitTests/OHPSafetyGateTests.swift"
+    )
+    original_ohp_gate_test = ohp_gate_test.read_text(encoding="utf-8")
+    ohp_gate_test.write_text(
+        original_ohp_gate_test.replace(
+            "XCTAssertEqual(decision.safetyStop, expectation.safetyStop)",
+            "XCTAssertNil(decision.safetyStop)",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "XCTAssertEqual(decision.safetyStop, expectation.safetyStop)")
+    ohp_gate_test.write_text(original_ohp_gate_test, encoding="utf-8")
+
+    session_review_test = (
+        root / "Packages/HealthTrackingModules/Tests/TrainingKitTests/SessionViewModelTests.swift"
+    )
+    original_session_review_test = session_review_test.read_text(encoding="utf-8")
+    session_review_test.write_text(
+        original_session_review_test
+        + "\nfunc invalidM310Autoclosure() async {\n"
+        + "XCTAssertEqual(await loadPendingWrite(), .idle)\n"
+        + "}\n",
+        encoding="utf-8",
+    )
+    run(root, "M3.10 XCTest autoclosures must evaluate async values first")
+    session_review_test.write_text(original_session_review_test, encoding="utf-8")
+    for removed in (
+        "testStoredPriorSymptomsAndUncertaintyStopOHPAtTheSafeAlternative",
+        "testAnsweringPriorSymptomsOrUncertaintyStopsOHPAtTheSafeAlternative",
+        "testCurrentOHPSymptomStopsBeforeTheRepositoryWriteCompletes",
+        "A pending exact write must reject a second write or retry.",
+        "testCurrentOHPSymptomWriteFailureRetainsStopAndRetriesTheExactRequestOnce",
+        "Pending current-symptom persistence must block exercise progress and completion.",
+        "A failed pending write must keep route actions fail closed until exact retry succeeds.",
+        "repository.deletedSessionIDs.count",
+        "[request.repositoryUpdate, request.repositoryUpdate]",
+        "XCTAssertEqual(symptomClient.events, [expectedEvent])",
+        "testAdvanceRouteFirstRejectsSymptomAndDuplicateRoutesUntilChosenProgressCompletes",
+        "testGoBackRouteFirstRejectsSymptomUntilChosenProgressCompletes",
+        "testFinishRouteFirstKeepsTheLockThroughProgressAndTransition",
+        "testRouteLockClearsAfterAppliedProgressFailureWithoutAcceptingSymptom",
+        "waitUntilProgressUpdateIsSuspended",
+        "waitUntilTransitionIsSuspended",
+        "XCTAssertTrue(viewModel.isSessionRouteMutationInFlight)",
+        "XCTAssertTrue(repository.ohpSymptomUpdates.isEmpty)",
+        "XCTAssertEqual(repository.progressUpdates.count, progressCount + 1)",
+        "testDeletionFailurePreservesStoppedSymptomRetryAndExactRequest",
+        "testSuccessfulDeletionIsTheOnlyDeletionPathThatDiscardsPendingSymptomRetry",
+        "testDeleteFirstLeaseRejectsSymptomRoutesAndDuplicateDeleteUntilSuccess",
+        "testSuspendedDeletionFailureRetainsStoppedExactRetryUntilLeaseReleases",
+        "testRouteFirstLeaseRejectsDeletionRequestAndConfirmationBeforeRepositoryAwait",
+        "testCancelledDeletionReleasesLeaseAndPreservesExactStoppedRetry",
+        "waitUntilDeletionIsSuspended",
+        "repository.suspendNextDeletion()",
+        "repository.resumeSuspendedDeletion()",
+        "deletion.cancel()",
+        "try Task.checkCancellation()",
+        "deleteAttempts.append(id)",
+        "XCTAssertTrue(viewModel.isSessionDeletionInFlight)",
+        "XCTAssertEqual(repository.deleteAttempts, [sessionID])",
+        "XCTAssertTrue(viewModel.hasSessionDeletionFailure)",
+        "XCTAssertEqual(viewModel.state, stoppedState)",
+        "XCTAssertTrue(repository.deletedSessionIDs.isEmpty)",
+        "XCTAssertEqual(repository.deletedSessionIDs, [sessionID])",
+        "testOrdinaryDeletionFailureRetainsTheExistingRecoverableFailureRoute",
+        "XCTAssertEqual(viewModel.state, .failed(.deletion))",
+        "testStartTailOwnsSessionUntilInitialProgressFinishesAndDeleteFirstRejectsRestart",
+        "testRestoredStartKeepsItsOwnerThroughTheActiveSymptomJournalTail",
+        "testWarmupAndCooldownChecklistOwnersBlockDeletionUntilProgressReturns",
+        "testPriorResponseAndDeloadOwnersBlockDeletionThroughRepositoryStateWrites",
+        "testSetSaveAndExactRetryEachOwnTheirWholeRepositoryLifetime",
+        "testSummarySaveOwnerBlocksDeletionUntilItsDismissalCommits",
+        "testOverlappingOwnersReleaseOnlyTheirExactTokenBeforeDeletionBecomesAvailable",
+        "testCancelledSessionMutationReleasesOnlyItsOwnerAndAllowsDeletion",
+        "testJournalRetryMayFinishAfterDeletionWithoutRepublishingSessionState",
+        "XCTAssertEqual(viewModel.activeSessionMutationCount, 2)",
+        '"The first completion must remove only its exact owner token."',
+        '"Metrics-only journal retry must not own the session deletion boundary."',
+        "assertDeletionRejectedWhileSessionMutationOwned",
+        "suspendNextDeloadUpdate",
+        "suspendNextSetSave",
+        "suspendNextSummaryUpdate",
+        "suspendNextRecord",
+        "OneShotSuspensionGate",
+    ):
+        session_review_test.write_text(
+            original_session_review_test.replace(removed, "coverageWasRemoved"),
+            encoding="utf-8",
+        )
+        run(root, removed)
+        session_review_test.write_text(original_session_review_test, encoding="utf-8")
+
+    ohp_ui_review_test = root / "HealthTrackingAppUITests/OHPSafetyFlowUITests.swift"
+    original_ohp_ui_review_test = ohp_ui_review_test.read_text(encoding="utf-8")
+    ohp_ui_review_test.write_text(
+        original_ohp_ui_review_test.replace(
+            "app.buttons.matching(identifier: identifier).firstMatch",
+            "app.descendants(matching: .any)[identifier]",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "exact button-scoped query in all three pending/deletion/retry loops")
+    ohp_ui_review_test.write_text(original_ohp_ui_review_test, encoding="utf-8")
+
+    for removed in (
+        "testAnsweredPriorSymptomsAndUncertaintyRenderTheShippedStoppedRoute",
+        "A stored prior response must not reopen the unanswered question.",
+        "must restore the stopped route.",
+        "session.ohp.persistence.error",
+        "session.ohp.persistence.retry",
+        "persistenceRetry.frame.height + 0.01",
+        "Pending OHP persistence must disable the route control:",
+        "Successful exact retry must re-enable the route control:",
+        "session.delete.confirm.action",
+        "session.delete.error",
+        "A failed deletion must stay on the stopped route and expose a separate error.",
+        "A failed deletion must not replace the current OHP safety stop.",
+        "A failed deletion must preserve the exact symptom persistence retry.",
+        "Deletion failure must keep the pending route control disabled:",
+    ):
+        ohp_ui_review_test.write_text(
+            original_ohp_ui_review_test.replace(removed, "coverageWasRemoved"),
+            encoding="utf-8",
+        )
+        run(root, removed)
+        ohp_ui_review_test.write_text(original_ohp_ui_review_test, encoding="utf-8")
+
+    ohp_ui_review_test.write_text(
+        original_ohp_ui_review_test.replace(
+            "XCTAssertGreaterThanOrEqual(persistenceRetry.frame.height + 0.01, 52,",
+            "XCTAssertGreaterThanOrEqual(persistenceRetry.frame.height + 0.01, 44,",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "shipped OHP persistence retry UI test must measure a real 52-point target")
+    ohp_ui_review_test.write_text(original_ohp_ui_review_test, encoding="utf-8")
+
+    medical_ui_review_test = root / "HealthTrackingAppUITests/MedicalSafetyFlowUITests.swift"
+    original_medical_ui_review_test = medical_ui_review_test.read_text(encoding="utf-8")
+    medical_ui_review_test.write_text(
+        original_medical_ui_review_test.replace(
+            "-ui-test-medical-safety-first-use-evidence",
+            "-ui-test-medical-safety-evidence-was-removed",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "-ui-test-medical-safety-first-use-evidence")
+    medical_ui_review_test.write_text(original_medical_ui_review_test, encoding="utf-8")
+
+    medical_ui_review_test.write_text(
+        original_medical_ui_review_test.replace(
+            "XCTAssertGreaterThanOrEqual(acknowledgement.frame.height + 0.01, 52,",
+            "XCTAssertGreaterThanOrEqual(acknowledgement.frame.height + 0.01, 44,",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "shipped L0 acknowledgement UI test must measure a real 52-point target")
+    medical_ui_review_test.write_text(original_medical_ui_review_test, encoding="utf-8")
+
+    app_root_review = root / "App/Application/AppRootView.swift"
+    original_app_root_review = app_root_review.read_text(encoding="utf-8")
+    app_root_review.write_text(
+        original_app_root_review.replace(
+            "self.medicalSafetyAcknowledgementController = medicalSafetyAcknowledgementController",
+            "let ignoredAcknowledgementController = medicalSafetyAcknowledgementController",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.10 AppRootView must expose an explicit immutable initializer")
+    app_root_review.write_text(original_app_root_review, encoding="utf-8")
+
+    app_root_review.write_text(
+        original_app_root_review.replace(
+            ".frame(maxWidth: .infinity, minHeight: 52)\n.contentShape(Rectangle())\n}",
+            ".contentShape(Rectangle())\n}\n.frame(minHeight: 52)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "52-point frame and content shape inside the explicit Button label")
+    app_root_review.write_text(original_app_root_review, encoding="utf-8")
+
+    app_bootstrap_review = root / "App/Application/AppBootstrapView.swift"
+    original_app_bootstrap_review = app_bootstrap_review.read_text(encoding="utf-8")
+    app_bootstrap_review.write_text(
+        original_app_bootstrap_review.replace(
+            "dependencies.medicalSafetyAcknowledgementController",
+            "nil",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "must pass the composed acknowledgement controller")
+    app_bootstrap_review.write_text(original_app_bootstrap_review, encoding="utf-8")
+
+    ohp_gate_review = (
+        root / "Packages/HealthTrackingModules/Sources/GuidanceKit/Safety/OHPSafetyGate.swift"
+    )
+    original_ohp_gate_review = ohp_gate_review.read_text(encoding="utf-8")
+    stop_contract = "safetyStop: SafetyStop(alternative: .halfKneelingDBPress)"
+    first_stop = original_ohp_gate_review.find(stop_contract)
+    second_stop = original_ohp_gate_review.find(stop_contract, first_stop + 1)
+    for stop_index in (first_stop, second_stop):
+        mutated = (
+            original_ohp_gate_review[:stop_index]
+            + "safetyStop: nil"
+            + original_ohp_gate_review[stop_index + len(stop_contract):]
+        )
+        ohp_gate_review.write_text(mutated, encoding="utf-8")
+        run(root, "prior OHP symptoms and uncertainty must produce")
+        ohp_gate_review.write_text(original_ohp_gate_review, encoding="utf-8")
+
+    session_review_source = (
+        root / "Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionViewModel.swift"
+    )
+    original_session_review_source = session_review_source.read_text(encoding="utf-8")
+
+    def replace_in_swift_function(
+        source: str, name: str, old: str, new: str
+    ) -> str:
+        declaration = source.index(f"func {name}")
+        opening = source.index("{", declaration)
+        depth = 0
+        closing = -1
+        for index in range(opening, len(source)):
+            if source[index] == "{":
+                depth += 1
+            elif source[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    closing = index + 1
+                    break
+        if closing < 0:
+            raise RuntimeError(f"Unclosed fixture function: {name}")
+        body = source[declaration:closing]
+        if old not in body:
+            raise RuntimeError(f"Missing fixture mutation token in {name}: {old}")
+        mutated_body = body.replace(old, new, 1)
+        return source[:declaration] + mutated_body + source[closing:]
+
+    session_review_source.write_text(
+        original_session_review_source.replace(
+            "public private(set) var isSessionDeletionInFlight = false",
+            "private var deletionLeaseWasRemoved = false",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "deletion arbitration requires an observable MainActor deletion lease")
+    session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    for contract, replacement, expected in (
+        (
+            "private var sessionMutationOwners: Set<UUID> = []",
+            "private var sessionMutationOwners: [UUID] = []",
+            "deletion finality requires exact broad session mutation owners",
+        ),
+        (
+            "public var activeSessionMutationCount: Int { sessionMutationOwners.count }",
+            "public var activeSessionMutationCount: Int { 0 }",
+            "deletion finality requires exact broad session mutation owners",
+        ),
+        (
+            "public var isSessionMutationInFlight: Bool { !sessionMutationOwners.isEmpty }",
+            "public var isSessionMutationInFlight: Bool { false }",
+            "deletion finality requires exact broad session mutation owners",
+        ),
+    ):
+        session_review_source.write_text(
+            original_session_review_source.replace(contract, replacement, 1),
+            encoding="utf-8",
+        )
+        run(root, expected)
+        session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    for function_name, contract, replacement in (
+        (
+            "beginSessionMutation",
+            "guard !isSessionDeletionInFlight else { return nil }",
+            "let deletionWasIgnored = true",
+        ),
+        (
+            "beginSessionMutation",
+            "let owner = UUID()",
+            "let owner = UUID.zero",
+        ),
+        (
+            "beginSessionMutation",
+            "sessionMutationOwners.insert(owner)",
+            "let ownerWasNotInserted = owner",
+        ),
+        (
+            "endSessionMutation",
+            "sessionMutationOwners.remove(owner)",
+            "sessionMutationOwners.removeAll()",
+        ),
+    ):
+        session_review_source.write_text(
+            replace_in_swift_function(
+                original_session_review_source,
+                function_name,
+                contract,
+                replacement,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "broad session mutation owner must be an exact inserted/removed token")
+        session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    for action_name in (
+        "start",
+        "toggleWarmupItem",
+        "completeWarmup",
+        "skipWarmup",
+        "answerPreviousOHPSymptom",
+        "respondToDeload",
+        "reportCurrentOHPSymptom",
+        "retryCurrentOHPSymptomWrite",
+        "advanceExercise",
+        "goBack",
+        "toggleCooldownItem",
+        "completeCooldown",
+        "skipCooldown",
+        "finishIncomplete",
+        "saveCurrentSet",
+        "retrySetSave",
+        "saveSummary",
+    ):
+        expected = (
+            "session mutation entry must acquire and defer-release one exact broad "
+            f"owner before awaiting: {action_name}"
+        )
+        for contract, replacement in (
+            (
+                "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+                "let sessionMutationOwner = UUID()",
+            ),
+            (
+                "defer { endSessionMutation(sessionMutationOwner) }",
+                "let ownerWasNotReleased = sessionMutationOwner",
+            ),
+        ):
+            session_review_source.write_text(
+                replace_in_swift_function(
+                    original_session_review_source,
+                    action_name,
+                    contract,
+                    replacement,
+                ),
+                encoding="utf-8",
+            )
+            run(root, expected)
+            session_review_source.write_text(
+                original_session_review_source,
+                encoding="utf-8",
+            )
+
+    for action_name in (
+        "selectRecovery",
+        "selectPerformedVariant",
+        "stepperChanged",
+        "updateSummaryNote",
+    ):
+        session_review_source.write_text(
+            replace_in_swift_function(
+                original_session_review_source,
+                action_name,
+                "guard !isSessionDeletionInFlight else { return }",
+                "let deletionWasIgnored = true",
+            ),
+            encoding="utf-8",
+        )
+        run(root, "delete-first safety must reject synchronous session mutation: " + action_name)
+        session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    session_review_source.write_text(
+        replace_in_swift_function(
+            original_session_review_source,
+            "retrySymptomJournal",
+            "await recordSymptomEvent(event)",
+            "guard let owner = beginSessionMutation() else { return }; defer { endSessionMutation(owner) }; await recordSymptomEvent(event)",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "metrics-only symptom journal retry must not own or republish session state")
+    session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    session_review_source.write_text(
+        original_session_review_source.replace(
+            "replaceActiveSession(optimistic)",
+            "let deferredSnapshot = optimistic",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "must publish and retain the exact stopped request before awaiting persistence")
+    session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    session_review_source.write_text(
+        original_session_review_source.replace(
+            "guard !isSessionRouteMutationInFlight, !isSessionDeletionInFlight else { return false }",
+            "guard !isSessionDeletionInFlight else { return false }",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "shipped symptom action availability must close")
+    session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    session_review_source.write_text(
+        original_session_review_source.replace(
+            "guard !isSessionRouteMutationInFlight, !isSessionDeletionInFlight else { return false }",
+            "guard !isSessionRouteMutationInFlight else { return false }",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "shipped symptom action availability must close")
+    session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    report_guard = (
+        "guard !isSessionRouteMutationInFlight, !isSessionDeletionInFlight, "
+        "pendingOHPSymptomWriteRequest == nil else { return }"
+    )
+    for replacement in (
+        "guard !isSessionDeletionInFlight, pendingOHPSymptomWriteRequest == nil else { return }",
+        "guard !isSessionRouteMutationInFlight, pendingOHPSymptomWriteRequest == nil else { return }",
+    ):
+        session_review_source.write_text(
+            original_session_review_source.replace(report_guard, replacement),
+            encoding="utf-8",
+        )
+        run(root, "current OHP report must reject route-first and delete-first races")
+        session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    for action_name in ("advanceExercise", "goBack", "finishSession"):
+        action_lines = [
+            f"func {action_name}() async {{",
+            "guard !hasPendingCurrentOHPSymptomWrite, !isSessionRouteMutationInFlight, !isSessionDeletionInFlight else { return }",
+        ]
+        if action_name != "finishSession":
+            action_lines.extend(
+                [
+                    "guard let sessionMutationOwner = beginSessionMutation() else { return }",
+                    "defer { endSessionMutation(sessionMutationOwner) }",
+                ]
+            )
+        action_lines.extend(
+            [
+                "isSessionRouteMutationInFlight = true",
+                "defer { isSessionRouteMutationInFlight = false }",
+            ]
+        )
+        action_prefix = "\n".join(action_lines)
+        without_acquire = action_prefix.replace(
+            "isSessionRouteMutationInFlight = true",
+            "let routeMutationWasNotLocked = true",
+        )
+        session_review_source.write_text(
+            original_session_review_source.replace(action_prefix, without_acquire),
+            encoding="utf-8",
+        )
+        run(root, "route-first safety must acquire and defer-release the lock before awaiting: " + action_name)
+        session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+        session_review_source.write_text(
+            original_session_review_source.replace(
+                action_prefix,
+                action_prefix.replace(", !isSessionDeletionInFlight", ""),
+            ),
+            encoding="utf-8",
+        )
+        run(root, "delete-first safety must block normal session route action: " + action_name)
+        session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+        without_release = action_prefix.replace(
+            "defer { isSessionRouteMutationInFlight = false }",
+            "let routeMutationWasNotReleased = true",
+        )
+        session_review_source.write_text(
+            original_session_review_source.replace(action_prefix, without_release),
+            encoding="utf-8",
+        )
+        run(root, "route-first safety must acquire and defer-release the lock before awaiting: " + action_name)
+        session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    session_review_source.write_text(
+        original_session_review_source.replace(
+            "hasSessionDeletionFailure = true",
+            "state = .failed(.deletion)",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "deletion failure must preserve pending OHP safety without regressing ordinary failure recovery")
+    session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    session_review_source.write_text(
+        original_session_review_source.replace(
+            "state = .failed(.deletion)",
+            "let ordinaryFailureWasHidden = true",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "deletion failure must preserve pending OHP safety without regressing ordinary failure recovery")
+    session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    confirm_success_prefix = "\n".join(
+        [
+            "try await repository.deleteWorkoutSession(id: sessionID)",
+            "pendingOHPSymptomWriteRequest = nil",
+            "ohpSymptomWriteState = .idle",
+        ]
+    )
+    session_review_source.write_text(
+        original_session_review_source.replace(
+            confirm_success_prefix,
+            "try await repository.deleteWorkoutSession(id: sessionID)",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "only successful session deletion may discard the exact symptom retry")
+    session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    session_review_source.write_text(
+        original_session_review_source.replace(
+            "guard pendingOHPSymptomWriteRequest != nil else { return false }",
+            "guard ohpSymptomWriteState != .idle else { return false }",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "pending current OHP write flag must derive fail-closed")
+    session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    for signature, action_name in (
+        ("func advanceExercise() async {", "advanceExercise"),
+        ("func goBack() async {", "goBack"),
+        ("func finishSession() async {", "finishSession"),
+    ):
+        session_review_source.write_text(
+            original_session_review_source.replace(
+                signature
+                + "\nguard !hasPendingCurrentOHPSymptomWrite, "
+                + "!isSessionRouteMutationInFlight, "
+                + "!isSessionDeletionInFlight else { return }",
+                signature
+                + "\nguard !isSessionRouteMutationInFlight, "
+                + "!isSessionDeletionInFlight else { return }",
+            ),
+            encoding="utf-8",
+        )
+        run(
+            root,
+            "pending current OHP write must block normal session route action: "
+            + action_name,
+        )
+        session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    session_review_source.write_text(
+        original_session_review_source.replace(
+            "if case .saving = ohpSymptomWriteState { return true }",
+            "if case .failed = ohpSymptomWriteState { return true }",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "destructive deletion guard must distinguish the exact saving window")
+    session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    for signature, action_name in (
+        ("func requestDeletion() {", "requestDeletion"),
+        ("func confirmDeletion() async {", "confirmDeletion"),
+    ):
+        deletion_entry_guard = (
+            signature
+            + "\nguard !isCurrentOHPSymptomWriteSaving, "
+            + "!isSessionRouteMutationInFlight, !isSessionMutationInFlight, "
+            + "!isSessionDeletionInFlight else { return }"
+        )
+        session_review_source.write_text(
+            original_session_review_source.replace(
+                deletion_entry_guard,
+                deletion_entry_guard.replace(
+                    "!isCurrentOHPSymptomWriteSaving, ", ""
+                ),
+            ),
+            encoding="utf-8",
+        )
+        run(
+            root,
+            "saving current OHP write must block destructive deletion race: "
+            + action_name,
+        )
+        session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+        for removed_lock in (
+            "!isSessionRouteMutationInFlight, ",
+            "!isSessionMutationInFlight, ",
+            "!isSessionDeletionInFlight",
+        ):
+            session_review_source.write_text(
+                original_session_review_source.replace(
+                    deletion_entry_guard,
+                    deletion_entry_guard.replace(removed_lock, ""),
+                ),
+                encoding="utf-8",
+            )
+            run(root, "deletion entry must reject route, broad mutation, and duplicate deletion ownership: " + action_name)
+            session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    for lease_contract in (
+        "isSessionDeletionInFlight = true",
+        "defer { isSessionDeletionInFlight = false }",
+    ):
+        session_review_source.write_text(
+            original_session_review_source.replace(
+                lease_contract,
+                "let deletionLeaseContractWasRemoved = true",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "confirm deletion must acquire and defer-release its lease before the first await")
+        session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    session_review_source.write_text(
+        original_session_review_source.replace(
+            "ohpSymptomWriteState = .failed(request: request)",
+            "ohpSymptomWriteState = .idle",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "write failure must retain the active stopped route")
+    session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    session_review_source.write_text(
+        original_session_review_source.replace(
+            "guard !isSessionDeletionInFlight, let request = pendingOHPSymptomWriteRequest else { return }",
+            "guard let request = pendingOHPSymptomWriteRequest else { return }",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "retry must reject deletion ownership and reuse the exact pending request")
+    session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    session_review_source.write_text(
+        original_session_review_source.replace(
+            "func retryCurrentOHPSymptomWrite() async {",
+            "func retryCurrentOHPSymptomWrite() async { let replacementTimestamp = now()",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "retry must reject deletion ownership and reuse the exact pending request")
+    session_review_source.write_text(original_session_review_source, encoding="utf-8")
+
+    exercise_review_source = (
+        root / "Packages/HealthTrackingModules/Sources/TrainingKit/Session/ExerciseStageView.swift"
+    )
+    original_exercise_review_source = exercise_review_source.read_text(encoding="utf-8")
+    exercise_review_source.write_text(
+        original_exercise_review_source.replace(
+            'accessibilityIdentifier("session.ohp.persistence.retry")',
+            'accessibilityIdentifier("session.ohp.persistence.dismiss")',
+        ),
+        encoding="utf-8",
+    )
+    run(root, "shipped stopped UI must expose current-response write retry")
+    exercise_review_source.write_text(original_exercise_review_source, encoding="utf-8")
+
+    exercise_review_source.write_text(
+        original_exercise_review_source.replace(
+            "if viewModel.canReportCurrentOHPSymptom { }",
+            "if true { }",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "shipped stopped UI must expose current-response write retry")
+    exercise_review_source.write_text(original_exercise_review_source, encoding="utf-8")
+
+    exercise_review_source.write_text(
+        original_exercise_review_source.replace(
+            'accessibilityIdentifier("session.delete.error")',
+            'accessibilityIdentifier("session.delete.hidden-error")',
+        ),
+        encoding="utf-8",
+    )
+    run(root, "shipped stopped UI must expose current-response write retry")
+    exercise_review_source.write_text(original_exercise_review_source, encoding="utf-8")
+
+    exercise_review_source.write_text(
+        original_exercise_review_source.replace(
+            ".frame(maxWidth: .infinity, minHeight: 52)\n.contentShape(Rectangle())\n}",
+            ".contentShape(Rectangle())\n}\n.frame(minHeight: 52)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "52-point frame and content shape inside the explicit Button label")
+    exercise_review_source.write_text(original_exercise_review_source, encoding="utf-8")
+
+    exercise_review_source.write_text(
+        original_exercise_review_source.replace(
+            'accessibilityIdentifier("session.ohp.persistence.retry")\n'
+            + ".disabled(viewModel.isSessionDeletionInFlight)",
+            'accessibilityIdentifier("session.ohp.persistence.retry")',
+        ),
+        encoding="utf-8",
+    )
+    run(root, "shipped OHP retry must be disabled while deletion owns the session")
+    exercise_review_source.write_text(original_exercise_review_source, encoding="utf-8")
+
+    for identifier in (
+        "session.exercise.next",
+        "session.exercise.back",
+        "session.exercise.finish-incomplete",
+    ):
+        identifier_contract = f'accessibilityIdentifier("{identifier}")'
+        exercise_review_source.write_text(
+            original_exercise_review_source.replace(
+                identifier_contract
+                + "\n.disabled(viewModel.hasPendingCurrentOHPSymptomWrite || "
+                + "viewModel.isSessionDeletionInFlight)",
+                identifier_contract,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "shipped exercise route controls must remain disabled")
+        exercise_review_source.write_text(original_exercise_review_source, encoding="utf-8")
+
+        exercise_review_source.write_text(
+            original_exercise_review_source.replace(
+                identifier_contract
+                + "\n.disabled(viewModel.hasPendingCurrentOHPSymptomWrite || "
+                + "viewModel.isSessionDeletionInFlight)",
+                identifier_contract
+                + "\n.disabled(viewModel.hasPendingCurrentOHPSymptomWrite)",
+            ),
+            encoding="utf-8",
+        )
+        run(root, "shipped exercise route controls must remain disabled")
+        exercise_review_source.write_text(original_exercise_review_source, encoding="utf-8")
+
+    training_session_review_source = root / (
+        "Packages/HealthTrackingModules/Sources/TrainingKit/Session/TrainingSessionView.swift"
+    )
+    original_training_session_review_source = training_session_review_source.read_text(
+        encoding="utf-8"
+    )
+    for lock_contract in (
+        ".disabled(viewModel.hasPendingCurrentOHPSymptomWrite || viewModel.isSessionMutationInFlight || viewModel.isSessionDeletionInFlight)",
+        ".disabled(viewModel.isCurrentOHPSymptomWriteSaving || viewModel.isSessionRouteMutationInFlight || viewModel.isSessionMutationInFlight || viewModel.isSessionDeletionInFlight)",
+        ".disabled(viewModel.isSessionRouteMutationInFlight || viewModel.isSessionMutationInFlight || viewModel.isSessionDeletionInFlight)",
+    ):
+        training_session_review_source.write_text(
+            original_training_session_review_source.replace(
+                lock_contract,
+                ".disabled(false)",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "shipped session toolbar must preserve the pending write")
+        training_session_review_source.write_text(
+            original_training_session_review_source,
+            encoding="utf-8",
+        )
+
+    for lock_contract, weakened_contract in (
+        (
+            ".disabled(viewModel.hasPendingCurrentOHPSymptomWrite || viewModel.isSessionMutationInFlight || viewModel.isSessionDeletionInFlight)",
+            ".disabled(viewModel.hasPendingCurrentOHPSymptomWrite || viewModel.isSessionDeletionInFlight)",
+        ),
+        (
+            ".disabled(viewModel.isCurrentOHPSymptomWriteSaving || viewModel.isSessionRouteMutationInFlight || viewModel.isSessionMutationInFlight || viewModel.isSessionDeletionInFlight)",
+            ".disabled(viewModel.isCurrentOHPSymptomWriteSaving || viewModel.isSessionRouteMutationInFlight || viewModel.isSessionDeletionInFlight)",
+        ),
+        (
+            ".disabled(viewModel.isSessionRouteMutationInFlight || viewModel.isSessionMutationInFlight || viewModel.isSessionDeletionInFlight)",
+            ".disabled(viewModel.isSessionRouteMutationInFlight || viewModel.isSessionDeletionInFlight)",
+        ),
+    ):
+        training_session_review_source.write_text(
+            original_training_session_review_source.replace(
+                lock_contract, weakened_contract, 1
+            ),
+            encoding="utf-8",
+        )
+        run(root, "shipped session toolbar must preserve the pending write")
+        training_session_review_source.write_text(
+            original_training_session_review_source,
+            encoding="utf-8",
+        )
+
+    training_session_review_source.write_text(
+        original_training_session_review_source.replace(
+            ".disabled(viewModel.isSessionDeletionInFlight)",
+            ".disabled(false)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "shipped active session content must be disabled for the full deletion lease")
+    training_session_review_source.write_text(
+        original_training_session_review_source,
+        encoding="utf-8",
+    )
+
+    training_session_review_source.write_text(
+        original_training_session_review_source.replace(
+            'accessibilityIdentifier("session.delete.confirm.action")',
+            'accessibilityIdentifier("session.delete.confirm.hidden")',
+        ),
+        encoding="utf-8",
+    )
+    run(root, "shipped deletion failure regression requires an addressable confirm action")
+    training_session_review_source.write_text(
+        original_training_session_review_source,
+        encoding="utf-8",
+    )
+
+    dependencies_review_source = root / "App/Application/AppDependencies.swift"
+    original_dependencies_review_source = dependencies_review_source.read_text(
+        encoding="utf-8"
+    )
+    dependencies_review_source.write_text(
+        original_dependencies_review_source.replace(
+            "failsFirstCurrentOHPSymptomWrite: true",
+            "failsFirstCurrentOHPSymptomWrite: false",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "OHP UI fixture must fail the first current-response write")
+    dependencies_review_source.write_text(
+        original_dependencies_review_source,
+        encoding="utf-8",
+    )
+
+    dependencies_review_source.write_text(
+        original_dependencies_review_source.replace(
+            "failsFirstSessionDeletion: true",
+            "failsFirstSessionDeletion: false",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "OHP UI fixture must fail the first current-response write")
+    dependencies_review_source.write_text(
+        original_dependencies_review_source,
+        encoding="utf-8",
+    )
+
+    dependencies_review_source.write_text(
+        original_dependencies_review_source.replace(
+            "if failsNextSessionDeletion, id == currentSessionID",
+            "if false, id == currentSessionID",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "OHP UI fixture must fail the first current-response write")
+    dependencies_review_source.write_text(
+        original_dependencies_review_source,
+        encoding="utf-8",
+    )
+    dependencies_review_source.write_text(
+        original_dependencies_review_source.replace(
+            "return try await repository.updateWorkoutSessionOHPSymptomResponse(",
+            "try await repository.updateWorkoutSessionOHPSymptomResponse(",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "DEBUG OHP UI repository must return its delegated snapshot")
+    dependencies_review_source.write_text(
+        original_dependencies_review_source,
+        encoding="utf-8",
+    )
+    dependencies_review_source.write_text(
+        original_dependencies_review_source.replace(
+            "id == currentSessionID",
+            "id != currentSessionID",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "OHP UI fixture must fail the first current-response write")
+    dependencies_review_source.write_text(
+        original_dependencies_review_source,
+        encoding="utf-8",
+    )
 
     autoclosure_repository_tests = root / (
         "Packages/HealthTrackingModules/Tests/PersistenceKitTests/"
@@ -7396,6 +10304,267 @@ with tempfile.TemporaryDirectory() as temporary:
     run(root, '["id", "occurredAt", "source"]')
     symptom_event_test.write_text(original_symptom_event_test, encoding="utf-8")
 
+    medical_safety_test = root / "Packages/HealthTrackingModules/Tests/HealthSafetyKitTests/MedicalSafetyPresentationTests.swift"
+    original_medical_safety_test = medical_safety_test.read_text(encoding="utf-8")
+    medical_safety_test.write_text(
+        original_medical_safety_test.replace(
+            "testMissingSymptomAnswerPublishesCompleteNonUrgentFailClosedLevelTwo",
+            "missingAnswerCoverageWasRemoved",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testMissingSymptomAnswerPublishesCompleteNonUrgentFailClosedLevelTwo")
+    medical_safety_test.write_text(original_medical_safety_test, encoding="utf-8")
+
+    medical_safety_test.write_text(
+        original_medical_safety_test.replace(
+            "değişiklik acil tıbbi değerlendirme gerektirir.\"",
+            "değişiklik acil tıbbi değerlendirme gerektirir. Ek öneri.\"",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.10 RED test expectedGeneralMessage must freeze the complete exact Turkish copy")
+    medical_safety_test.write_text(original_medical_safety_test, encoding="utf-8")
+
+    medical_safety_test.write_text(
+        original_medical_safety_test.replace(
+            "private let expectedUrgentMessage =\n"
+            '"Hareketi durdur. Yeni veya belirgin şekilde kötüleşen kol veya bacakta '
+            "güçsüzlük ya da uyuşma, el becerisinde kayıp, denge veya yürümede "
+            "değişiklik ya da mesane veya bağırsak işlevinde değişiklik acil tıbbi "
+            'değerlendirme gerektirir."',
+            "private let expectedUrgentMessage =\n"
+            '"Hareketi durdur. Yeni veya belirgin şekilde kötüleşen kol veya bacakta '
+            "güçsüzlük ya da uyuşma, el becerisinde kayıp, denge veya yürümede "
+            "değişiklik ya da mesane veya bağırsak işlevinde değişiklik acil tıbbi "
+            'değerlendirme gerektirir. Ek öneri."',
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.10 RED test expectedUrgentMessage must freeze the complete exact Turkish copy")
+    medical_safety_test.write_text(original_medical_safety_test, encoding="utf-8")
+
+    for removed, expected in (
+        (
+            "for flag in CervicalRedFlag.allCases",
+            "for flag in CervicalRedFlag.allCases",
+        ),
+        (
+            "triggers: [.cervicalRedFlags([flag])]",
+            "triggers: [.cervicalRedFlags([flag])]",
+        ),
+        (
+            "for generalTrigger in generalTriggers",
+            "for generalTrigger in generalTriggers",
+        ),
+        (
+            "XCTAssertEqual(notice.kind, .urgentAssessmentInformation",
+            "XCTAssertEqual(notice.kind, .urgentAssessmentInformation",
+        ),
+        (
+            "XCTAssertTrue(notice.requiresUrgentAssessment",
+            "XCTAssertTrue(notice.requiresUrgentAssessment",
+        ),
+        (
+            "XCTAssertEqual(notice.message, expectedUrgentMessage",
+            "XCTAssertEqual(notice.message, expectedUrgentMessage",
+        ),
+    ):
+        medical_safety_test.write_text(
+            original_medical_safety_test.replace(removed, "coverageWasRemoved"),
+            encoding="utf-8",
+        )
+        run(root, expected)
+        medical_safety_test.write_text(
+            original_medical_safety_test,
+            encoding="utf-8",
+        )
+
+    posture_safety_test = root / "Packages/HealthTrackingModules/Tests/MetricsKitTests/PostureViewModelTests.swift"
+    original_posture_safety_test = posture_safety_test.read_text(encoding="utf-8")
+    posture_safety_test.write_text(
+        original_posture_safety_test.replace(
+            "testLoadOrdersHistoryAndWallTestOnlyRecordDoesNotTriggerSafety",
+            "wallTestOnlyRulingWasRemoved",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "testLoadOrdersHistoryAndWallTestOnlyRecordDoesNotTriggerSafety")
+    posture_safety_test.write_text(original_posture_safety_test, encoding="utf-8")
+
+    session_safety_test = root / "Packages/HealthTrackingModules/Tests/TrainingKitTests/SessionViewModelTests.swift"
+    original_session_safety_test = session_safety_test.read_text(encoding="utf-8")
+    session_safety_test.write_text(
+        original_session_safety_test.replace(
+            ".priorOverheadPressResponse(.uncertain)",
+            ".priorResponseCoverageWasRemoved",
+        ),
+        encoding="utf-8",
+    )
+    run(root, ".priorOverheadPressResponse(.uncertain)")
+    session_safety_test.write_text(original_session_safety_test, encoding="utf-8")
+
+    app_safety_mapper_test = root / "HealthTrackingAppTests/SymptomJournalAdapterTests.swift"
+    original_app_safety_mapper_test = app_safety_mapper_test.read_text(encoding="utf-8")
+    app_safety_mapper_test.write_text(
+        original_app_safety_mapper_test.replace(
+            "OHPSymptomResponse.notAsked, .uncertain",
+            "OHPSymptomResponse.symptomFree",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "OHPSymptomResponse.notAsked, .uncertain")
+    app_safety_mapper_test.write_text(original_app_safety_mapper_test, encoding="utf-8")
+
+    app_safety_mapper_test.write_text(
+        original_app_safety_mapper_test.replace(
+            "session.resolveSymptomSafetyPresentation(for: context)",
+            "TrainingSymptomSafetyMapper.presentation(for: context)",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "session.resolveSymptomSafetyPresentation(for: context)")
+    app_safety_mapper_test.write_text(original_app_safety_mapper_test, encoding="utf-8")
+
+    acknowledgement_test = root / "HealthTrackingAppTests/MedicalSafetyAcknowledgementTests.swift"
+    original_acknowledgement_test = acknowledgement_test.read_text(encoding="utf-8")
+    acknowledgement_test.write_text(
+        original_acknowledgement_test.replace(
+            "XCTAssertTrue(controller.isLevelZeroVisible)",
+            "XCTAssertFalse(controller.isLevelZeroVisible)",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "XCTAssertTrue(controller.isLevelZeroVisible)")
+    acknowledgement_test.write_text(original_acknowledgement_test, encoding="utf-8")
+
+    motion_policy_test = (
+        root
+        / "Packages/HealthTrackingModules/Tests/DesignSystemTests/MedicalSafetyMotionPolicyTests.swift"
+    )
+    original_motion_policy_test = motion_policy_test.read_text(encoding="utf-8")
+    motion_policy_test.write_text(
+        original_motion_policy_test.replace(
+            "),\n.identity\n)",
+            "),\n.opacity\n)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.10 motion behavior test must require Reduce Motion true -> identity")
+    motion_policy_test.write_text(original_motion_policy_test, encoding="utf-8")
+
+    focus_policy_test = (
+        root
+        / "Packages/HealthTrackingModules/Tests/DesignSystemTests/MedicalSafetyFocusPolicyTests.swift"
+    )
+    original_focus_policy_test = focus_policy_test.read_text(encoding="utf-8")
+    focus_policy_test.write_text(
+        original_focus_policy_test.replace(
+            "isLevelTwoPresented: true",
+            "isLevelTwoPresented: false",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "MedicalSafetyFocusPolicy.headingFocused(isLevelTwoPresented: true)")
+    focus_policy_test.write_text(original_focus_policy_test, encoding="utf-8")
+
+    frozen_l1 = "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir."
+    for relative_path in (
+        "HealthTrackingAppUITests/PostureFlowUITests.swift",
+        "HealthTrackingAppUITests/OHPSafetyFlowUITests.swift",
+        "HealthTrackingAppUITests/BloodworkFlowUITests.swift",
+        "HealthTrackingAppUITests/HealthCheckFlowUITests.swift",
+    ):
+        l1_test = root / relative_path
+        original_l1_test = l1_test.read_text(encoding="utf-8")
+        l1_test.write_text(
+            original_l1_test.replace(frozen_l1, "Bu bir sağlık notudur.", 1),
+            encoding="utf-8",
+        )
+        run(root, relative_path)
+        l1_test.write_text(original_l1_test, encoding="utf-8")
+
+    for relative_path, trigger_contract in (
+        (
+            "HealthTrackingAppUITests/OHPSafetyFlowUITests.swift",
+            "An unanswered prior OHP response must fail closed before it is answered.",
+        ),
+        (
+            "HealthTrackingAppUITests/PostureFlowUITests.swift",
+            "The final symptom input must immediately publish the complete L2.",
+        ),
+    ):
+        safety_ui_test = root / relative_path
+        original_safety_ui_test = safety_ui_test.read_text(encoding="utf-8")
+        safety_ui_test.write_text(
+            original_safety_ui_test.replace(trigger_contract, "triggerCoverageWasRemoved"),
+            encoding="utf-8",
+        )
+        run(root, trigger_contract)
+        safety_ui_test.write_text(original_safety_ui_test, encoding="utf-8")
+
+        safety_ui_test.write_text(
+            original_safety_ui_test + "\nXCTAssertTrue(heading.hasFocus)\n",
+            encoding="utf-8",
+        )
+        run(root, "must not claim focus through inactive or unverified VoiceOver state")
+        safety_ui_test.write_text(original_safety_ui_test, encoding="utf-8")
+
+        safety_ui_test.write_text(
+            original_safety_ui_test.replace("expectedGeneralMessage", "messageWasNotCompared"),
+            encoding="utf-8",
+        )
+        run(root, "expectedGeneralMessage")
+        safety_ui_test.write_text(original_safety_ui_test, encoding="utf-8")
+
+    posture_ui_test = root / "HealthTrackingAppUITests/PostureFlowUITests.swift"
+    original_posture_ui_test = posture_ui_test.read_text(encoding="utf-8")
+    posture_ui_test.write_text(
+        original_posture_ui_test.replace(
+            '.matching(identifier: "medical.disclaimer.l1")',
+            '["medical.disclaimer.l1"]',
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, '.matching(identifier: "medical.disclaimer.l1")')
+    posture_ui_test.write_text(original_posture_ui_test, encoding="utf-8")
+
+    posture_ui_test.write_text(
+        original_posture_ui_test
+        .replace("posture.entry.region", "__region__", 1)
+        .replace("posture.entry.symptom", "posture.entry.region", 1)
+        .replace("__region__", "posture.entry.symptom", 1),
+        encoding="utf-8",
+    )
+    run(root, "must enter region/note first, make symptom the final trigger")
+    posture_ui_test.write_text(original_posture_ui_test, encoding="utf-8")
+
+    posture_ui_test.write_text(
+        original_posture_ui_test.replace(
+            "dismissKeyboardAfterTyping: false",
+            "dismissKeyboardAfterTyping: true",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "dismissKeyboardAfterTyping: false")
+    posture_ui_test.write_text(original_posture_ui_test, encoding="utf-8")
+
+    posture_ui_test.write_text(
+        original_posture_ui_test.replace(
+            "dismissKeyboardAfterTyping: false",
+            "dismissKeyboardAfterTyping: false\napp.buttons[\"other\"].tap()",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "must perform no focus-stealing tap")
+    posture_ui_test.write_text(original_posture_ui_test, encoding="utf-8")
+
     health_safety_source = root / "Packages/HealthTrackingModules/Sources/HealthSafetyKit/HealthSafetyKitModule.swift"
     original_health_safety_source = health_safety_source.read_text(encoding="utf-8")
     health_safety_source.write_text(
@@ -7404,6 +10573,190 @@ with tempfile.TemporaryDirectory() as temporary:
     )
     run(root, "must remain dependency-neutral")
     health_safety_source.write_text(original_health_safety_source, encoding="utf-8")
+
+    health_safety_source.write_text(
+        original_health_safety_source + "\nlet forbiddenSafetyDiagnosis = \\\"tanı\\\"\n",
+        encoding="utf-8",
+    )
+    run(root, "M3.10 safety presentation must not diagnose")
+    health_safety_source.write_text(original_health_safety_source, encoding="utf-8")
+
+    health_safety_source.write_text(
+        original_health_safety_source.replace(
+            "sağlık profesyoneli tarafından değerlendirilmelidir.",
+            "izlenmelidir.",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.10 required general/urgent safety copy is incomplete")
+    health_safety_source.write_text(original_health_safety_source, encoding="utf-8")
+
+    health_safety_source.write_text(
+        original_health_safety_source.replace(
+            r'+ "\(redFlagInformation)"',
+            r'+ "\(redFlagInformation) Ek öneri."',
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.10 generalStopMessage must match the complete exact Turkish safety copy")
+    health_safety_source.write_text(original_health_safety_source, encoding="utf-8")
+
+    health_safety_source.write_text(
+        original_health_safety_source.replace(
+            r'"Hareketi durdur. \(redFlagInformation)"',
+            r'"Hareketi durdur. \(redFlagInformation) Ek öneri."',
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.10 urgentMessage must match the complete exact Turkish safety copy")
+    health_safety_source.write_text(original_health_safety_source, encoding="utf-8")
+
+    health_safety_source.write_text(
+        original_health_safety_source.replace(
+            "Yeni veya belirgin şekilde kötüleşen",
+            "Belirti olan",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.10 required general/urgent safety copy is incomplete")
+    health_safety_source.write_text(original_health_safety_source, encoding="utf-8")
+
+    health_safety_source.write_text(
+        original_health_safety_source.replace(
+            "requiresUrgentAssessment: true",
+            "requiresUrgentAssessment: false",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.10 required general/urgent safety copy is incomplete")
+    health_safety_source.write_text(original_health_safety_source, encoding="utf-8")
+
+    training_mapper_source = root / "App/Application/TrainingSymptomMetricsAdapter.swift"
+    original_training_mapper_source = training_mapper_source.read_text(encoding="utf-8")
+    training_mapper_source.write_text(
+        original_training_mapper_source.replace(
+            ".missingSymptomAnswer",
+            ".overheadPressSymptom",
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.10 structured OHP safety mapping is incomplete")
+    training_mapper_source.write_text(original_training_mapper_source, encoding="utf-8")
+
+    motion_policy = (
+        root
+        / "Packages/HealthTrackingModules/Sources/DesignSystem/Motion/MedicalSafetyMotionPolicy.swift"
+    )
+    original_motion_policy = motion_policy.read_text(encoding="utf-8")
+    motion_policy.write_text(
+        original_motion_policy.replace(
+            "guard !reduceMotion else { return identity }\nreturn opacity",
+            "if reduceMotion { return identity }\nreturn opacity",
+        ),
+        encoding="utf-8",
+    )
+    run(root)
+    motion_policy.write_text(original_motion_policy, encoding="utf-8")
+
+    missing_consumer = (
+        root
+        / "Packages/HealthTrackingModules/Sources/TrainingKit/Session/OHPPriorSymptomQuestionView.swift"
+    )
+    original_missing_consumer = missing_consumer.read_text(encoding="utf-8")
+    missing_consumer.unlink()
+    run(root, "Missing required M3.10 L2 UI consumer")
+    missing_consumer.write_text(original_missing_consumer, encoding="utf-8")
+
+    for relative_path in (
+        "Packages/HealthTrackingModules/Sources/MetricsKit/Posture/PostureEntryView.swift",
+        "Packages/HealthTrackingModules/Sources/TrainingKit/Session/OHPPriorSymptomQuestionView.swift",
+        "Packages/HealthTrackingModules/Sources/TrainingKit/Session/ExerciseStageView.swift",
+    ):
+        safety_ui_source = root / relative_path
+        original_safety_ui_source = safety_ui_source.read_text(encoding="utf-8")
+        safety_ui_source.write_text(
+            original_safety_ui_source.replace(
+                ".accessibilityFocused($levelTwoHeadingFocused)",
+                ".focusBindingWasRemoved",
+            ),
+            encoding="utf-8",
+        )
+        run(root, "must provide stable L2 heading focus")
+        safety_ui_source.write_text(original_safety_ui_source, encoding="utf-8")
+
+        safety_ui_source.write_text(
+            original_safety_ui_source.replace(
+                ".onAppear",
+                ".appearanceActivationWasRemoved",
+            ),
+            encoding="utf-8",
+        )
+        run(root, ".onAppear")
+        safety_ui_source.write_text(original_safety_ui_source, encoding="utf-8")
+
+        safety_ui_source.write_text(
+            original_safety_ui_source.replace(
+                ".onChange",
+                ".changeActivationWasRemoved",
+            ),
+            encoding="utf-8",
+        )
+        run(root, ".onChange")
+        safety_ui_source.write_text(original_safety_ui_source, encoding="utf-8")
+
+        safety_ui_source.write_text(
+            original_safety_ui_source.replace(
+                "levelTwoHeadingFocused = MedicalSafetyFocusPolicy.headingFocused(\n"
+                "isLevelTwoPresented: isPresented\n"
+                ")",
+                "levelTwoHeadingFocused = false",
+            ),
+            encoding="utf-8",
+        )
+        run(root, "must bind L2 appearance/removal to the tested MedicalSafetyFocusPolicy")
+        safety_ui_source.write_text(original_safety_ui_source, encoding="utf-8")
+
+        safety_ui_source.write_text(
+            original_safety_ui_source.replace(
+                "identity: .identity,\nopacity: .opacity",
+                "identity: .opacity,\nopacity: .identity",
+            ),
+            encoding="utf-8",
+        )
+        run(root, "identity/opacity mapped correctly")
+        safety_ui_source.write_text(original_safety_ui_source, encoding="utf-8")
+
+    safety_ui_source = (
+        root
+        / "Packages/HealthTrackingModules/Sources/MetricsKit/Posture/PostureEntryView.swift"
+    )
+    original_safety_ui_source = safety_ui_source.read_text(encoding="utf-8")
+    safety_ui_source.write_text(
+        original_safety_ui_source + "\nlet unrelated = Color.clear.scaleEffect(2)\n",
+        encoding="utf-8",
+    )
+    run(root)
+    safety_ui_source.write_text(original_safety_ui_source, encoding="utf-8")
+
+    for unsafe_transition, expected in (
+        (".move(edge: .top)", "must not use move in levelTwoTransition"),
+        (".slide", "must not use slide in levelTwoTransition"),
+        (".scale", "must not use scale in levelTwoTransition"),
+        (".scaleEffect(2)", "must not use scaleEffect in levelTwoTransition"),
+        (".offset(x: 1)", "must not use offset in levelTwoTransition"),
+        (".zoom", "must not use zoom in levelTwoTransition"),
+        (".push(from: .top)", "must not use push in levelTwoTransition"),
+    ):
+        safety_ui_source.write_text(
+            original_safety_ui_source.replace(
+                "private var levelTwoTransition: AnyTransition {",
+                "private var levelTwoTransition: AnyTransition {\n"
+                f"let unsafe = {unsafe_transition}",
+            ),
+            encoding="utf-8",
+        )
+        run(root, expected)
+        safety_ui_source.write_text(original_safety_ui_source, encoding="utf-8")
 
     training_source = root / "Packages/HealthTrackingModules/Sources/TrainingKit/Forbidden.swift"
     training_source.parent.mkdir(parents=True, exist_ok=True)

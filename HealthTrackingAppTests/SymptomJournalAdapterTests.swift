@@ -1,4 +1,5 @@
 @testable import HealthTrackingApp
+import CoreModels
 import Foundation
 import MetricsKit
 import TrainingKit
@@ -6,6 +7,13 @@ import XCTest
 
 @MainActor
 final class SymptomJournalAdapterTests: XCTestCase {
+    private let expectedGeneralMessage =
+        "Hareketi durdur. Kalıcı veya kötüleşen belirtiler bir sağlık profesyoneli "
+        + "tarafından değerlendirilmelidir. Yeni veya belirgin şekilde kötüleşen kol veya "
+        + "bacakta güçsüzlük ya da uyuşma, el becerisinde kayıp, denge veya yürümede "
+        + "değişiklik ya da mesane veya bağırsak işlevinde değişiklik acil tıbbi "
+        + "değerlendirme gerektirir."
+
     func testTrainingSafetyMapperUsesTheCentralPermanentAndLevelTwoCopy() throws {
         let presentation = try XCTUnwrap(
             TrainingSymptomSafetyMapper.overheadPressSymptom()
@@ -15,9 +23,59 @@ final class SymptomJournalAdapterTests: XCTestCase {
             presentation.disclaimer,
             "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir."
         )
-        XCTAssertTrue(presentation.levelTwoMessage.hasPrefix("Hareketi durdur."))
-        XCTAssertTrue(presentation.levelTwoMessage.contains("sağlık profesyoneli"))
+        XCTAssertEqual(presentation.levelTwoMessage, expectedGeneralMessage)
         XCTAssertFalse(presentation.requiresUrgentAssessment)
+    }
+
+    // Mutation caught: adding a pure missing-answer trigger without mapping the
+    // shipped session contexts would leave real .notAsked/.uncertain OHP history silent.
+    func testStructuredMissingOHPSessionResponsesMapToCentralFailClosedPresentation() throws {
+        for response in [OHPSymptomResponse.notAsked, .uncertain] {
+            let presentation = try XCTUnwrap(
+                TrainingSymptomSafetyMapper.presentation(
+                    for: .priorOverheadPressResponse(response)
+                )
+            )
+
+            XCTAssertEqual(
+                presentation.disclaimer,
+                "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir."
+            )
+            XCTAssertEqual(presentation.levelTwoMessage, expectedGeneralMessage)
+            XCTAssertFalse(presentation.requiresUrgentAssessment)
+        }
+
+        XCTAssertNil(
+            TrainingSymptomSafetyMapper.presentation(
+                for: .priorOverheadPressResponse(.symptomFree)
+            ),
+            "A recorded symptom-free answer must not be reclassified as missing."
+        )
+    }
+
+    // Mutation caught: leaving the AppDependencies factory on SessionViewModel's
+    // nil default would make the real app composition discard the tested mapper.
+    func testAppDependenciesComposesStructuredSafetyProviderIntoSessionViewModel() throws {
+        let dependencies = try AppDependencies(environment: .uiTesting)
+        let session = dependencies.makeSessionViewModel()
+
+        for context in [
+            TrainingSymptomSafetyContext.priorOverheadPressResponse(.notAsked),
+            .priorOverheadPressResponse(.uncertain),
+            .currentOverheadPressResponse(.symptomsPresent),
+        ] {
+            let presentation = try XCTUnwrap(
+                session.resolveSymptomSafetyPresentation(for: context)
+            )
+            XCTAssertEqual(presentation.levelTwoMessage, expectedGeneralMessage)
+            XCTAssertFalse(presentation.requiresUrgentAssessment)
+        }
+
+        XCTAssertNil(
+            session.resolveSymptomSafetyPresentation(
+                for: .priorOverheadPressResponse(.symptomFree)
+            )
+        )
     }
 
     func testAdapterMapsStableTrainingEventIntoAnIdempotentMetricsUpsert() async throws {

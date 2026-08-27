@@ -50,6 +50,11 @@ public struct TrainingSessionView: View {
                     }
                     .accessibilityLabel(localized("session.close"))
                     .accessibilityIdentifier("session.close")
+                    .disabled(
+                        viewModel.hasPendingCurrentOHPSymptomWrite
+                            || viewModel.isSessionMutationInFlight
+                            || viewModel.isSessionDeletionInFlight
+                    )
                 }
                 if case .active = viewModel.state {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -58,6 +63,12 @@ public struct TrainingSessionView: View {
                         }
                         .accessibilityLabel(localized("session.delete"))
                         .accessibilityIdentifier("session.delete")
+                        .disabled(
+                            viewModel.isCurrentOHPSymptomWriteSaving
+                                || viewModel.isSessionRouteMutationInFlight
+                                || viewModel.isSessionMutationInFlight
+                                || viewModel.isSessionDeletionInFlight
+                        )
                     }
                 }
             }
@@ -89,6 +100,12 @@ public struct TrainingSessionView: View {
             Button(localized("session.delete.confirm.action"), role: .destructive) {
                 Task { await viewModel.confirmDeletion() }
             }
+            .accessibilityIdentifier("session.delete.confirm.action")
+            .disabled(
+                viewModel.isSessionRouteMutationInFlight
+                    || viewModel.isSessionMutationInFlight
+                    || viewModel.isSessionDeletionInFlight
+            )
         } message: {
             Text(localized("session.delete.confirm.message"))
         }
@@ -98,7 +115,9 @@ public struct TrainingSessionView: View {
     private func activeContent(_ presentation: SessionPresentation) -> some View {
         Group {
             if case .awaitingPreviousSessionResponse = viewModel.ohpSafetyState {
-                OHPPriorSymptomQuestionView { response in
+                OHPPriorSymptomQuestionView(
+                    safetyPresentation: viewModel.symptomSafetyPresentation
+                ) { response in
                     Task { await viewModel.answerPreviousOHPSymptom(response) }
                 }
             } else if case let .recommendation(reason, trainingWeekIndex) =
@@ -155,6 +174,7 @@ public struct TrainingSessionView: View {
         .id(activeContentIdentity(presentation))
         .transition(stageTransition)
         .animation(stageAnimation, value: activeContentIdentity(presentation))
+        .disabled(viewModel.isSessionDeletionInFlight)
     }
 
     private func activeContentIdentity(_ presentation: SessionPresentation) -> String {

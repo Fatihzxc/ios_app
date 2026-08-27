@@ -85,6 +85,22 @@ jobs:
         # ProgressPhotoLifecycleUITests remains in the complete app suite below.
         run: scripts/test-ios.sh --only-testing ProgressPhotosKitTests
 
+      - name: Targeted M3.10 pure medical safety tests
+        timeout-minutes: 20
+        run: scripts/test-ios.sh --only-testing HealthSafetyKitTests
+
+      - name: Targeted M3.10 medical safety focus and motion policy tests
+        timeout-minutes: 20
+        run: scripts/test-ios.sh --only-testing DesignSystemTests
+
+      - name: Targeted M3.10 shipped session safety tests
+        timeout-minutes: 20
+        run: scripts/test-ios.sh --only-testing TrainingKitTests
+
+      - name: Targeted M3.10 app safety composition tests
+        timeout-minutes: 20
+        run: scripts/test-ios.sh --only-testing HealthTrackingAppTests
+
       - name: Test iOS app
         timeout-minutes: 90
         # The dedicated test-cold-launch job owns this noisy performance gate.

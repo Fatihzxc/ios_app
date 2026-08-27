@@ -5,6 +5,17 @@ import XCTest
 final class MedicalSafetyPresentationTests: XCTestCase {
     private let frozenDisclaimer =
         "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir."
+    private let expectedGeneralMessage =
+        "Hareketi durdur. Kalıcı veya kötüleşen belirtiler bir sağlık profesyoneli "
+        + "tarafından değerlendirilmelidir. Yeni veya belirgin şekilde kötüleşen kol veya "
+        + "bacakta güçsüzlük ya da uyuşma, el becerisinde kayıp, denge veya yürümede "
+        + "değişiklik ya da mesane veya bağırsak işlevinde değişiklik acil tıbbi "
+        + "değerlendirme gerektirir."
+    private let expectedUrgentMessage =
+        "Hareketi durdur. Yeni veya belirgin şekilde kötüleşen kol veya bacakta "
+        + "güçsüzlük ya da uyuşma, el becerisinde kayıp, denge veya yürümede "
+        + "değişiklik ya da mesane veya bağırsak "
+        + "işlevinde değişiklik acil tıbbi değerlendirme gerektirir."
 
     func testPermanentDisclaimerUsesTheFrozenTurkishCopy() {
         XCTAssertEqual(
@@ -21,55 +32,89 @@ final class MedicalSafetyPresentationTests: XCTestCase {
         XCTAssertNil(presentation.levelTwo)
     }
 
-    func testOHPAndExplicitWorseningPublishOnlyTheGeneralStopNotice() throws {
+    // Mutation caught: replacing either general trigger with a vague warning would
+    // omit the complete professional-assessment and cervical red-flag information.
+    func testOHPAndIncreasingSymptomsPublishCompleteGeneralLevelTwoInformation() throws {
         for trigger in [
             MedicalSafetyTrigger.overheadPressSymptom,
             .increasingSymptom,
         ] {
-            let notice = try XCTUnwrap(
-                MedicalSafetyPresentation.resolve(triggers: [trigger]).levelTwo
-            )
-
-            XCTAssertEqual(notice.kind, .stopAndProfessionalAssessment)
-            XCTAssertTrue(notice.message.hasPrefix("Hareketi durdur."))
-            XCTAssertTrue(notice.message.contains("sağlık profesyoneli"))
-            XCTAssertFalse(notice.requiresUrgentAssessment)
-            assertContainsNoDiagnosticLanguage(notice.message)
+            try assertCompleteGeneralNotice(for: trigger)
         }
     }
 
-    func testExplicitCervicalRedFlagPublishesUrgentInformationWithoutDiagnosis() throws {
-        let flags = Set(CervicalRedFlag.allCases)
-        let notice = try XCTUnwrap(
-            MedicalSafetyPresentation.resolve(
-                triggers: [.cervicalRedFlags(flags)]
-            ).levelTwo
-        )
-
-        XCTAssertEqual(notice.kind, .urgentAssessmentInformation)
-        XCTAssertTrue(notice.message.hasPrefix("Hareketi durdur."))
-        XCTAssertTrue(notice.requiresUrgentAssessment)
-        XCTAssertTrue(notice.message.contains("kol veya bacakta güçsüzlük ya da uyuşma"))
-        XCTAssertTrue(notice.message.contains("el becerisinde kayıp"))
-        XCTAssertTrue(notice.message.contains("denge veya yürümede değişiklik"))
-        XCTAssertTrue(notice.message.contains("mesane veya bağırsak işlevinde değişiklik"))
-        XCTAssertTrue(notice.message.contains("acil tıbbi değerlendirme"))
-        assertContainsNoDiagnosticLanguage(notice.message)
+    // Mutation caught: defining a missing-answer case without resolving it would
+    // leave structured OHP .notAsked/.uncertain responses without fail-closed L2.
+    func testMissingSymptomAnswerPublishesCompleteNonUrgentFailClosedLevelTwo() throws {
+        try assertCompleteGeneralNotice(for: .missingSymptomAnswer)
     }
 
-    func testRedFlagNoticeTakesPriorityOverGeneralTriggers() throws {
-        let presentation = MedicalSafetyPresentation.resolve(
-            triggers: [
-                .overheadPressSymptom,
-                .increasingSymptom,
-                .cervicalRedFlags([.balanceOrWalkingChange]),
-            ]
+    // Mutation caught: handling only a combined flag set, or giving any individual
+    // flag lower priority than a general trigger, would leave one red flag non-urgent.
+    func testEachCervicalRedFlagAlonePublishesExactUrgentMessageAndOverridesEveryGeneralTrigger() throws {
+        let generalTriggers: [MedicalSafetyTrigger] = [
+            .overheadPressSymptom,
+            .increasingSymptom,
+            .missingSymptomAnswer,
+        ]
+
+        for flag in CervicalRedFlag.allCases {
+            try assertExactUrgentNotice(
+                triggers: [.cervicalRedFlags([flag])]
+            )
+
+            for generalTrigger in generalTriggers {
+                try assertExactUrgentNotice(
+                    triggers: [generalTrigger, .cervicalRedFlags([flag])]
+                )
+            }
+        }
+    }
+
+    private func assertCompleteGeneralNotice(
+        for trigger: MedicalSafetyTrigger,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let notice = try XCTUnwrap(
+            MedicalSafetyPresentation.resolve(triggers: [trigger]).levelTwo,
+            file: file,
+            line: line
         )
 
         XCTAssertEqual(
-            try XCTUnwrap(presentation.levelTwo).kind,
-            .urgentAssessmentInformation
+            notice.kind,
+            .stopAndProfessionalAssessment,
+            file: file,
+            line: line
         )
+        XCTAssertEqual(
+            notice.message,
+            expectedGeneralMessage,
+            file: file,
+            line: line
+        )
+        XCTAssertFalse(notice.requiresUrgentAssessment, file: file, line: line)
+        assertContainsNoDiagnosticLanguage(notice.message, file: file, line: line)
+        assertContainsNoNumericMedicalThreshold(notice.message, file: file, line: line)
+    }
+
+    private func assertExactUrgentNotice(
+        triggers: Set<MedicalSafetyTrigger>,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let notice = try XCTUnwrap(
+            MedicalSafetyPresentation.resolve(triggers: triggers).levelTwo,
+            file: file,
+            line: line
+        )
+
+        XCTAssertEqual(notice.kind, .urgentAssessmentInformation, file: file, line: line)
+        XCTAssertTrue(notice.requiresUrgentAssessment, file: file, line: line)
+        XCTAssertEqual(notice.message, expectedUrgentMessage, file: file, line: line)
+        assertContainsNoDiagnosticLanguage(notice.message, file: file, line: line)
+        assertContainsNoNumericMedicalThreshold(notice.message, file: file, line: line)
     }
 
     private func assertContainsNoDiagnosticLanguage(
@@ -86,5 +131,18 @@ final class MedicalSafetyPresentationTests: XCTestCase {
                 line: line
             )
         }
+    }
+
+    private func assertContainsNoNumericMedicalThreshold(
+        _ value: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertNil(
+            value.range(of: #"\d"#, options: .regularExpression),
+            "Safety copy must not invent a numeric medical threshold.",
+            file: file,
+            line: line
+        )
     }
 }

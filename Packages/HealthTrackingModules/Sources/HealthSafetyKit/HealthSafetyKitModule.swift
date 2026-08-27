@@ -29,6 +29,7 @@ public enum CervicalRedFlag: String, CaseIterable, Equatable, Hashable, Sendable
 public enum MedicalSafetyTrigger: Equatable, Hashable, Sendable {
     case overheadPressSymptom
     case increasingSymptom
+    case missingSymptomAnswer
     case cervicalRedFlags(Set<CervicalRedFlag>)
 }
 
@@ -85,7 +86,8 @@ public struct MedicalSafetyPresentation: Equatable, Sendable {
         }
 
         if triggers.contains(.overheadPressSymptom)
-            || triggers.contains(.increasingSymptom) {
+            || triggers.contains(.increasingSymptom)
+            || triggers.contains(.missingSymptomAnswer) {
             return MedicalSafetyPresentation(
                 disclaimer: .permanent,
                 levelTwo: MedicalSafetyNotice(
@@ -100,13 +102,12 @@ public struct MedicalSafetyPresentation: Equatable, Sendable {
     }
 
     private static let redFlagInformation =
-        "kol veya bacakta güçsüzlük ya da uyuşma, el becerisinde kayıp, "
-        + "denge veya yürümede değişiklik ya da mesane veya bağırsak işlevinde değişiklik"
+        "Yeni veya belirgin şekilde kötüleşen kol veya bacakta güçsüzlük ya da uyuşma, el becerisinde kayıp, denge veya yürümede değişiklik ya da mesane veya bağırsak işlevinde değişiklik acil tıbbi değerlendirme gerektirir."
 
     private static let generalStopMessage =
-        "Hareketi durdur. Belirtiyi bir sağlık profesyoneliyle değerlendir. "
-        + "\(redFlagInformation) varsa acil tıbbi değerlendirme iste."
+        "Hareketi durdur. Kalıcı veya kötüleşen belirtiler bir sağlık profesyoneli tarafından değerlendirilmelidir. "
+        + "\(redFlagInformation)"
 
     private static let urgentMessage =
-        "Hareketi durdur. \(redFlagInformation) için acil tıbbi değerlendirme iste."
+        "Hareketi durdur. \(redFlagInformation)"
 }

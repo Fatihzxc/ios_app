@@ -58,23 +58,35 @@ final class OHPSafetyGateTests: XCTestCase {
 
     func testOnlyExplicitSymptomFreeResponseAllowsLoadIncrease() {
         let expectations: [
-            (OHPSafetyGate.SymptomResponse, OHPSafetyGate.LoadIncreasePolicy)
+            (
+                response: OHPSafetyGate.SymptomResponse,
+                policy: OHPSafetyGate.LoadIncreasePolicy,
+                safetyStop: OHPSafetyGate.SafetyStop?
+            )
         ] = [
-            (.symptomFree, .allowed),
-            (.symptomsPresent, .blocked(.previousSymptomsPresent)),
-            (.uncertain, .blocked(.previousResponseUncertain)),
+            (.symptomFree, .allowed, nil),
+            (
+                .symptomsPresent,
+                .blocked(.previousSymptomsPresent),
+                .init(alternative: .halfKneelingDBPress)
+            ),
+            (
+                .uncertain,
+                .blocked(.previousResponseUncertain),
+                .init(alternative: .halfKneelingDBPress)
+            ),
         ]
 
-        for (response, policy) in expectations {
+        for expectation in expectations {
             guard case let .decision(decision) = OHPSafetyGate.resolve(
-                makeInput(previousResponse: response)
+                makeInput(previousResponse: expectation.response)
             ) else {
                 return XCTFail("A valid training week must produce an OHP decision.")
             }
             XCTAssertEqual(decision.entryVariant, .standingNeutral)
-            XCTAssertEqual(decision.loadIncreasePolicy, policy)
+            XCTAssertEqual(decision.loadIncreasePolicy, expectation.policy)
             XCTAssertNil(decision.priorSessionQuestion)
-            XCTAssertNil(decision.safetyStop)
+            XCTAssertEqual(decision.safetyStop, expectation.safetyStop)
         }
     }
 

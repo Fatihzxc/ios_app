@@ -2,6 +2,15 @@ import Foundation
 import XCTest
 
 final class PostureFlowUITests: XCTestCase {
+    private let disclaimer =
+        "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir."
+    private let expectedGeneralMessage =
+        "Hareketi durdur. Kalıcı veya kötüleşen belirtiler bir sağlık profesyoneli "
+        + "tarafından değerlendirilmelidir. Yeni veya belirgin şekilde kötüleşen kol veya "
+        + "bacakta güçsüzlük ya da uyuşma, el becerisinde kayıp, denge veya yürümede "
+        + "değişiklik ya da mesane veya bağırsak işlevinde değişiklik acil tıbbi "
+        + "değerlendirme gerektirir."
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
@@ -11,16 +20,25 @@ final class PostureFlowUITests: XCTestCase {
         let app = launch(storeIdentifier: storeIdentifier)
         openEntry(in: app)
 
-        require(identified("medical.disclaimer.l1", in: app))
+        assertDisclaimer(in: app)
         require(identified("posture.entry.wall.fail", in: app)).tap()
-        replaceText(in: textField("posture.entry.symptom", in: app), with: "6", app: app)
         replaceText(in: textField("posture.entry.region", in: app), with: "Boyun", app: app)
         replaceText(
             in: textField("posture.entry.note", in: app),
             with: "OHP sonrası takip",
             app: app
         )
-        require(identified("medical.safety.l2", in: app))
+        replaceText(
+            in: textField("posture.entry.symptom", in: app),
+            with: "6",
+            app: app,
+            dismissKeyboardAfterTyping: false
+        )
+        assertCompleteGeneralLevelTwo(
+            in: app,
+            reason: "The final symptom input must immediately publish the complete L2."
+        )
+        dismissKeyboard(in: app)
         require(identified("posture.entry.save", in: app)).tap()
 
         require(
@@ -44,7 +62,7 @@ final class PostureFlowUITests: XCTestCase {
             firstIdentified(prefix: "posture.row.", labelContaining: "6", in: app)
         )
         makeHittable(savedRow, in: app)
-        require(identified("medical.disclaimer.l1", in: app))
+        assertDisclaimer(in: app)
         attachScreenshot(named: "m3-posture-progress-light")
         app.terminate()
 
@@ -60,7 +78,7 @@ final class PostureFlowUITests: XCTestCase {
     func testDarkAX5AndHighContrastKeepDisclaimerAndActionsReachable() {
         let dark = launch(storeIdentifier: UUID(), appearance: "dark")
         openEntry(in: dark)
-        require(identified("medical.disclaimer.l1", in: dark))
+        assertDisclaimer(in: dark)
         attachScreenshot(named: "m3-posture-entry-dark")
         dark.terminate()
 
@@ -91,7 +109,7 @@ final class PostureFlowUITests: XCTestCase {
         makeHittable(save, in: ax5)
         XCTAssertTrue(save.isHittable)
         XCTAssertGreaterThanOrEqual(save.frame.height + 0.01, 52)
-        require(identified("medical.disclaimer.l1", in: ax5))
+        assertDisclaimer(in: ax5)
         attachScreenshot(named: "m3-posture-entry-ax5")
         ax5.terminate()
 
@@ -101,7 +119,7 @@ final class PostureFlowUITests: XCTestCase {
             extraArguments: ["-UIAccessibilityDarkerSystemColorsEnabled", "YES"]
         )
         openEntry(in: highContrast)
-        require(identified("medical.disclaimer.l1", in: highContrast))
+        assertDisclaimer(in: highContrast)
         attachScreenshot(named: "m3-posture-high-contrast")
     }
 
@@ -118,6 +136,7 @@ final class PostureFlowUITests: XCTestCase {
             "-ui-test-store-identifier", storeIdentifier.uuidString,
             "-AppleLanguages", "(tr)",
             "-AppleLocale", "tr_TR",
+            "-UIAccessibilityReduceMotionEnabled", "YES",
         ] + extraArguments
         app.launch()
         return app
@@ -132,10 +151,43 @@ final class PostureFlowUITests: XCTestCase {
         require(identified("posture.entry.loaded", in: app))
     }
 
+    private func assertDisclaimer(in app: XCUIApplication) {
+        XCTAssertEqual(
+            require(
+                app.descendants(matching: .any)
+                    .matching(identifier: "medical.disclaimer.l1")
+                    .firstMatch
+            ).label,
+            disclaimer
+        )
+    }
+
+    private func assertCompleteGeneralLevelTwo(
+        in app: XCUIApplication,
+        reason: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        require(
+            identified("medical.safety.l2.heading", in: app),
+            reason
+        )
+        XCTAssertEqual(
+            require(
+                identified("medical.safety.l2", in: app),
+                "The stable heading must not replace the complete L2 message."
+            ).label,
+            expectedGeneralMessage,
+            file: file,
+            line: line
+        )
+    }
+
     private func replaceText(
         in element: XCUIElement,
         with value: String,
-        app: XCUIApplication
+        app: XCUIApplication,
+        dismissKeyboardAfterTyping: Bool = true
     ) {
         makeHittable(element, in: app)
         require(element).tap()
@@ -146,6 +198,12 @@ final class PostureFlowUITests: XCTestCase {
             )
         }
         element.typeText(value)
+        if dismissKeyboardAfterTyping {
+            dismissKeyboard(in: app)
+        }
+    }
+
+    private func dismissKeyboard(in app: XCUIApplication) {
         let dismiss = app.buttons["quick-entry.keyboard.dismiss"]
         if dismiss.waitForExistence(timeout: 2) {
             dismiss.tap()

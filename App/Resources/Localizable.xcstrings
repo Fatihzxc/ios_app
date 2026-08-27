@@ -44,6 +44,12 @@
     "foundation.empty.accessibility" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Programı yeniden yükle" } } }
     },
+    "medical.explanation.l0" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Bu uygulama yalnızca takip ve alışkanlık kaydı içindir; tıbbi değerlendirme yapmaz." } } }
+    },
+    "medical.explanation.l0.acknowledge" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Anladım" } } }
+    },
     "foundation.empty.action" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yeniden yükle" } } }
     },

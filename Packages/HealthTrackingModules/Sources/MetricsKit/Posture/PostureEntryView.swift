@@ -5,6 +5,8 @@ import SwiftUI
 @MainActor
 public struct PostureEntryView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @AccessibilityFocusState private var levelTwoHeadingFocused: Bool
     @Bindable private var viewModel: PostureViewModel
     private let initialDate: Date
     private let onClose: @MainActor () -> Void
@@ -132,13 +134,46 @@ public struct PostureEntryView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("medical.disclaimer.l1")
             if let notice = viewModel.safetyPresentation.levelTwo {
-                Text(notice.message)
-                    .font(AppTypography.body)
-                    .foregroundStyle(AppColors.color(.stateDanger, scheme: colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("medical.safety.l2")
+                VStack(alignment: .leading, spacing: AppSpacing.compact) {
+                    Text(localized("medical.safety.l2.heading"))
+                        .font(AppTypography.label)
+                        .foregroundStyle(AppColors.color(.stateDanger, scheme: colorScheme))
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("medical.safety.l2.heading")
+                        .accessibilityFocused($levelTwoHeadingFocused)
+                    Text(notice.message)
+                        .font(AppTypography.body)
+                        .foregroundStyle(AppColors.color(.stateDanger, scheme: colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("medical.safety.l2")
+                }
+                .onAppear {
+                    updateLevelTwoHeadingFocus(isPresented: true)
+                }
+                .transition(levelTwoTransition)
             }
         }
+        .onChange(of: isLevelTwoPresented) { _, isPresented in
+            updateLevelTwoHeadingFocus(isPresented: isPresented)
+        }
+    }
+
+    private var isLevelTwoPresented: Bool {
+        viewModel.safetyPresentation.levelTwo != nil
+    }
+
+    private var levelTwoTransition: AnyTransition {
+        MedicalSafetyMotionPolicy.transition(
+            reduceMotion: accessibilityReduceMotion,
+            identity: .identity,
+            opacity: .opacity
+        )
+    }
+
+    private func updateLevelTwoHeadingFocus(isPresented: Bool) {
+        levelTwoHeadingFocused = MedicalSafetyFocusPolicy.headingFocused(
+            isLevelTwoPresented: isPresented
+        )
     }
 
     private var wallTestField: some View {

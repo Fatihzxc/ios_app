@@ -274,6 +274,13 @@ require_text_contract(
         "performAccessibilityAudit",
         "scrollByShortDrag(",
         "with bounded drags",
+        "acknowledgeFirstUseExplanationIfNeeded(in: app)",
+        'let explanation = identified("medical.explanation.l0", in: app)',
+        "guard explanation.waitForExistence(timeout: 2) else { return }",
+        "medical.explanation.l0.acknowledge",
+        "makeHittable(acknowledgement, in: app)",
+        "acknowledgement.frame.height + 0.01",
+        "acknowledgement.tap()",
     ],
 )
 training_accessibility_path = root / "HealthTrackingAppUITests/TrainingAccessibilityUITests.swift"
@@ -485,6 +492,13 @@ contracts = {
         "performAccessibilityAudit",
         "scrollByShortDrag(",
         "with bounded drags",
+        "acknowledgeFirstUseExplanationIfNeeded(in: app)",
+        'let explanation = identified("medical.explanation.l0", in: app)',
+        "guard explanation.waitForExistence(timeout: 2) else { return }",
+        "medical.explanation.l0.acknowledge",
+        "makeHittable(acknowledgement, in: app)",
+        "acknowledgement.frame.height + 0.01",
+        "acknowledgement.tap()",
     ],
     ".github/workflows/ios.yml": [
         "training_accessibility_expected",
@@ -589,6 +603,36 @@ PY
         return 1
     fi
     grep -Fq 'AX5 positioning must use bounded short drags instead of full swipes' "$fixture/m1-ax5-full-swipe.out"
+    mv "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.valid.swift" "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.swift"
+    cp "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.swift" "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.valid.swift"
+    for contract in \
+        'acknowledgeFirstUseExplanationIfNeeded(in: app)' \
+        'let explanation = identified("medical.explanation.l0", in: app)' \
+        'guard explanation.waitForExistence(timeout: 2) else { return }' \
+        'medical.explanation.l0.acknowledge' \
+        'makeHittable(acknowledgement, in: app)' \
+        'acknowledgement.frame.height + 0.01' \
+        'acknowledgement.tap()'
+    do
+        python3 - "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.valid.swift" "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.swift" "$contract" <<'PY'
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
+contract = sys.argv[3]
+if contract not in source:
+    raise SystemExit(f"Missing first-use fixture mutation token: {contract}")
+Path(sys.argv[2]).write_text(
+    source.replace(contract, "firstUseContractWasRemoved", 1),
+    encoding="utf-8",
+)
+PY
+        if verify_repo "$fixture" >"$fixture/m1-medical-first-use.out" 2>&1; then
+            echo "Requirements self-test expected a missing first-use medical acknowledgement failure: $contract" >&2
+            return 1
+        fi
+        grep -Fq 'M1 contract HealthTrackingAppUITests/TrainingAccessibilityUITests.swift is missing required tokens' "$fixture/m1-medical-first-use.out"
+    done
     mv "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.valid.swift" "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.swift"
     cp "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.valid.swift"
     sed 's/bottomActionClearance: CGFloat = 52/bottomActionClearance: CGFloat = 44/' "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.valid.swift" > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.swift"

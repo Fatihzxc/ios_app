@@ -1,3 +1,4 @@
+import CoreModels
 import Foundation
 
 public enum SymptomJournalSource: Equatable, Sendable {
@@ -51,4 +52,9 @@ public struct TrainingSymptomSafetyPresentation: Equatable, Sendable {
         self.levelTwoMessage = levelTwoMessage
         self.requiresUrgentAssessment = requiresUrgentAssessment
     }
+}
+
+public enum TrainingSymptomSafetyContext: Equatable, Sendable {
+    case priorOverheadPressResponse(OHPSymptomResponse)
+    case currentOverheadPressResponse(OHPSymptomResponse)
 }

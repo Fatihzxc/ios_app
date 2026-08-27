@@ -1,6 +1,7 @@
 {
   "sourceLanguage" : "tr",
   "strings" : {
+    "medical.safety.l2.heading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Güvenlik uyarısı" } } } },
     "posture.entry.close" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Kapat" } } } },
     "posture.entry.date" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Kayıt tarihi" } } } },
     "posture.entry.load.error" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Duruş geçmişi yüklenemedi." } } } },

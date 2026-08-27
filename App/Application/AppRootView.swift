@@ -22,6 +22,43 @@ struct AppRootView: View {
     let trainingHapticController: TrainingHapticController?
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
+    let medicalSafetyAcknowledgementController: MedicalSafetyAcknowledgementController?
+
+    init(
+        todayViewModel: TodayViewModel,
+        foundationViewModel: FoundationProgramViewModel,
+        phaseTransitionViewModel: PhaseTransitionViewModel,
+        trainingHistoryViewModel: TrainingHistoryViewModel,
+        todayNutritionViewModel: TodayNutritionViewModel,
+        nutritionDayViewModel: NutritionDayViewModel,
+        foodLibraryViewModel: FoodLibraryViewModel,
+        recipeLibraryViewModel: RecipeLibraryViewModel,
+        nutritionQuickAddViewModel: NutritionQuickAddViewModel,
+        nutritionManualEntryViewModel: NutritionManualEntryViewModel,
+        makeSessionViewModel: @escaping @MainActor () -> SessionViewModel,
+        makeTrackerFeatureRouter: @escaping @MainActor () -> any TrackerFeatureRouting,
+        trainingHapticController: TrainingHapticController?,
+        shouldLoadFoundation: Bool,
+        persistencePresentation: FoundationPersistencePresentation,
+        medicalSafetyAcknowledgementController: MedicalSafetyAcknowledgementController? = nil
+    ) {
+        self.todayViewModel = todayViewModel
+        self.foundationViewModel = foundationViewModel
+        self.phaseTransitionViewModel = phaseTransitionViewModel
+        self.trainingHistoryViewModel = trainingHistoryViewModel
+        self.todayNutritionViewModel = todayNutritionViewModel
+        self.nutritionDayViewModel = nutritionDayViewModel
+        self.foodLibraryViewModel = foodLibraryViewModel
+        self.recipeLibraryViewModel = recipeLibraryViewModel
+        self.nutritionQuickAddViewModel = nutritionQuickAddViewModel
+        self.nutritionManualEntryViewModel = nutritionManualEntryViewModel
+        self.makeSessionViewModel = makeSessionViewModel
+        self.makeTrackerFeatureRouter = makeTrackerFeatureRouter
+        self.trainingHapticController = trainingHapticController
+        self.shouldLoadFoundation = shouldLoadFoundation
+        self.persistencePresentation = persistencePresentation
+        self.medicalSafetyAcknowledgementController = medicalSafetyAcknowledgementController
+    }
 
     @State private var selectedTab = AppTab.today
     @State private var hasStartedFoundationLoad = false
@@ -58,6 +95,9 @@ struct AppRootView: View {
                     .allowsHitTesting(false)
             }
             #endif
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            levelZeroExplanation
         }
         .task {
             guard shouldLoadFoundation, !hasStartedFoundationLoad else { return }
@@ -124,6 +164,33 @@ struct AppRootView: View {
             if selectedTab == .progress {
                 resolveTrackerFeatureBundle()
             }
+        }
+    }
+
+    @ViewBuilder
+    private var levelZeroExplanation: some View {
+        if let controller = medicalSafetyAcknowledgementController,
+           controller.isLevelZeroVisible {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(String(localized: "medical.explanation.l0"))
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("medical.explanation.l0")
+                Button {
+                    controller.acknowledge()
+                } label: {
+                    Text(String(localized: "medical.explanation.l0.acknowledge"))
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("medical.explanation.l0.acknowledge")
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.regularMaterial)
+            .accessibilityElement(children: .contain)
         }
     }
 
