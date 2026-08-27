@@ -15,6 +15,7 @@ public struct TodayView: View {
     private let onPerformAction: @MainActor (TodayMainAction) -> Void
     private let onAddMeal: @MainActor () -> Void
     private let onOpenTrackers: @MainActor () -> Void
+    private let onOpenLifestyle: @MainActor () -> Void
 
     public init(
         viewModel: TodayViewModel,
@@ -22,7 +23,8 @@ public struct TodayView: View {
         exposesLaunchPerformanceEvidence: Bool = false,
         onPerformAction: @escaping @MainActor (TodayMainAction) -> Void = { _ in },
         onAddMeal: @escaping @MainActor () -> Void = {},
-        onOpenTrackers: @escaping @MainActor () -> Void = {}
+        onOpenTrackers: @escaping @MainActor () -> Void = {},
+        onOpenLifestyle: @escaping @MainActor () -> Void = {}
     ) {
         self.viewModel = viewModel
         self.nutritionState = nutritionState
@@ -30,6 +32,7 @@ public struct TodayView: View {
         self.onPerformAction = onPerformAction
         self.onAddMeal = onAddMeal
         self.onOpenTrackers = onOpenTrackers
+        self.onOpenLifestyle = onOpenLifestyle
     }
 
     public var body: some View {
@@ -159,6 +162,22 @@ public struct TodayView: View {
             .tint(AppColors.color(.accentAction, scheme: colorScheme))
             .accessibilityIdentifier("today.metrics.action")
             .accessibilityHint(text("today.metrics.action.hint"))
+
+            Button(action: onOpenLifestyle) {
+                Label(
+                    text("today.lifestyle.action"),
+                    systemImage: "moon.stars.fill"
+                )
+                .font(AppTypography.label)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.bordered)
+            .tint(AppColors.color(.accentAction, scheme: colorScheme))
+            .accessibilityIdentifier("today.lifestyle.action")
+            .accessibilityHint(text("today.lifestyle.action.hint"))
 
             nutritionCard(
                 state: nutritionState,

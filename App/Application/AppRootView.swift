@@ -28,7 +28,7 @@ struct AppRootView: View {
     @State private var sessionRoute: SessionRoute?
     @State private var nutritionQuickAddIntent: NutritionQuickAddIntent?
     @State private var trackerFeatureRouter: (any TrackerFeatureRouting)?
-    @State private var presentsTrackerEntry = false
+    @State private var trackerEntryRoute: TrackerEntryRoute?
 
     var body: some View {
         Group {
@@ -86,11 +86,18 @@ struct AppRootView: View {
                 }
             )
         }
-        .sheet(isPresented: $presentsTrackerEntry) {
+        .sheet(item: $trackerEntryRoute) { route in
             if let trackerFeatureRouter {
-                trackerFeatureRouter.makeBodyMetricEntryView(
-                    onClose: { presentsTrackerEntry = false }
-                )
+                switch route {
+                case .bodyMetric:
+                    trackerFeatureRouter.makeBodyMetricEntryView(
+                        onClose: { trackerEntryRoute = nil }
+                    )
+                case .lifestyle:
+                    trackerFeatureRouter.makeLifestyleEntryView(
+                        onClose: { trackerEntryRoute = nil }
+                    )
+                }
             }
         }
         .onChange(of: selectedTab) { _, selectedTab in
@@ -135,7 +142,8 @@ struct AppRootView: View {
                 exposesLaunchPerformanceEvidence: exposesLaunchPerformanceEvidence,
                 onPerformAction: performTodayAction,
                 onAddMeal: performTodayNutritionAction,
-                onOpenTrackers: performTodayTrackerAction
+                onOpenTrackers: performTodayTrackerAction,
+                onOpenLifestyle: performTodayLifestyleAction
             )
         case .training:
             FoundationProgramView(
@@ -207,7 +215,12 @@ struct AppRootView: View {
 
     private func performTodayTrackerAction() {
         resolveTrackerFeatureBundle()
-        presentsTrackerEntry = true
+        trackerEntryRoute = .bodyMetric
+    }
+
+    private func performTodayLifestyleAction() {
+        resolveTrackerFeatureBundle()
+        trackerEntryRoute = .lifestyle
     }
 
     private func resolveTrackerFeatureBundle() {
@@ -235,4 +248,11 @@ private struct SessionRoute: Identifiable {
     let id = UUID()
     let workoutDayID: UUID
     let viewModel: SessionViewModel
+}
+
+private enum TrackerEntryRoute: String, Identifiable {
+    case bodyMetric
+    case lifestyle
+
+    var id: String { rawValue }
 }

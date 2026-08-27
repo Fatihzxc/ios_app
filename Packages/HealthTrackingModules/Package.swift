@@ -17,6 +17,7 @@ let package = Package(
         .library(name: "DesignSystem", targets: ["DesignSystem"]),
         .library(name: "NutritionKit", targets: ["NutritionKit"]),
         .library(name: "MetricsKit", targets: ["MetricsKit"]),
+        .library(name: "SleepMoodKit", targets: ["SleepMoodKit"]),
         .library(name: "ReportsKit", targets: ["ReportsKit"]),
         .library(name: "SettingsKit", targets: ["SettingsKit"])
     ],
@@ -37,7 +38,7 @@ let package = Package(
         ),
         .target(
             name: "PersistenceKit",
-            dependencies: ["CoreModels", "GuidanceKit", "MetricsKit", "NutritionKit", "TrainingKit"],
+            dependencies: ["CoreModels", "GuidanceKit", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit"],
             swiftSettings: strictConcurrency
         ),
         .target(
@@ -53,6 +54,12 @@ let package = Package(
         ),
         .target(
             name: "MetricsKit",
+            dependencies: ["CoreModels", "DesignSystem"],
+            resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
+        .target(
+            name: "SleepMoodKit",
             dependencies: ["CoreModels", "DesignSystem"],
             resources: [.process("Resources")],
             swiftSettings: strictConcurrency
@@ -81,7 +88,7 @@ let package = Package(
         ),
         .testTarget(
             name: "PersistenceKitTests",
-            dependencies: ["CoreModels", "MetricsKit", "NutritionKit", "TrainingKit", "PersistenceKit"],
+            dependencies: ["CoreModels", "MetricsKit", "NutritionKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"],
             swiftSettings: strictConcurrency
         ),
         .testTarget(
@@ -102,6 +109,11 @@ let package = Package(
         .testTarget(
             name: "MetricsKitTests",
             dependencies: ["CoreModels", "MetricsKit"],
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
+            name: "SleepMoodKitTests",
+            dependencies: ["CoreModels", "SleepMoodKit"],
             swiftSettings: strictConcurrency
         )
     ]

@@ -1,17 +1,28 @@
 import Foundation
 import MetricsKit
 import PersistenceKit
+import SleepMoodKit
 import SwiftData
 import SwiftUI
 
 @MainActor
 final class TrackerFeatureBundle: TrackerFeatureRouting {
     let repository: any MetricsRepository
+    let lifestyleRepository: any LifestyleRepository
     let bodyMetricViewModel: BodyMetricViewModel
+    let lifestyleViewModel: LifestyleViewModel
+    private let now: @MainActor () -> Date
 
-    init(repository: any MetricsRepository) {
-        self.repository = repository
-        bodyMetricViewModel = BodyMetricViewModel(repository: repository)
+    init(
+        metricsRepository: any MetricsRepository,
+        lifestyleRepository: any LifestyleRepository,
+        now: @escaping @MainActor () -> Date = { .now }
+    ) {
+        repository = metricsRepository
+        self.lifestyleRepository = lifestyleRepository
+        self.now = now
+        bodyMetricViewModel = BodyMetricViewModel(repository: metricsRepository)
+        lifestyleViewModel = LifestyleViewModel(repository: lifestyleRepository)
     }
 
     func makeBodyMetricEntryView(
@@ -25,8 +36,27 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         )
     }
 
+    func makeLifestyleEntryView(
+        onClose: @escaping @MainActor () -> Void
+    ) -> AnyView {
+        AnyView(
+            LifestyleEntryView(
+                viewModel: lifestyleViewModel,
+                initialDate: now(),
+                onClose: onClose
+            )
+        )
+    }
+
     func makeProgressView() -> AnyView {
-        AnyView(BodyMetricProgressView(viewModel: bodyMetricViewModel))
+        AnyView(
+            BodyMetricProgressView(viewModel: bodyMetricViewModel) {
+                LifestyleProgressSection(
+                    viewModel: lifestyleViewModel,
+                    date: now()
+                )
+            }
+        )
     }
 }
 
@@ -36,21 +66,72 @@ enum DefaultTrackerFeatureFactory {
         environment: AppEnvironment,
         modelContext: ModelContext
     ) -> any TrackerFeatureRouting {
-        let repository = SwiftDataMetricsRepository(modelContext: modelContext)
+        let metricsRepository = SwiftDataMetricsRepository(modelContext: modelContext)
+        let lifestyleRepository = SwiftDataLifestyleRepository(modelContext: modelContext)
         #if DEBUG
         if environment == .uiTesting,
-           AppUITestLaunchConfiguration.resolve()?.scenario == .m3BodyMetrics {
-            return TrackerFeatureBundle(
-                repository: UITestMetricsRepository(
-                    repository: repository,
-                    failsFirstCreate: true
+           let scenario = AppUITestLaunchConfiguration.resolve()?.scenario {
+            if scenario == .m3BodyMetrics {
+                return TrackerFeatureBundle(
+                    metricsRepository: UITestMetricsRepository(
+                        repository: metricsRepository,
+                        failsFirstCreate: true
+                    ),
+                    lifestyleRepository: lifestyleRepository
                 )
-            )
+            }
+            if scenario == .m3SleepMood {
+                return TrackerFeatureBundle(
+                    metricsRepository: metricsRepository,
+                    lifestyleRepository: UITestLifestyleRepository(
+                        repository: lifestyleRepository,
+                        failsFirstUpsert: true
+                    )
+                )
+            }
         }
         #endif
-        return TrackerFeatureBundle(repository: repository)
+        return TrackerFeatureBundle(
+            metricsRepository: metricsRepository,
+            lifestyleRepository: lifestyleRepository
+        )
     }
 }
+
+#if DEBUG
+@MainActor
+private final class UITestLifestyleRepository: LifestyleRepository {
+    private enum FixtureFailure: Error {
+        case upsert
+    }
+
+    private let repository: any LifestyleRepository
+    private var failsNextUpsert: Bool
+
+    init(
+        repository: any LifestyleRepository,
+        failsFirstUpsert: Bool
+    ) {
+        self.repository = repository
+        failsNextUpsert = failsFirstUpsert
+    }
+
+    func fetchLifestyleDay(containing date: Date) async throws -> LifestyleDaySnapshot {
+        try await repository.fetchLifestyleDay(containing: date)
+    }
+
+    func upsertLifestyleDay(
+        _ input: LifestyleDayInput,
+        expected: LifestyleDaySnapshot
+    ) async throws -> LifestyleDaySnapshot {
+        if failsNextUpsert {
+            failsNextUpsert = false
+            throw FixtureFailure.upsert
+        }
+        return try await repository.upsertLifestyleDay(input, expected: expected)
+    }
+}
+#endif
 
 #if DEBUG
 @MainActor

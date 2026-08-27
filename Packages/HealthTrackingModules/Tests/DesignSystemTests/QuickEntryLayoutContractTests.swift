@@ -30,6 +30,14 @@ final class QuickEntryLayoutContractTests: XCTestCase {
             QuickEntryFormContract.actionLayout(isAccessibilitySize: true),
             .vertical
         )
+        XCTAssertEqual(
+            QuickEntryFormContract.actionPlacement(isAccessibilitySize: false),
+            .pinned
+        )
+        XCTAssertEqual(
+            QuickEntryFormContract.actionPlacement(isAccessibilitySize: true),
+            .afterForm
+        )
     }
 
     func testActionsAndKeyboardContractHaveStableAccessibleValues() {

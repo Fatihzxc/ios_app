@@ -2,6 +2,7 @@
 import CoreModels
 import Foundation
 import MetricsKit
+import SleepMoodKit
 import XCTest
 
 @MainActor
@@ -9,11 +10,15 @@ final class TrackerCompositionTests: XCTestCase {
     func testBootstrapAndRootConstructionDoNotInvokeTrackerFactoryAndFirstRouteCachesOnce() async throws {
         var factoryCalls = 0
         let repository = TrackerMetricsRepositoryStub()
+        let lifestyleRepository = TrackerLifestyleRepositoryStub()
         let dependencies = try AppDependencies(
             environment: .uiTesting,
             makeTrackerFeatureBundle: { _ in
                 factoryCalls += 1
-                return TrackerFeatureBundle(repository: repository)
+                return TrackerFeatureBundle(
+                    metricsRepository: repository,
+                    lifestyleRepository: lifestyleRepository
+                )
             }
         )
 
@@ -48,6 +53,28 @@ final class TrackerCompositionTests: XCTestCase {
         XCTAssertTrue(firstRoute === progressRoute)
         let bundle = try XCTUnwrap(firstRoute as? TrackerFeatureBundle)
         XCTAssertTrue((bundle.repository as AnyObject) === repository)
+        XCTAssertTrue(
+            (bundle.lifestyleRepository as AnyObject) === lifestyleRepository
+        )
+    }
+}
+
+@MainActor
+private final class TrackerLifestyleRepositoryStub: LifestyleRepository {
+    func fetchLifestyleDay(containing date: Date) async throws -> LifestyleDaySnapshot {
+        throw StubFailure.unexpectedLoad
+    }
+
+    func upsertLifestyleDay(
+        _ input: LifestyleDayInput,
+        expected: LifestyleDaySnapshot
+    ) async throws -> LifestyleDaySnapshot {
+        throw StubFailure.unexpectedMutation
+    }
+
+    private enum StubFailure: Error {
+        case unexpectedLoad
+        case unexpectedMutation
     }
 }
 

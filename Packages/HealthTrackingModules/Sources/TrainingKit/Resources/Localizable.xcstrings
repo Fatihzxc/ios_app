@@ -3,6 +3,8 @@
   "strings" : {
     "today.metrics.action" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Vücut ölçümü ekle" } } } },
     "today.metrics.action.hint" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Ağırlık, bel çevresi veya özel ölçüm girişini açar." } } } },
+    "today.lifestyle.action" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Uyku ve ruh hali ekle" } } } },
+    "today.lifestyle.action.hint" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Bugünün uyku ve ruh hali girişini açar." } } } },
     "today.action.hint" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Bugünün önerilen antrenman akışını açar." } } } },
     "today.action.overrideRest" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yine de antrenman yap" } } } },
     "today.action.resume" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Seansa devam et" } } } },

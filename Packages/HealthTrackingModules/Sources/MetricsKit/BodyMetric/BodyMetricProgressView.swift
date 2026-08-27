@@ -4,19 +4,27 @@ import Foundation
 import SwiftUI
 
 @MainActor
-public struct BodyMetricProgressView: View {
+public struct BodyMetricProgressView<AdditionalContent: View>: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable private var viewModel: BodyMetricViewModel
     @State private var editingSnapshot: BodyMetricSnapshot?
+    private let additionalContent: AdditionalContent
 
-    public init(viewModel: BodyMetricViewModel) {
+    public init(
+        viewModel: BodyMetricViewModel,
+        @ViewBuilder additionalContent: () -> AdditionalContent
+    ) {
         self.viewModel = viewModel
+        self.additionalContent = additionalContent()
     }
 
     public var body: some View {
         NavigationStack {
             ScrollView {
-                stateContent
+                VStack(alignment: .leading, spacing: AppSpacing.comfortable) {
+                    stateContent
+                    additionalContent
+                }
                     .padding(.horizontal, AppSpacing.screenHorizontal)
                     .padding(.vertical, AppSpacing.standard)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -190,5 +198,11 @@ public struct BodyMetricProgressView: View {
             locale: .autoupdatingCurrent,
             arguments: arguments
         )
+    }
+}
+
+public extension BodyMetricProgressView where AdditionalContent == EmptyView {
+    init(viewModel: BodyMetricViewModel) {
+        self.init(viewModel: viewModel) { EmptyView() }
     }
 }

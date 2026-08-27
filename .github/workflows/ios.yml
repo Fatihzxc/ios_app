@@ -76,9 +76,9 @@ jobs:
         timeout-minutes: 15
         run: scripts/test-ios.sh --verify-bootstrap-idempotence
 
-      - name: Targeted M3.2 Metrics tests
+      - name: Targeted M3.3 SleepMood tests
         timeout-minutes: 20
-        run: scripts/test-ios.sh --only-testing MetricsKitTests
+        run: scripts/test-ios.sh --only-testing SleepMoodKitTests
 
       - name: Test iOS app
         timeout-minutes: 90
@@ -179,6 +179,17 @@ jobs:
               "m2-nutrition-dark-high-contrast-food",
               "m2-nutrition-reduce-motion",
           }
+          body_metric_expected = {
+              "m3-metrics-progress-light",
+              "m3-metrics-entry-dark",
+              "m3-metrics-entry-ax5",
+          }
+          lifestyle_expected = {
+              "m3-lifestyle-combined-light",
+              "m3-lifestyle-progress-light",
+              "m3-lifestyle-entry-dark",
+              "m3-lifestyle-entry-ax5",
+          }
           expected = (
               shell_expected
               | gallery_expected
@@ -190,6 +201,8 @@ jobs:
               | nutrition_quick_add_expected
               | m2_acceptance_expected
               | nutrition_accessibility_expected
+              | body_metric_expected
+              | lifestyle_expected
           )
 
           owners = {
@@ -232,6 +245,14 @@ jobs:
               "NutritionAccessibilityUITests": {
                   "module": "HealthTrackingAppUITests",
                   "expected": nutrition_accessibility_expected,
+              },
+              "BodyMetricFlowUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": body_metric_expected,
+              },
+              "LifestyleFlowUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": lifestyle_expected,
               },
           }
 

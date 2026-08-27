@@ -6,5 +6,9 @@ protocol TrackerFeatureRouting: AnyObject {
         onClose: @escaping @MainActor () -> Void
     ) -> AnyView
 
+    func makeLifestyleEntryView(
+        onClose: @escaping @MainActor () -> Void
+    ) -> AnyView
+
     func makeProgressView() -> AnyView
 }

@@ -5,6 +5,11 @@ public enum QuickEntryActionLayout: Equatable, Sendable {
     case vertical
 }
 
+public enum QuickEntryActionPlacement: Equatable, Sendable {
+    case pinned
+    case afterForm
+}
+
 public enum QuickEntryFormContract {
     public static let minimumActionHeight: CGFloat = 52
     public static let keyboardDismissAccessibilityIdentifier = "quick-entry.keyboard.dismiss"
@@ -12,6 +17,12 @@ public enum QuickEntryFormContract {
 
     public static func actionLayout(isAccessibilitySize: Bool) -> QuickEntryActionLayout {
         isAccessibilitySize ? .vertical : .horizontal
+    }
+
+    public static func actionPlacement(
+        isAccessibilitySize: Bool
+    ) -> QuickEntryActionPlacement {
+        isAccessibilitySize ? .afterForm : .pinned
     }
 }
 
@@ -67,14 +78,7 @@ public struct QuickEntryFormScaffold<Content: View>: View {
                 .font(AppTypography.titleLarge)
                 .accessibilityAddTraits(.isHeader)
 
-            ScrollView {
-                content($isInputFocused)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .scrollDismissesKeyboard(.interactively)
-
-            actionBar
-                .transition(actionTransition)
+            formAndActions
         }
         .padding(.horizontal, AppSpacing.screenHorizontal)
         .padding(.vertical, AppSpacing.comfortable)
@@ -98,6 +102,35 @@ public struct QuickEntryFormScaffold<Content: View>: View {
             AppMotion.animation(reduceMotion: accessibilityReduceMotion),
             value: actionLayout
         )
+    }
+
+    @ViewBuilder
+    private var formAndActions: some View {
+        switch actionPlacement {
+        case .pinned:
+            scrollableContent
+            actionBar
+                .transition(actionTransition)
+        case .afterForm:
+            ScrollView {
+                VStack(alignment: .leading, spacing: AppSpacing.comfortable) {
+                    content($isInputFocused)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    actionBar
+                        .transition(actionTransition)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollDismissesKeyboard(.interactively)
+        }
+    }
+
+    private var scrollableContent: some View {
+        ScrollView {
+            content($isInputFocused)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     @ViewBuilder
@@ -159,6 +192,12 @@ public struct QuickEntryFormScaffold<Content: View>: View {
 
     private var actionLayout: QuickEntryActionLayout {
         QuickEntryFormContract.actionLayout(
+            isAccessibilitySize: dynamicTypeSize.isAccessibilitySize
+        )
+    }
+
+    private var actionPlacement: QuickEntryActionPlacement {
+        QuickEntryFormContract.actionPlacement(
             isAccessibilitySize: dynamicTypeSize.isAccessibilitySize
         )
     }
