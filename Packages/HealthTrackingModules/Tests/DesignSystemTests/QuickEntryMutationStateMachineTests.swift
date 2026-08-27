@@ -47,6 +47,27 @@ final class QuickEntryMutationStateMachineTests: XCTestCase {
         XCTAssertTrue(machine.completeSave(retryAttempt, undoToken: "saved-row"))
     }
 
+    func testFailedSaveCanBeAbandonedWithoutReusingItsRequest() throws {
+        var machine = QuickEntryMutationStateMachine<String>()
+        let abandonedRequestID = UUID()
+        let failedAttempt = try XCTUnwrap(
+            machine.beginSave(requestID: abandonedRequestID)
+        )
+        XCTAssertTrue(machine.failSave(failedAttempt))
+
+        XCTAssertTrue(machine.abandonFailedSave())
+        XCTAssertEqual(machine.phase, .idle)
+        XCTAssertNil(machine.retrySave())
+
+        let replacementRequestID = UUID()
+        let replacement = try XCTUnwrap(
+            machine.beginSave(requestID: replacementRequestID)
+        )
+        XCTAssertEqual(replacement.requestID, replacementRequestID)
+        XCTAssertGreaterThan(replacement.generation, failedAttempt.generation)
+        XCTAssertFalse(machine.abandonFailedSave())
+    }
+
     func testFailedUndoRetainsTokenAndRetryUsesSameRequestID() throws {
         var machine = QuickEntryMutationStateMachine<String>()
         let saveAttempt = try XCTUnwrap(machine.beginSave(requestID: UUID()))

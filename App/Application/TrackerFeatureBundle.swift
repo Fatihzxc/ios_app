@@ -2,6 +2,7 @@ import Foundation
 import HealthChecksKit
 import MetricsKit
 import PersistenceKit
+import ProgressPhotosKit
 import SleepMoodKit
 import SwiftData
 import SwiftUI
@@ -12,19 +13,24 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
     let lifestyleRepository: any LifestyleRepository
     let healthChecksRepository: any HealthChecksRepository
     let bloodworkRepository: any BloodworkRepository
+    let progressPhotoRepository: any ProgressPhotoRepository
     let bodyMetricViewModel: BodyMetricViewModel
     let postureViewModel: PostureViewModel
     let lifestyleViewModel: LifestyleViewModel
     let healthChecksViewModel: HealthChecksViewModel
     let bloodworkViewModel: BloodworkViewModel
+    let progressPhotoImportViewModel: ProgressPhotoImportViewModel
     private let calendar: Calendar
     private let now: @MainActor () -> Date
+    private let progressPhotoFixtureData: Data?
 
     init(
         metricsRepository: any MetricsRepository,
         lifestyleRepository: any LifestyleRepository,
         healthChecksRepository: any HealthChecksRepository,
         bloodworkRepository: any BloodworkRepository,
+        progressPhotoRepository: any ProgressPhotoRepository = NoOpProgressPhotoRepository.shared,
+        progressPhotoFixtureData: Data? = nil,
         calendar: Calendar,
         now: @escaping @MainActor () -> Date = { .now }
     ) {
@@ -32,6 +38,8 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         self.lifestyleRepository = lifestyleRepository
         self.healthChecksRepository = healthChecksRepository
         self.bloodworkRepository = bloodworkRepository
+        self.progressPhotoRepository = progressPhotoRepository
+        self.progressPhotoFixtureData = progressPhotoFixtureData
         self.calendar = calendar
         self.now = now
         bodyMetricViewModel = BodyMetricViewModel(repository: metricsRepository)
@@ -39,6 +47,10 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         lifestyleViewModel = LifestyleViewModel(repository: lifestyleRepository)
         healthChecksViewModel = HealthChecksViewModel(repository: healthChecksRepository)
         bloodworkViewModel = BloodworkViewModel(repository: bloodworkRepository)
+        progressPhotoImportViewModel = ProgressPhotoImportViewModel(
+            repository: progressPhotoRepository,
+            date: now()
+        )
     }
 
     func makeBodyMetricEntryView(
@@ -105,12 +117,26 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         )
     }
 
+    func makeProgressPhotoLifecycleView(
+        onClose: @escaping @MainActor () -> Void
+    ) -> AnyView {
+        AnyView(
+            ProgressPhotoLifecycleView(
+                viewModel: progressPhotoImportViewModel,
+                fixtureImageData: progressPhotoFixtureData,
+                onClose: onClose
+            )
+        )
+    }
+
     func makeProgressView(
-        onOpenBloodwork: @escaping @MainActor () -> Void
+        onOpenBloodwork: @escaping @MainActor () -> Void,
+        onOpenProgressPhotos: @escaping @MainActor () -> Void
     ) -> AnyView {
         AnyView(
             BodyMetricProgressView(viewModel: bodyMetricViewModel) {
                 VStack(alignment: .leading, spacing: 24) {
+                    ProgressPhotoAccessButton(action: onOpenProgressPhotos)
                     LifestyleProgressSection(
                         viewModel: lifestyleViewModel,
                         date: now()
@@ -145,6 +171,15 @@ enum DefaultTrackerFeatureFactory {
         )
         let bloodworkRepository = SwiftDataBloodworkRepository(
             modelContext: modelContext,
+            now: now
+        )
+        let progressPhotoAssetStore = LocalPhotoAssetStore(
+            processor: ImageIOPhotoImageProcessor()
+        )
+        let progressPhotoRepository = SwiftDataProgressPhotoRepository(
+            modelContext: modelContext,
+            assetStore: progressPhotoAssetStore,
+            cleanupJournal: FilePhotoAssetCleanupJournal(),
             now: now
         )
         #if DEBUG
@@ -221,6 +256,20 @@ enum DefaultTrackerFeatureFactory {
                     now: now
                 )
             }
+            if scenario == .m3ProgressPhotos {
+                return TrackerFeatureBundle(
+                    metricsRepository: metricsRepository,
+                    lifestyleRepository: lifestyleRepository,
+                    healthChecksRepository: healthChecksRepository,
+                    bloodworkRepository: bloodworkRepository,
+                    progressPhotoRepository: progressPhotoRepository,
+                    progressPhotoFixtureData: Data(
+                        base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2Z7sAAAAASUVORK5CYII="
+                    ),
+                    calendar: calendar,
+                    now: now
+                )
+            }
         }
         #endif
         return TrackerFeatureBundle(
@@ -228,6 +277,7 @@ enum DefaultTrackerFeatureFactory {
             lifestyleRepository: lifestyleRepository,
             healthChecksRepository: healthChecksRepository,
             bloodworkRepository: bloodworkRepository,
+            progressPhotoRepository: progressPhotoRepository,
             calendar: calendar,
             now: now
         )

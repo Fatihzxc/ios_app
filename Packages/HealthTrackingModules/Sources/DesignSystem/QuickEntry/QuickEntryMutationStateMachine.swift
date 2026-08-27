@@ -64,6 +64,16 @@ where UndoToken: Equatable & Sendable {
     }
 
     @discardableResult
+    public mutating func abandonFailedSave() -> Bool {
+        guard case .saveFailed = phase else {
+            return false
+        }
+
+        phase = .idle
+        return true
+    }
+
+    @discardableResult
     public mutating func completeSave(
         _ attempt: QuickEntryMutationAttempt,
         undoToken: UndoToken

@@ -113,6 +113,10 @@ struct AppRootView: View {
                         onCommittedMutation: {},
                         onClose: { trackerEntryRoute = nil }
                     )
+                case .progressPhotos:
+                    trackerFeatureRouter.makeProgressPhotoLifecycleView(
+                        onClose: { trackerEntryRoute = nil }
+                    )
                 }
             }
         }
@@ -185,6 +189,9 @@ struct AppRootView: View {
                 trackerFeatureRouter.makeProgressView(
                     onOpenBloodwork: {
                         trackerEntryRoute = .bloodwork
+                    },
+                    onOpenProgressPhotos: {
+                        trackerEntryRoute = .progressPhotos
                     }
                 )
             } else {
@@ -288,6 +295,7 @@ private enum TrackerEntryRoute: String, Identifiable {
     case posture
     case healthChecks
     case bloodwork
+    case progressPhotos
 
     var id: String { rawValue }
 }
