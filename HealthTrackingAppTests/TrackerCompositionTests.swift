@@ -13,6 +13,7 @@ final class TrackerCompositionTests: XCTestCase {
         let repository = TrackerMetricsRepositoryStub()
         let lifestyleRepository = TrackerLifestyleRepositoryStub()
         let healthChecksRepository = TrackerHealthChecksRepositoryStub()
+        let bloodworkRepository = TrackerBloodworkRepositoryStub()
         let dependencies = try AppDependencies(
             environment: .uiTesting,
             makeTrackerFeatureBundle: { _ in
@@ -21,6 +22,7 @@ final class TrackerCompositionTests: XCTestCase {
                     metricsRepository: repository,
                     lifestyleRepository: lifestyleRepository,
                     healthChecksRepository: healthChecksRepository,
+                    bloodworkRepository: bloodworkRepository,
                     calendar: Calendar(identifier: .gregorian)
                 )
             }
@@ -63,6 +65,40 @@ final class TrackerCompositionTests: XCTestCase {
         XCTAssertTrue(
             (bundle.healthChecksRepository as AnyObject) === healthChecksRepository
         )
+        XCTAssertTrue(
+            (bundle.bloodworkRepository as AnyObject) === bloodworkRepository
+        )
+    }
+}
+
+@MainActor
+private final class TrackerBloodworkRepositoryStub: BloodworkRepository {
+    func fetchResults() async throws -> [BloodworkResultSnapshot] { [] }
+
+    func createResult(
+        _ input: BloodworkResultInput
+    ) async throws -> BloodworkCreationMutation {
+        throw StubFailure.unexpectedMutation
+    }
+
+    func updateResult(
+        id: UUID,
+        expectedUpdatedAt: Date,
+        input: BloodworkResultInput
+    ) async throws -> BloodworkResultSnapshot {
+        throw StubFailure.unexpectedMutation
+    }
+
+    func deleteResult(id: UUID, expectedUpdatedAt: Date) async throws {
+        throw StubFailure.unexpectedMutation
+    }
+
+    func undoResultCreation(_ token: BloodworkCreationUndoToken) async throws {
+        throw StubFailure.unexpectedMutation
+    }
+
+    private enum StubFailure: Error {
+        case unexpectedMutation
     }
 }
 

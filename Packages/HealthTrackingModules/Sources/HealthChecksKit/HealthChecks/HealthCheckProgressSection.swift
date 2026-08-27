@@ -9,15 +9,18 @@ public struct HealthCheckProgressSection: View {
     @Bindable private var viewModel: HealthChecksViewModel
     private let calendar: Calendar
     private let now: @MainActor () -> Date
+    private let onOpenBloodwork: @MainActor () -> Void
 
     public init(
         viewModel: HealthChecksViewModel,
         calendar: Calendar,
-        now: @escaping @MainActor () -> Date = { .now }
+        now: @escaping @MainActor () -> Date = { .now },
+        onOpenBloodwork: @escaping @MainActor () -> Void = {}
     ) {
         self.viewModel = viewModel
         self.calendar = calendar
         self.now = now
+        self.onOpenBloodwork = onOpenBloodwork
     }
 
     public var body: some View {
@@ -56,6 +59,13 @@ public struct HealthCheckProgressSection: View {
                 .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("medical.disclaimer.l1")
+            Button(action: onOpenBloodwork) {
+                Label(localized("bloodwork.title"), systemImage: "cross.case")
+                    .font(AppTypography.label)
+                    .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("bloodwork.open")
             if viewModel.snapshots.isEmpty {
                 AppCard { Text(localized("health-check.empty")) }
             } else {

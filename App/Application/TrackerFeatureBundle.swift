@@ -11,10 +11,12 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
     let repository: any MetricsRepository
     let lifestyleRepository: any LifestyleRepository
     let healthChecksRepository: any HealthChecksRepository
+    let bloodworkRepository: any BloodworkRepository
     let bodyMetricViewModel: BodyMetricViewModel
     let postureViewModel: PostureViewModel
     let lifestyleViewModel: LifestyleViewModel
     let healthChecksViewModel: HealthChecksViewModel
+    let bloodworkViewModel: BloodworkViewModel
     private let calendar: Calendar
     private let now: @MainActor () -> Date
 
@@ -22,18 +24,21 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         metricsRepository: any MetricsRepository,
         lifestyleRepository: any LifestyleRepository,
         healthChecksRepository: any HealthChecksRepository,
+        bloodworkRepository: any BloodworkRepository,
         calendar: Calendar,
         now: @escaping @MainActor () -> Date = { .now }
     ) {
         repository = metricsRepository
         self.lifestyleRepository = lifestyleRepository
         self.healthChecksRepository = healthChecksRepository
+        self.bloodworkRepository = bloodworkRepository
         self.calendar = calendar
         self.now = now
         bodyMetricViewModel = BodyMetricViewModel(repository: metricsRepository)
         postureViewModel = PostureViewModel(repository: metricsRepository)
         lifestyleViewModel = LifestyleViewModel(repository: lifestyleRepository)
         healthChecksViewModel = HealthChecksViewModel(repository: healthChecksRepository)
+        bloodworkViewModel = BloodworkViewModel(repository: bloodworkRepository)
     }
 
     func makeBodyMetricEntryView(
@@ -86,7 +91,23 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         )
     }
 
-    func makeProgressView() -> AnyView {
+    func makeBloodworkListView(
+        onCommittedMutation: @escaping @MainActor () -> Void,
+        onClose: @escaping @MainActor () -> Void
+    ) -> AnyView {
+        AnyView(
+            BloodworkListView(
+                viewModel: bloodworkViewModel,
+                now: now,
+                onCommittedMutation: onCommittedMutation,
+                onClose: onClose
+            )
+        )
+    }
+
+    func makeProgressView(
+        onOpenBloodwork: @escaping @MainActor () -> Void
+    ) -> AnyView {
         AnyView(
             BodyMetricProgressView(viewModel: bodyMetricViewModel) {
                 VStack(alignment: .leading, spacing: 24) {
@@ -98,7 +119,8 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
                     HealthCheckProgressSection(
                         viewModel: healthChecksViewModel,
                         calendar: calendar,
-                        now: now
+                        now: now,
+                        onOpenBloodwork: onOpenBloodwork
                     )
                 }
             }
@@ -121,6 +143,10 @@ enum DefaultTrackerFeatureFactory {
             calendar: calendar,
             now: now
         )
+        let bloodworkRepository = SwiftDataBloodworkRepository(
+            modelContext: modelContext,
+            now: now
+        )
         #if DEBUG
         if environment == .uiTesting,
            let scenario = AppUITestLaunchConfiguration.resolve()?.scenario {
@@ -132,6 +158,7 @@ enum DefaultTrackerFeatureFactory {
                     ),
                     lifestyleRepository: lifestyleRepository,
                     healthChecksRepository: healthChecksRepository,
+                    bloodworkRepository: bloodworkRepository,
                     calendar: calendar,
                     now: now
                 )
@@ -144,6 +171,7 @@ enum DefaultTrackerFeatureFactory {
                         failsFirstUpsert: true
                     ),
                     healthChecksRepository: healthChecksRepository,
+                    bloodworkRepository: bloodworkRepository,
                     calendar: calendar,
                     now: now
                 )
@@ -157,6 +185,7 @@ enum DefaultTrackerFeatureFactory {
                     ),
                     lifestyleRepository: lifestyleRepository,
                     healthChecksRepository: healthChecksRepository,
+                    bloodworkRepository: bloodworkRepository,
                     calendar: calendar,
                     now: now
                 )
@@ -169,6 +198,21 @@ enum DefaultTrackerFeatureFactory {
                         repository: healthChecksRepository,
                         failsFirstCompletion: true
                     ),
+                    bloodworkRepository: bloodworkRepository,
+                    calendar: calendar,
+                    now: now
+                )
+            }
+            if scenario == .m3Bloodwork {
+                return TrackerFeatureBundle(
+                    metricsRepository: metricsRepository,
+                    lifestyleRepository: lifestyleRepository,
+                    healthChecksRepository: healthChecksRepository,
+                    bloodworkRepository: UITestBloodworkRepository(
+                        repository: bloodworkRepository,
+                        failsFirstLoad: true,
+                        failsFirstCreate: true
+                    ),
                     calendar: calendar,
                     now: now
                 )
@@ -179,6 +223,7 @@ enum DefaultTrackerFeatureFactory {
             metricsRepository: metricsRepository,
             lifestyleRepository: lifestyleRepository,
             healthChecksRepository: healthChecksRepository,
+            bloodworkRepository: bloodworkRepository,
             calendar: calendar,
             now: now
         )
@@ -285,6 +330,71 @@ private final class UITestHealthChecksRepository: HealthChecksRepository {
         _ token: HealthCheckCompletionUndoToken
     ) async throws -> HealthCheckReminderSnapshot {
         try await repository.undoCompletion(token)
+    }
+}
+#endif
+
+#if DEBUG
+@MainActor
+private final class UITestBloodworkRepository: BloodworkRepository {
+    private enum FixtureFailure: Error {
+        case load
+        case create
+    }
+
+    private let repository: any BloodworkRepository
+    private var failsNextLoad: Bool
+    private var failsNextCreate: Bool
+
+    init(
+        repository: any BloodworkRepository,
+        failsFirstLoad: Bool,
+        failsFirstCreate: Bool
+    ) {
+        self.repository = repository
+        failsNextLoad = failsFirstLoad
+        failsNextCreate = failsFirstCreate
+    }
+
+    func fetchResults() async throws -> [BloodworkResultSnapshot] {
+        if failsNextLoad {
+            failsNextLoad = false
+            throw FixtureFailure.load
+        }
+        return try await repository.fetchResults()
+    }
+
+    func createResult(
+        _ input: BloodworkResultInput
+    ) async throws -> BloodworkCreationMutation {
+        if failsNextCreate {
+            failsNextCreate = false
+            throw FixtureFailure.create
+        }
+        return try await repository.createResult(input)
+    }
+
+    func updateResult(
+        id: UUID,
+        expectedUpdatedAt: Date,
+        input: BloodworkResultInput
+    ) async throws -> BloodworkResultSnapshot {
+        try await repository.updateResult(
+            id: id,
+            expectedUpdatedAt: expectedUpdatedAt,
+            input: input
+        )
+    }
+
+    func deleteResult(id: UUID, expectedUpdatedAt: Date) async throws {
+        try await repository.deleteResult(
+            id: id,
+            expectedUpdatedAt: expectedUpdatedAt
+        )
+    }
+
+    func undoResultCreation(_ token: BloodworkCreationUndoToken) async throws {
+        try await repository.undoResultCreation(token)
     }
 }
 #endif
