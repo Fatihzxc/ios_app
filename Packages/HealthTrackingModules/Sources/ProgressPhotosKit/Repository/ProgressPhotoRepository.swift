@@ -36,6 +36,7 @@ public protocol ProgressPhotoRepository: AnyObject {
         bytes: Data
     ) async throws -> ProgressPhotoSnapshot
     func thumbnail(assetID: String) async throws -> PhotoAssetLoadResult
+    func fullImage(assetID: String) async throws -> PhotoAssetLoadResult
     func deletePhoto(id: UUID, expectedUpdatedAt: Date) async throws
     func retryPendingAssetCleanup() async throws
 }
@@ -57,6 +58,10 @@ public final class NoOpProgressPhotoRepository: ProgressPhotoRepository {
     }
 
     public func thumbnail(assetID: String) async throws -> PhotoAssetLoadResult {
+        .missing
+    }
+
+    public func fullImage(assetID: String) async throws -> PhotoAssetLoadResult {
         .missing
     }
 

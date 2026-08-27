@@ -31,6 +31,7 @@ public struct ProgressPhotoLifecycleView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @Bindable private var viewModel: ProgressPhotoImportViewModel
+    @Bindable private var galleryViewModel: ProgressPhotoGalleryViewModel
     private let fixtureImageData: Data?
     private let onClose: @MainActor () -> Void
     @State private var pendingDelete: ProgressPhotoSnapshot?
@@ -38,10 +39,12 @@ public struct ProgressPhotoLifecycleView: View {
 
     public init(
         viewModel: ProgressPhotoImportViewModel,
+        galleryViewModel: ProgressPhotoGalleryViewModel,
         fixtureImageData: Data? = nil,
         onClose: @escaping @MainActor () -> Void
     ) {
         self.viewModel = viewModel
+        self.galleryViewModel = galleryViewModel
         self.fixtureImageData = fixtureImageData
         self.onClose = onClose
     }
@@ -87,13 +90,21 @@ public struct ProgressPhotoLifecycleView: View {
                         .accessibilityIdentifier("photos.note")
 
                     SystemPhotosPickerView(title: localized("photos.picker")) { selection in
-                        Task { await viewModel.importSelection(selection) }
+                        Task {
+                            if await viewModel.importSelection(selection) {
+                                await galleryViewModel.load()
+                            }
+                        }
                     }
                     .disabled(viewModel.isMutationInFlight)
 
                     if let fixtureImageData {
                         Button(localized("photos.import.fixture")) {
-                            Task { await viewModel.importFixtureBytes(fixtureImageData) }
+                            Task {
+                                if await viewModel.importFixtureBytes(fixtureImageData) {
+                                    await galleryViewModel.load()
+                                }
+                            }
                         }
                         .buttonStyle(.bordered)
                         .frame(minHeight: 52)
@@ -122,10 +133,22 @@ public struct ProgressPhotoLifecycleView: View {
             if viewModel.listPhase == .idle {
                 await viewModel.load()
             }
+            if galleryViewModel.phase == .idle || galleryViewModel.phase == .failed {
+                await galleryViewModel.load()
+            } else if galleryViewModel.phase == .loaded {
+                await galleryViewModel.retryUnavailableAssets()
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
-            Task { await viewModel.retryPendingAssetCleanup() }
+            Task {
+                await viewModel.retryPendingAssetCleanup()
+                if galleryViewModel.phase == .failed {
+                    await galleryViewModel.load()
+                } else if galleryViewModel.phase == .loaded {
+                    await galleryViewModel.retryUnavailableAssets()
+                }
+            }
         }
         .confirmationDialog(
             localized("photos.delete.confirmation"),
@@ -137,6 +160,7 @@ public struct ProgressPhotoLifecycleView: View {
                 Task {
                     if await viewModel.delete(pendingDelete) {
                         self.pendingDelete = nil
+                        await galleryViewModel.load()
                     }
                 }
             }
@@ -165,7 +189,11 @@ public struct ProgressPhotoLifecycleView: View {
                     .accessibilityIdentifier("photos.import.saved")
                 if viewModel.canUndoLastImport {
                     Button(localized("photos.import.undo")) {
-                        Task { await viewModel.undoLastImport() }
+                        Task {
+                            if await viewModel.undoLastImport() {
+                                await galleryViewModel.load()
+                            }
+                        }
                     }
                     .buttonStyle(.bordered)
                     .frame(minHeight: 52)
@@ -183,7 +211,11 @@ public struct ProgressPhotoLifecycleView: View {
                     .accessibilityIdentifier("photos.import.error")
                 if viewModel.canRetryImport {
                     Button(localized("photos.import.retry")) {
-                        Task { await viewModel.retryImport() }
+                        Task {
+                            if await viewModel.retryImport() {
+                                await galleryViewModel.load()
+                            }
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                     .frame(minHeight: 52)
@@ -191,7 +223,11 @@ public struct ProgressPhotoLifecycleView: View {
                 }
                 if viewModel.canRetryUndo {
                     Button(localized("photos.import.retry.undo")) {
-                        Task { await viewModel.retryUndo() }
+                        Task {
+                            if await viewModel.retryUndo() {
+                                await galleryViewModel.load()
+                            }
+                        }
                     }
                     .buttonStyle(.bordered)
                     .frame(minHeight: 52)
@@ -203,18 +239,23 @@ public struct ProgressPhotoLifecycleView: View {
 
     @ViewBuilder
     private var listState: some View {
-        switch viewModel.listPhase {
+        switch galleryViewModel.phase {
         case .idle, .loading:
             FeatureStateView(state: .loading)
                 .accessibilityIdentifier("photos.list.loading")
         case .failed:
             FeatureStateView(
                 state: .error(message: localized("photos.load.error")),
-                retry: { Task { await viewModel.load() } }
+                retry: {
+                    Task {
+                        await viewModel.load()
+                        await galleryViewModel.load()
+                    }
+                }
             )
             .accessibilityIdentifier("photos.list.error")
         case .loaded:
-            if viewModel.snapshots.isEmpty {
+            if galleryViewModel.items.isEmpty {
                 AppCard {
                     Text(localized("photos.empty"))
                         .font(AppTypography.body)
@@ -222,53 +263,12 @@ public struct ProgressPhotoLifecycleView: View {
                 }
                 .accessibilityIdentifier("photos.list.empty")
             } else {
-                VStack(alignment: .leading, spacing: AppSpacing.standard) {
-                    Text(localized("photos.list"))
-                        .font(AppTypography.titleMedium)
-                        .accessibilityAddTraits(.isHeader)
-                        .accessibilityIdentifier("photos.list.content")
-                    ForEach(viewModel.snapshots) { snapshot in
-                        AppCard {
-                            VStack(alignment: .leading, spacing: AppSpacing.small) {
-                                Text(poseTitle(snapshot.pose))
-                                    .font(AppTypography.label)
-                                Text(
-                                    snapshot.date.formatted(
-                                        date: .abbreviated,
-                                        time: .omitted
-                                    )
-                                )
-                                .font(AppTypography.body)
-                                if let note = snapshot.note {
-                                    Text(note)
-                                        .font(AppTypography.caption)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                                Button(role: .destructive) {
-                                    pendingDelete = snapshot
-                                    isConfirmingDelete = true
-                                } label: {
-                                    Text(localized("photos.delete"))
-                                        .frame(maxWidth: .infinity, minHeight: 52)
-                                }
-                                .buttonStyle(.bordered)
-                                .accessibilityIdentifier(
-                                    "photos.delete.\(snapshot.id.uuidString.lowercased())"
-                                )
-                            }
-                        }
-                        .accessibilityIdentifier(
-                            "photos.row.\(snapshot.id.uuidString.lowercased())"
-                        )
-
-                        if viewModel.deleteFailureID == snapshot.id {
-                            Text(localized("photos.delete.error"))
-                                .font(AppTypography.caption)
-                                .foregroundStyle(
-                                    AppColors.color(.stateDanger, scheme: colorScheme)
-                                )
-                        }
-                    }
+                ProgressPhotoGalleryView(
+                    viewModel: galleryViewModel,
+                    deleteFailureID: viewModel.deleteFailureID
+                ) { snapshot in
+                    pendingDelete = snapshot
+                    isConfirmingDelete = true
                 }
             }
         }
