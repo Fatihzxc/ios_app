@@ -19,5 +19,12 @@ protocol TrackerFeatureRouting: AnyObject {
         onClose: @escaping @MainActor () -> Void
     ) -> AnyView
 
-    func makeProgressView() -> AnyView
+    func makeBloodworkListView(
+        onCommittedMutation: @escaping @MainActor () -> Void,
+        onClose: @escaping @MainActor () -> Void
+    ) -> AnyView
+
+    func makeProgressView(
+        onOpenBloodwork: @escaping @MainActor () -> Void
+    ) -> AnyView
 }
