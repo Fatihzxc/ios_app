@@ -132,6 +132,47 @@ final class HealthChecksViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.mutationPhase, .idle)
     }
 
+    func testFailedNewCompletionExpiresPreviousUndoPresentation() async {
+        let first = snapshot(id: uuid(541), status: .pending, updatedAt: date(60_000))
+        let second = snapshot(id: uuid(542), status: .pending, updatedAt: date(61_000))
+        let completed = snapshot(
+            id: first.id,
+            status: .done,
+            updatedAt: date(62_000)
+        )
+        let repository = HealthChecksRepositoryFake(
+            reminders: [first, second],
+            completionResults: [
+                .success(
+                    HealthCheckCompletionMutation(
+                        completed: completed,
+                        successor: nil,
+                        undoToken: undoToken(
+                            original: first,
+                            completed: completed,
+                            successor: nil
+                        )
+                    )
+                ),
+                .failure(.saveFailed),
+            ]
+        )
+        let viewModel = HealthChecksViewModel(repository: repository)
+        await viewModel.load()
+        await viewModel.complete(first)
+        XCTAssertNotNil(viewModel.lastCompletion)
+
+        await viewModel.complete(second)
+
+        XCTAssertEqual(viewModel.mutationPhase, .failed)
+        XCTAssertNil(
+            viewModel.lastCompletion,
+            "A new accepted save must expire the previous undo presentation."
+        )
+        await viewModel.undoLastCompletion()
+        XCTAssertTrue(repository.undoRequests.isEmpty)
+    }
+
     private func undoToken(
         original: HealthCheckReminderSnapshot,
         completed: HealthCheckReminderSnapshot,

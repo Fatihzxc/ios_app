@@ -972,6 +972,18 @@ private enum UITestSessionFixture {
         reminder.status = .pending
         reminder.dueDate = .now.addingTimeInterval(-60)
         reminder.updatedAt = .now
+        let now = Date.now
+        modelContext.insert(
+            AppReminder(
+                id: todayMeasurementReminderID,
+                createdAt: now,
+                updatedAt: now,
+                type: .measurement,
+                schedule: "today-reminder-ui-test",
+                message: "Bel ölçümünü kaydet",
+                isEnabled: true
+            )
+        )
         try modelContext.save()
     }
 

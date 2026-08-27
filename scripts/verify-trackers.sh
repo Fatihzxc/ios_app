@@ -465,6 +465,7 @@ m35_tests = {
         "retryCompletion",
         "testSecondCompletionTapWhileSavingCannotReplacePendingRetry",
         "testSuccessfulUndoRemovesSuccessorAndRestoresOriginalSnapshot",
+        "testFailedNewCompletionExpiresPreviousUndoPresentation",
         "failedCompletionID",
         "undoLastCompletion",
         "expectedUpdatedAt: first.updatedAt",
@@ -500,6 +501,11 @@ m35_tests = {
         "testHealthCheckDueLaterTodayUsesTheSameLocalDaySemanticsAsTrackerDetail",
         "dueLaterToday",
         "dueTomorrow",
+    },
+    "HealthTrackingAppUITests/TodayGuidanceUITests.swift": {
+        "testBloodworkCardKeepsRemainingAlertCountWithoutDuplicateAlertCard",
+        'scenario: "today-reminder"',
+        'XCTAssertEqual(remaining.label, "+1")',
     },
 }
 
@@ -1524,6 +1530,7 @@ fixture_files = {
             "retryCompletion",
             "testSecondCompletionTapWhileSavingCannotReplacePendingRetry",
             "testSuccessfulUndoRemovesSuccessorAndRestoresOriginalSnapshot",
+            "testFailedNewCompletionExpiresPreviousUndoPresentation",
             "failedCompletionID",
             "undoLastCompletion",
             "expectedUpdatedAt: first.updatedAt",
@@ -1558,6 +1565,13 @@ fixture_files = {
             "relaunchedGeneralRows.count",
             "health-check.history.loaded",
             "m3-health-check-detail-ax5",
+        ]
+    ),
+    "HealthTrackingAppUITests/TodayGuidanceUITests.swift": " ".join(
+        [
+            "testBloodworkCardKeepsRemainingAlertCountWithoutDuplicateAlertCard",
+            'scenario: "today-reminder"',
+            'XCTAssertEqual(remaining.label, "+1")',
         ]
     ),
     "Packages/HealthTrackingModules/Sources/HealthChecksKit/HealthChecksKitModule.swift": (
