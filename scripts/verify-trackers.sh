@@ -1666,8 +1666,6 @@ m39_tests = {
         "testInboundRestoreProtectsPreviouslyFailedOrphanFromCleanupRetry",
         "testInitialOrphanSweepRereadsInboundOwnershipAtDeleteBoundary",
         "testInboundJournalReadFailureStopsPendingCleanupRetryBeforeDelete",
-        "testCleanupRetryRechecksInboundOwnershipAfterEarlierAssetDeleteSuspends",
-        "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
         "testCancelledInboundRecordRemovesExactWaiterAndAllowsLaterCleanupLease",
         "waitForInboundRecordWaiter",
         "inboundRecordWaiterIDs",
@@ -3429,6 +3427,10 @@ def swift_braced_declaration(source: str, name: str) -> str | None:
     return None
 
 
+def swift_braced_declaration_code(source: str, name: str) -> str | None:
+    return swift_braced_declaration(swift_code_mask(source), name)
+
+
 def swift_braced_region_after(source: str, marker: str) -> str | None:
     marker_index = source.find(marker)
     if marker_index < 0:
@@ -3466,6 +3468,436 @@ def swift_braced_type_declaration(source: str, name: str) -> str | None:
             if depth == 0:
                 return source[opening:index + 1]
     return None
+
+
+def swift_braced_type_declaration_code(source: str, name: str) -> str | None:
+    return swift_braced_type_declaration(swift_code_mask(source), name)
+
+
+def swift_direct_code(braced_source: str) -> str:
+    if (
+        len(braced_source) < 2
+        or braced_source[0] != "{"
+        or braced_source[-1] != "}"
+    ):
+        return ""
+    direct = list(braced_source)
+    direct[0] = " "
+    direct[-1] = " "
+    depth = 0
+    for index in range(1, len(braced_source) - 1):
+        character = braced_source[index]
+        if depth:
+            if character == "{":
+                depth += 1
+            elif character == "}":
+                depth -= 1
+            if character != "\n":
+                direct[index] = " "
+        elif character == "{":
+            depth = 1
+            direct[index] = " "
+        elif character == "}":
+            return ""
+    if depth:
+        return ""
+    return "".join(direct)
+
+
+def swift_direct_lines(braced_source: str) -> list[str]:
+    return [
+        re.sub(r"[ \t]+", " ", line).strip()
+        for line in swift_direct_code(braced_source).splitlines()
+        if line.strip()
+    ]
+
+
+def swift_direct_marker_position(braced_source: str, marker: str) -> int | None:
+    direct = swift_direct_code(braced_source)
+    matches = list(
+        re.finditer(
+            rf"(?m)^[ \t]*{re.escape(marker)}[ \t]*$",
+            direct,
+        )
+    )
+    if len(matches) != 1:
+        return None
+    return matches[0].start() + matches[0].group().find(marker)
+
+
+def swift_braced_region_from_position(source: str, position: int) -> str | None:
+    opening = source.find("{", position)
+    if opening < 0:
+        return None
+    depth = 0
+    for index in range(opening, len(source)):
+        character = source[index]
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0:
+                return source[opening:index + 1]
+    return None
+
+
+progress_photo_repository_tests_text = (
+    root
+    / "Packages/HealthTrackingModules/Tests/PersistenceKitTests/ProgressPhotoRepositoryTests.swift"
+).read_text(encoding="utf-8")
+progress_photo_repository_tests_code = swift_code_mask(
+    progress_photo_repository_tests_text
+)
+conditional_compilation_failure = (
+    "M3 cleanup suspension contracts must not use conditional compilation"
+)
+if re.search(
+    r"(?m)^[ \t]*#(?:if|elseif|else|endif)\b",
+    progress_photo_repository_tests_code,
+):
+    raise SystemExit(conditional_compilation_failure)
+
+
+def swift_binding_pattern_shadows(source: str, identifier: str) -> bool:
+    identifier_token = re.compile(
+        rf"(?<![A-Za-z0-9_`])`?{re.escape(identifier)}`?"
+        rf"(?![A-Za-z0-9_`])"
+    )
+    for declaration in re.finditer(r"\b(?:let|var)\b", source):
+        cursor = declaration.end()
+        while cursor < len(source) and source[cursor].isspace():
+            cursor += 1
+        if source.startswith("case", cursor) and (
+            cursor + 4 == len(source)
+            or not source[cursor + 4].isalnum()
+        ):
+            cursor += 4
+            while cursor < len(source) and source[cursor].isspace():
+                cursor += 1
+        if cursor >= len(source):
+            continue
+        if source[cursor] != "(":
+            binding = re.match(r"`?([A-Za-z_][A-Za-z0-9_]*)`?", source[cursor:])
+            if binding is not None and binding.group(1) == identifier:
+                return True
+            continue
+        depth = 0
+        for end in range(cursor, len(source)):
+            character = source[end]
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+                if depth == 0:
+                    if identifier_token.search(source[cursor:end + 1]):
+                        return True
+                    break
+    return False
+
+
+def swift_shadows_identifier(source: str, identifier: str) -> bool:
+    escaped = re.escape(identifier)
+    name = rf"`?{escaped}`?"
+    return swift_binding_pattern_shadows(source, identifier) or any(
+        re.search(pattern, source) is not None
+        for pattern in (
+            rf"\b(?:actor|associatedtype|class|enum|func|let|protocol|struct|typealias|var)\s+{name}(?![A-Za-z0-9_`])",
+            rf"(?<![.A-Za-z0-9_`]){name}\s*(?::|=)",
+            rf"(?:\{{|,)\s*{name}\s+(?:in|,)",
+            rf"(?:\(|,)\s*{name}\s*(?:,|\))",
+            rf"\bimport\s+(?:(?:class|enum|func|struct|typealias|var)\s+)?[A-Za-z0-9_.]+\.{name}(?![A-Za-z0-9_`])",
+        )
+    )
+
+
+for cleanup_runtime_identifier in ("Task", "XCTFail"):
+    if swift_shadows_identifier(
+        progress_photo_repository_tests_code,
+        cleanup_runtime_identifier,
+    ):
+        raise SystemExit(
+            "M3 cleanup suspension contracts must not shadow Swift concurrency "
+            f"or XCTest runtime symbols: {cleanup_runtime_identifier}"
+        )
+
+if re.search(
+    r"\b(?:XCTSkip(?:If|Unless)?|XCTExpectFailure)\b",
+    progress_photo_repository_tests_code,
+):
+    raise SystemExit(
+        "M3 cleanup suspension XCTest file must not use skip or expected-failure APIs"
+    )
+
+progress_photo_file_scope = "{" + progress_photo_repository_tests_code + "}"
+test_suite_marker = "final class ProgressPhotoRepositoryTests: XCTestCase"
+test_suite_position = swift_direct_marker_position(
+    progress_photo_file_scope,
+    test_suite_marker,
+)
+if test_suite_position is None:
+    raise SystemExit("M3 cleanup suspension XCTest suite must remain top-level")
+progress_photo_repository_test_suite = swift_braced_region_from_position(
+    progress_photo_repository_tests_code,
+    test_suite_position - 1,
+)
+if progress_photo_repository_test_suite is None:
+    raise SystemExit("M3 cleanup suspension XCTest suite is missing")
+
+for cleanup_test_name, observation, asset in (
+    (
+        "testCleanupRetryRechecksInboundOwnershipAfterEarlierAssetDeleteSuspends",
+        "didSuspendA",
+        "assetA",
+    ),
+    (
+        "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
+        "didSuspendDelete",
+        "assetID",
+    ),
+):
+    cleanup_test_marker = f"func {cleanup_test_name}() async throws"
+    cleanup_test_suite_lines = swift_direct_lines(
+        progress_photo_repository_test_suite
+    )
+    cleanup_test_overloads = [
+        line
+        for line in cleanup_test_suite_lines
+        if re.search(rf"\bfunc {re.escape(cleanup_test_name)}\s*\(", line)
+    ]
+    failure = (
+        "M3 cleanup suspension guard must fail closed in "
+        f"{cleanup_test_name}"
+    )
+    cleanup_test_position = swift_direct_marker_position(
+        progress_photo_repository_test_suite,
+        cleanup_test_marker,
+    )
+    cleanup_test_body = (
+        swift_braced_region_from_position(
+            progress_photo_repository_test_suite,
+            cleanup_test_position,
+        )
+        if cleanup_test_position is not None
+        else None
+    )
+    if len(cleanup_test_overloads) != 1 or cleanup_test_body is None:
+        raise SystemExit(
+            "M3 cleanup suspension XCTest must bind one exact discovered method in "
+            f"{cleanup_test_name}"
+        )
+    guard_marker = f"guard {observation} else"
+    retry_marker = "let retryTask = Task"
+    observation_line = (
+        f"let {observation} = "
+        f"await assetStore.waitUntilDeleteIsSuspended({asset})"
+    )
+    cleanup_test_direct_lines = swift_direct_lines(cleanup_test_body or "")
+    cleanup_test_direct_code = swift_direct_code(cleanup_test_body or "")
+    flow_failure = (
+        "M3 cleanup suspension XCTest must not bypass its executable path in "
+        f"{cleanup_test_name}"
+    )
+    if ";" in cleanup_test_direct_code:
+        raise SystemExit(flow_failure)
+    for direct_line in cleanup_test_direct_lines:
+        if direct_line == guard_marker:
+            continue
+        if re.match(
+            r"^(?:[^:;{}]+:\s*)?"
+            r"(?:if|guard|switch|for|while|repeat|do|return|throw|break|continue)"
+            r"(?:\s|$)",
+            direct_line,
+        ):
+            raise SystemExit(flow_failure)
+    if re.search(
+        r"\b(?:XCTSkip(?:If|Unless)?|XCTExpectFailure)\b",
+        cleanup_test_body or "",
+    ):
+        raise SystemExit(flow_failure)
+    retry_line_indexes = [
+        index
+        for index, line in enumerate(cleanup_test_direct_lines)
+        if line == retry_marker
+    ]
+    observation_line_indexes = [
+        index
+        for index, line in enumerate(cleanup_test_direct_lines)
+        if line == observation_line
+    ]
+    guard_line_indexes = [
+        index
+        for index, line in enumerate(cleanup_test_direct_lines)
+        if line == guard_marker
+    ]
+    binding_failure = (
+        "M3 cleanup suspension observation must bind the exact retry and asset in "
+        f"{cleanup_test_name}"
+    )
+    if (
+        len(retry_line_indexes) != 1
+        or len(observation_line_indexes) != 1
+        or observation_line_indexes[0] != retry_line_indexes[0] + 1
+    ):
+        raise SystemExit(binding_failure)
+    if len(guard_line_indexes) != 1:
+        raise SystemExit(failure)
+    if guard_line_indexes[0] != observation_line_indexes[0] + 1:
+        raise SystemExit(binding_failure)
+    retry_position = swift_direct_marker_position(
+        cleanup_test_body or "",
+        retry_marker,
+    )
+    retry_body = (
+        swift_braced_region_from_position(cleanup_test_body, retry_position)
+        if cleanup_test_body is not None and retry_position is not None
+        else None
+    )
+    if retry_body is None or swift_direct_lines(retry_body) != [
+        "try await repository.retryPendingAssetCleanup()"
+    ]:
+        raise SystemExit(binding_failure)
+    guard_position = (
+        swift_direct_marker_position(cleanup_test_body, guard_marker)
+        if cleanup_test_body is not None
+        else None
+    )
+    cleanup_guard = (
+        swift_braced_region_from_position(cleanup_test_body, guard_position)
+        if cleanup_test_body is not None and guard_position is not None
+        else None
+    )
+    if cleanup_guard is None:
+        raise SystemExit(failure)
+    guard_lines = swift_direct_lines(cleanup_guard)
+    if (
+        len(guard_lines) != 5
+        or guard_lines[0]
+        != f"await assetStore.resumeSuspendedDelete(of: {asset})"
+        or guard_lines[1] != "retryTask.cancel()"
+        or guard_lines[2] != "_ = try? await retryTask.value"
+        or re.fullmatch(r"XCTFail\(\s*\)", guard_lines[3]) is None
+        or guard_lines[4] != "return"
+    ):
+        raise SystemExit(failure)
+
+cleanup_store_marker = (
+    "private actor CleanupLeaseInterleavingAssetStore: PhotoAssetStoring"
+)
+cleanup_store_position = swift_direct_marker_position(
+    progress_photo_file_scope,
+    cleanup_store_marker,
+)
+if cleanup_store_position is None:
+    raise SystemExit("M3 cleanup suspension fixture actor must remain top-level")
+cleanup_store_body = swift_braced_region_from_position(
+    progress_photo_repository_tests_code,
+    cleanup_store_position - 1,
+)
+if cleanup_store_body is None:
+    raise SystemExit("M3 cleanup suspension fixture actor is missing")
+
+cleanup_store_direct_lines = swift_direct_lines(cleanup_store_body)
+wait_method_marker = (
+    "func waitUntilDeleteIsSuspended(_ assetID: String) async -> Bool"
+)
+wait_method_overloads = [
+    line
+    for line in cleanup_store_direct_lines
+    if re.search(r"\bfunc waitUntilDeleteIsSuspended\s*\(", line)
+]
+wait_method_position = swift_direct_marker_position(
+    cleanup_store_body,
+    wait_method_marker,
+)
+wait_for_cleanup_body = (
+    swift_braced_region_from_position(cleanup_store_body, wait_method_position)
+    if wait_method_position is not None
+    else None
+)
+wait_failure = "M3 cleanup suspension wait must use a bounded wall-clock deadline"
+if (
+    len(wait_method_overloads) != 1
+    or wait_for_cleanup_body is None
+    or "Task.yield()" in wait_for_cleanup_body
+):
+    raise SystemExit(wait_failure)
+wait_loop_marker = "for _ in 0..<5_000"
+wait_loop_position = swift_direct_marker_position(
+    wait_for_cleanup_body,
+    wait_loop_marker,
+)
+wait_loop_body = (
+    swift_braced_region_from_position(wait_for_cleanup_body, wait_loop_position)
+    if wait_loop_position is not None
+    else None
+)
+if (
+    swift_direct_lines(wait_for_cleanup_body)
+    != [
+        wait_loop_marker,
+        "return suspendedDeleteAssetIDs.contains(assetID)",
+    ]
+    or wait_loop_body is None
+    or swift_direct_lines(wait_loop_body)
+    != [
+        "if suspendedDeleteAssetIDs.contains(assetID)",
+        "try? await Task.sleep(nanoseconds: 1_000_000)",
+    ]
+):
+    raise SystemExit(wait_failure)
+wait_observation_marker = "if suspendedDeleteAssetIDs.contains(assetID)"
+wait_observation_position = swift_direct_marker_position(
+    wait_loop_body,
+    wait_observation_marker,
+)
+wait_observation_body = (
+    swift_braced_region_from_position(wait_loop_body, wait_observation_position)
+    if wait_observation_position is not None
+    else None
+)
+if wait_observation_body is None or swift_direct_lines(wait_observation_body) != [
+    "return true"
+]:
+    raise SystemExit(wait_failure)
+
+resume_method_marker = "func resumeSuspendedDelete(of assetID: String)"
+resume_method_overloads = [
+    line
+    for line in cleanup_store_direct_lines
+    if re.search(r"\bfunc resumeSuspendedDelete\s*\(", line)
+]
+resume_method_position = swift_direct_marker_position(
+    cleanup_store_body,
+    resume_method_marker,
+)
+resume_cleanup_body = (
+    swift_braced_region_from_position(cleanup_store_body, resume_method_position)
+    if resume_method_position is not None
+    else None
+)
+resume_failure = "M3 cleanup suspension resume must disarm and release the exact delete"
+if len(resume_method_overloads) != 1 or resume_cleanup_body is None:
+    raise SystemExit(resume_failure)
+resume_disarm_marker = "if suspendedAssetID == assetID"
+resume_disarm_position = swift_direct_marker_position(
+    resume_cleanup_body,
+    resume_disarm_marker,
+)
+resume_disarm = (
+    swift_braced_region_from_position(resume_cleanup_body, resume_disarm_position)
+    if resume_disarm_position is not None
+    else None
+)
+if resume_disarm is None or swift_direct_lines(resume_disarm) != [
+    "suspendedAssetID = nil"
+]:
+    raise SystemExit(resume_failure)
+if swift_direct_lines(resume_cleanup_body) != [
+    resume_disarm_marker,
+    "let continuation = deleteContinuations.removeValue(forKey: assetID)",
+    "continuation?.resume()",
+]:
+    raise SystemExit(resume_failure)
 
 
 def swift_braced_initializer(
@@ -5355,6 +5787,8 @@ m311_support = {
         "scripts/test-ios.sh --only-testing HealthTrackingAppTests/HealthCheckNotificationCompositionTests",
         "Targeted M3.11 explicit notification permission UI test",
         "scripts/test-ios.sh --only-testing HealthTrackingAppUITests/HealthCheckNotificationFlowUITests",
+        "Targeted cleanup suspension regression",
+        "scripts/test-ios.sh --only-testing PersistenceKitTests/ProgressPhotoRepositoryTests/testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
     },
     "scripts/test-ios.sh": {
         "--m311-red-only",
@@ -5377,11 +5811,281 @@ for relative_path, tokens in m311_support.items():
     if absent:
         raise SystemExit(f"{relative_path} is missing M3.11 wiring: {absent}")
 
+
+def yaml_without_inline_comment(line: str) -> str:
+    quote = None
+    escaped = False
+    for index, character in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+        if quote == '"' and character == "\\":
+            escaped = True
+            continue
+        if character in ("'", '"'):
+            if quote is None:
+                quote = character
+            elif quote == character:
+                if quote == "'" and index + 1 < len(line) and line[index + 1] == "'":
+                    continue
+                quote = None
+            continue
+        if character == "#" and quote is None and (
+            index == 0 or line[index - 1].isspace()
+        ):
+            return line[:index]
+    return line
+
+
+def yaml_scalar(value: str) -> str:
+    scalar = value.strip()
+    if len(scalar) >= 2 and scalar[0] == scalar[-1] == "'":
+        return scalar[1:-1].replace("''", "'")
+    if len(scalar) >= 2 and scalar[0] == scalar[-1] == '"':
+        return scalar[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+    return scalar
+
+
+def canonical_test_job_steps(source: str) -> list[dict[str, object]]:
+    lines = source.splitlines()
+    active_lines = [yaml_without_inline_comment(line).rstrip() for line in lines]
+    root_keys: dict[str, list[str]] = {}
+    for line in active_lines:
+        if not line.strip() or len(line) - len(line.lstrip(" ")) != 0:
+            continue
+        match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*", line)
+        if match is None:
+            raise SystemExit(
+                "M3.11 workflow root must remain canonical without execution defaults"
+            )
+        root_keys.setdefault(match.group(1), []).append(
+            yaml_scalar(match.group(2))
+        )
+    if root_keys != {
+        "name": ["iOS"],
+        "on": [""],
+        "jobs": [""],
+    }:
+        raise SystemExit(
+            "M3.11 workflow root must remain canonical without execution defaults"
+        )
+    on_indexes = [index for index, line in enumerate(active_lines) if line == "on:"]
+    if len(on_indexes) != 1:
+        raise SystemExit(
+            "M3.11 workflow must run automatically for push and pull_request"
+        )
+    on_start = on_indexes[0]
+    on_end = len(lines)
+    for index in range(on_start + 1, len(lines)):
+        line = active_lines[index]
+        if line.strip() and len(line) - len(line.lstrip(" ")) == 0:
+            on_end = index
+            break
+    trigger_keys: dict[str, list[str]] = {}
+    for index in range(on_start + 1, on_end):
+        line = active_lines[index]
+        if not line.strip():
+            continue
+        if len(line) - len(line.lstrip(" ")) != 2:
+            raise SystemExit(
+                "M3.11 workflow must run automatically for push and pull_request"
+            )
+        match = re.fullmatch(r"  ([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*", line)
+        if match is None:
+            raise SystemExit(
+                "M3.11 workflow must run automatically for push and pull_request"
+            )
+        trigger_keys.setdefault(match.group(1), []).append(
+            yaml_scalar(match.group(2))
+        )
+    if trigger_keys != {
+        "push": [""],
+        "pull_request": [""],
+        "workflow_dispatch": [""],
+    }:
+        raise SystemExit(
+            "M3.11 workflow must run automatically for push and pull_request"
+        )
+    jobs = [index for index, line in enumerate(active_lines) if line == "jobs:"]
+    if len(jobs) != 1:
+        raise SystemExit("M3.11 workflow must define one canonical jobs mapping")
+    jobs_start = jobs[0]
+    jobs_end = len(lines)
+    for index in range(jobs_start + 1, len(lines)):
+        line = active_lines[index]
+        if line.strip() and len(line) - len(line.lstrip(" ")) == 0:
+            jobs_end = index
+            break
+
+    test_jobs = [
+        index
+        for index in range(jobs_start + 1, jobs_end)
+        if active_lines[index] == "  test:"
+    ]
+    if len(test_jobs) != 1:
+        raise SystemExit("M3.11 test workflow job must be canonical and unique")
+    test_start = test_jobs[0]
+    test_end = jobs_end
+    for index in range(test_start + 1, jobs_end):
+        line = active_lines[index]
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent <= 2:
+            test_end = index
+            break
+
+    job_keys: dict[str, list[tuple[str, int]]] = {}
+    for index in range(test_start + 1, test_end):
+        line = active_lines[index]
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent != 4:
+            continue
+        match = re.fullmatch(r"    ([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*", line)
+        if match is None:
+            raise SystemExit(
+                "M3.11 test workflow job must remain unconditional and canonical"
+            )
+        job_keys.setdefault(match.group(1), []).append(
+            (yaml_scalar(match.group(2)), index)
+        )
+    if (
+        set(job_keys) != {"runs-on", "timeout-minutes", "steps"}
+        or [value for value, _ in job_keys["runs-on"]] != ["macos-15"]
+        or [value for value, _ in job_keys["timeout-minutes"]] != ["180"]
+        or [value for value, _ in job_keys["steps"]] != [""]
+    ):
+        raise SystemExit(
+            "M3.11 test workflow job must remain unconditional and canonical"
+        )
+
+    steps_start = job_keys["steps"][0][1]
+    steps_end = test_end
+    for index in range(steps_start + 1, test_end):
+        line = active_lines[index]
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent <= 4:
+            steps_end = index
+            break
+
+    steps = []
+    index = steps_start + 1
+    while index < steps_end:
+        active_line = active_lines[index]
+        if not active_line.strip():
+            index += 1
+            continue
+        step_match = re.fullmatch(
+            r"      -\s+(name|uses)\s*:\s*(.*?)\s*",
+            active_line,
+        )
+        if step_match is None:
+            indent = len(active_line) - len(active_line.lstrip(" "))
+            if indent == 6:
+                raise SystemExit(
+                    "M3.11 test workflow steps must use canonical direct keys"
+                )
+            index += 1
+            continue
+        keys: dict[str, list[str]] = {}
+        keys[step_match.group(1)] = [yaml_scalar(step_match.group(2))]
+        child = index + 1
+        while child < steps_end:
+            child_line = active_lines[child]
+            if not child_line.strip():
+                child += 1
+                continue
+            child_indent = len(child_line) - len(child_line.lstrip(" "))
+            if child_indent <= 6:
+                break
+            if child_indent == 8:
+                key_match = re.fullmatch(
+                    r"        ([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*",
+                    child_line,
+                )
+                if key_match is None:
+                    raise SystemExit(
+                        "M3.11 test workflow steps must use canonical direct keys"
+                    )
+                keys.setdefault(key_match.group(1), []).append(
+                    yaml_scalar(key_match.group(2))
+                )
+            child += 1
+        steps.append(
+            {
+                "name": (
+                    yaml_scalar(step_match.group(2))
+                    if step_match.group(1) == "name"
+                    else None
+                ),
+                "line": index,
+                "keys": keys,
+            }
+        )
+        index = child
+    return steps
+
+
+def unique_active_workflow_step(
+    steps: list[dict[str, object]],
+    name: str,
+    failure: str,
+) -> dict[str, object]:
+    matches = [step for step in steps if step["name"] == name]
+    if len(matches) != 1:
+        raise SystemExit(failure)
+    return matches[0]
+
+
 m311_workflow_text = (root / ".github/workflows/ios.yml").read_text(encoding="utf-8")
-if m311_workflow_text.index("Qualifying M3.11 behavior RED") > m311_workflow_text.index(
-    "M0 acceptance gates"
-):
+m311_workflow_steps = canonical_test_job_steps(m311_workflow_text)
+m311_qualifying_step = unique_active_workflow_step(
+    m311_workflow_steps,
+    "Qualifying M3.11 behavior RED",
+    "M3.11 qualifying RED must define exactly one active workflow step",
+)
+m0_acceptance_step = unique_active_workflow_step(
+    m311_workflow_steps,
+    "M0 acceptance gates",
+    "M0 acceptance gates must define exactly one active workflow step",
+)
+if m311_qualifying_step["line"] > m0_acceptance_step["line"]:
     raise SystemExit("M3.11 qualifying RED must run before the M0 acceptance gates")
+
+cleanup_regression_step = unique_active_workflow_step(
+    m311_workflow_steps,
+    "Targeted cleanup suspension regression",
+    "Targeted cleanup suspension regression must define exactly one active workflow step",
+)
+cleanup_regression_keys = cleanup_regression_step["keys"]
+cleanup_regression_command = (
+    "scripts/test-ios.sh --only-testing "
+    "PersistenceKitTests/ProgressPhotoRepositoryTests/"
+    "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary"
+)
+if "if" in cleanup_regression_keys or "continue-on-error" in cleanup_regression_keys:
+    raise SystemExit(
+        "Targeted cleanup suspension regression must not use if or continue-on-error"
+    )
+if cleanup_regression_keys != {
+    "name": ["Targeted cleanup suspension regression"],
+    "timeout-minutes": ["20"],
+    "run": [cleanup_regression_command],
+}:
+    raise SystemExit(
+        "Targeted cleanup suspension regression must bind the exact active run command"
+    )
+m311_planning_step = unique_active_workflow_step(
+    m311_workflow_steps,
+    "Targeted M3.11 notification planning and routing tests",
+    "M3.11 notification planning must define exactly one active workflow step",
+)
+if cleanup_regression_step["line"] > m311_planning_step["line"]:
+    raise SystemExit("cleanup suspension regression must run before broader targeted suites")
 
 m311_source_root = root / "Packages/HealthTrackingModules/Sources/NotificationsKit"
 m311_marker_path = m311_source_root / "NotificationsKitModule.swift"
@@ -7815,8 +8519,6 @@ fixture_files = {
             "testInboundRestoreProtectsPreviouslyFailedOrphanFromCleanupRetry",
             "testInitialOrphanSweepRereadsInboundOwnershipAtDeleteBoundary",
             "testInboundJournalReadFailureStopsPendingCleanupRetryBeforeDelete",
-            "testCleanupRetryRechecksInboundOwnershipAfterEarlierAssetDeleteSuspends",
-            "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
             "testCancelledInboundRecordRemovesExactWaiterAndAllowsLaterCleanupLease",
             "waitForInboundRecordWaiter",
             "inboundRecordWaiterIDs",
@@ -8813,17 +9515,65 @@ fixture_files["project.yml"] += "\n" + "\n".join(
         "HealthTrackingModules/NotificationsKitTests",
     ]
 )
-fixture_files[".github/workflows/ios.yml"] += "\n" + "\n".join(
+fixture_files[".github/workflows/ios.yml"] = (
+    repo / ".github/workflows/ios.yml"
+).read_text(encoding="utf-8")
+
+cleanup_repository_fixture_path = (
+    "Packages/HealthTrackingModules/Tests/PersistenceKitTests/"
+    "ProgressPhotoRepositoryTests.swift"
+)
+fixture_files[cleanup_repository_fixture_path] += "\n" + "\n".join(
     [
-        "Qualifying M3.11 behavior RED",
-        "scripts/test-ios.sh --m311-red-only",
-        "M0 acceptance gates",
-        "Targeted M3.11 notification planning and routing tests",
-        "scripts/test-ios.sh --only-testing NotificationsKitTests",
-        "Targeted M3.11 app notification lifecycle tests",
-        "scripts/test-ios.sh --only-testing HealthTrackingAppTests/HealthCheckNotificationCompositionTests",
-        "Targeted M3.11 explicit notification permission UI test",
-        "scripts/test-ios.sh --only-testing HealthTrackingAppUITests/HealthCheckNotificationFlowUITests",
+        "final class ProgressPhotoRepositoryTests: XCTestCase {",
+        "    func testCleanupRetryRechecksInboundOwnershipAfterEarlierAssetDeleteSuspends() async throws {",
+        '        let assetA = "asset-a"',
+        "        let retryTask = Task { try await repository.retryPendingAssetCleanup() }",
+        "        let didSuspendA = await assetStore.waitUntilDeleteIsSuspended(assetA)",
+        "        guard didSuspendA else {",
+        "            await assetStore.resumeSuspendedDelete(of: assetA)",
+        "            retryTask.cancel()",
+        "            _ = try? await retryTask.value",
+        '            XCTFail("cleanup did not suspend")',
+        "            return",
+        "        }",
+        "    }",
+        "",
+        "    func testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary() async throws {",
+        '        let assetID = "asset-id"',
+        "        let retryTask = Task { try await repository.retryPendingAssetCleanup() }",
+        "        let didSuspendDelete = await assetStore.waitUntilDeleteIsSuspended(assetID)",
+        "        guard didSuspendDelete else {",
+        "            await assetStore.resumeSuspendedDelete(of: assetID)",
+        "            retryTask.cancel()",
+        "            _ = try? await retryTask.value",
+        '            XCTFail("cleanup did not suspend")',
+        "            return",
+        "        }",
+        "    }",
+        "}",
+        "",
+        "private actor CleanupLeaseInterleavingAssetStore: PhotoAssetStoring {",
+        "    private var suspendedAssetID: String?",
+        "    private var suspendedDeleteAssetIDs = Set<String>()",
+        "    private var deleteContinuations: [String: CheckedContinuation<Void, Never>] = [:]",
+        "",
+        "    func waitUntilDeleteIsSuspended(_ assetID: String) async -> Bool {",
+        "        for _ in 0..<5_000 {",
+        "            if suspendedDeleteAssetIDs.contains(assetID) { return true }",
+        "            try? await Task.sleep(nanoseconds: 1_000_000)",
+        "        }",
+        "        return suspendedDeleteAssetIDs.contains(assetID)",
+        "    }",
+        "",
+        "    func resumeSuspendedDelete(of assetID: String) {",
+        "        if suspendedAssetID == assetID {",
+        "            suspendedAssetID = nil",
+        "        }",
+        "        let continuation = deleteContinuations.removeValue(forKey: assetID)",
+        "        continuation?.resume()",
+        "    }",
+        "}",
     ]
 )
 fixture_files["scripts/test-ios.sh"] += "\n" + "\n".join(
@@ -9257,6 +10007,42 @@ def mutate_scoped_token_with_in_scope_decoys(
         + f"// {token}\n"
         + f'let m311ScopedStringDecoy = "{string_decoy}"'
         + original[token_end:],
+        encoding="utf-8",
+    )
+    run(root, expected)
+    path.write_text(original, encoding="utf-8")
+
+
+def mutate_function_fragment(
+    root: Path,
+    path: Path,
+    original: str,
+    function_name: str,
+    fragment: str,
+    replacement: str,
+    expected: str,
+) -> None:
+    span = braced_declaration(
+        original,
+        rf"\bfunc\s+{re.escape(function_name)}\b[^{{]*{{",
+    )
+    if span is None:
+        raise AssertionError(
+            f"M3 cleanup self fixture is missing function {function_name!r}"
+        )
+    scope_start, scope_end = span
+    scope = original[scope_start:scope_end]
+    relative = scope.find(fragment)
+    if relative < 0:
+        raise AssertionError(
+            f"M3 cleanup self fixture is missing scoped fragment {fragment!r}"
+        )
+    fragment_start = scope_start + relative
+    fragment_end = fragment_start + len(fragment)
+    path.write_text(
+        original[:fragment_start]
+        + replacement
+        + original[fragment_end:],
         encoding="utf-8",
     )
     run(root, expected)
@@ -9964,6 +10750,251 @@ with tempfile.TemporaryDirectory() as temporary:
         encoding="utf-8",
     )
     run(root, "scripts/test-ios.sh --only-testing NotificationsKitTests")
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    cleanup_regression_command = (
+        "scripts/test-ios.sh --only-testing "
+        "PersistenceKitTests/ProgressPhotoRepositoryTests/"
+        "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary"
+    )
+    m311_workflow.write_text(
+        original_m311_workflow.replace(
+            cleanup_regression_command,
+            "scripts/test-ios.sh --only-testing RemovedCleanupSuspensionRegression",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, cleanup_regression_command)
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    cleanup_run_line = f"        run: {cleanup_regression_command}"
+    m311_workflow.write_text(
+        original_m311_workflow.replace(
+            cleanup_run_line,
+            f"        run: echo bypassed # {cleanup_regression_command}",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(
+        root,
+        "Targeted cleanup suspension regression must bind the exact active run command",
+    )
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    m311_workflow.write_text(
+        original_m311_workflow.replace(
+            cleanup_run_line,
+            f"{cleanup_run_line} || true",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(
+        root,
+        "Targeted cleanup suspension regression must bind the exact active run command",
+    )
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    cleanup_step_name = "      - name: Targeted cleanup suspension regression"
+    cleanup_step_block = "\n".join(
+        [
+            cleanup_step_name,
+            "        timeout-minutes: 20",
+            cleanup_run_line,
+        ]
+    )
+    m311_workflow.write_text(
+        original_m311_workflow.replace(
+            cleanup_step_name,
+            cleanup_step_name + "\n        if: false",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(
+        root,
+        "Targeted cleanup suspension regression must not use if or continue-on-error",
+    )
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    m311_workflow.write_text(
+        original_m311_workflow.replace(
+            cleanup_step_name,
+            cleanup_step_name + "\n        continue-on-error: true",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(
+        root,
+        "Targeted cleanup suspension regression must not use if or continue-on-error",
+    )
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    for noncanonical_condition in (
+        '        "if": false',
+        "        'continue-on-error': true",
+        "        <<: *disabled-cleanup-step",
+        "        !disabled if: false",
+    ):
+        m311_workflow.write_text(
+            original_m311_workflow.replace(
+                cleanup_step_name,
+                cleanup_step_name + "\n" + noncanonical_condition,
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(root, "test workflow steps must use canonical direct keys")
+        m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    m311_workflow.write_text(
+        original_m311_workflow.replace(
+            "  test:\n",
+            "  test:\n    if: false\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "test workflow job must remain unconditional and canonical")
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    for missing_trigger in (
+        "  push:\n",
+        "  pull_request:\n",
+    ):
+        m311_workflow.write_text(
+            original_m311_workflow.replace(missing_trigger, "", 1),
+            encoding="utf-8",
+        )
+        run(
+            root,
+            "workflow must run automatically for push and pull_request",
+        )
+        m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    m311_workflow.write_text(
+        original_m311_workflow.replace("  push:\n", "", 1).replace(
+            "  pull_request:\n",
+            "",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(
+        root,
+        "workflow must run automatically for push and pull_request",
+    )
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    for noncanonical_trigger in (
+        "  'push':",
+        "  push:\n    branches:\n      - never",
+    ):
+        m311_workflow.write_text(
+            original_m311_workflow.replace("  push:", noncanonical_trigger, 1),
+            encoding="utf-8",
+        )
+        run(
+            root,
+            "workflow must run automatically for push and pull_request",
+        )
+        m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    for execution_default in (
+        "defaults:\n  run:\n    shell: bash -c 'bash {0}; exit 0'",
+        '"defaults":\n  run:\n    shell: bash -c \'bash {0}; exit 0\'',
+        "<<: *execution-defaults",
+    ):
+        m311_workflow.write_text(
+            original_m311_workflow + "\n" + execution_default + "\n",
+            encoding="utf-8",
+        )
+        run(
+            root,
+            "workflow root must remain canonical without execution defaults",
+        )
+        m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    m311_workflow.write_text(
+        original_m311_workflow.replace(
+            cleanup_step_block,
+            cleanup_step_block + "\n" + cleanup_step_block,
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(
+        root,
+        "Targeted cleanup suspension regression must define exactly one active workflow step",
+    )
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    m311_workflow.write_text(
+        original_m311_workflow.replace(
+            cleanup_run_line,
+            "        run: echo bypassed\n"
+            f"        # {cleanup_regression_command}",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(
+        root,
+        "Targeted cleanup suspension regression must bind the exact active run command",
+    )
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    planning_step_block = "\n".join(
+        [
+            "      - name: Targeted M3.11 notification planning and routing tests",
+            "        timeout-minutes: 20",
+            "        run: scripts/test-ios.sh --only-testing NotificationsKitTests",
+        ]
+    )
+    cleanup_decoy_job = "\n".join(
+        [
+            "  cleanup-decoy:",
+            "    if: false",
+            "    runs-on: macos-15",
+            "    steps:",
+            cleanup_step_name,
+            "        timeout-minutes: 20",
+            cleanup_run_line,
+        ]
+    )
+    m311_workflow.write_text(
+        original_m311_workflow.replace(cleanup_step_block + "\n", "", 1)
+        + "\n"
+        + cleanup_decoy_job
+        + "\n",
+        encoding="utf-8",
+    )
+    run(
+        root,
+        "Targeted cleanup suspension regression must define exactly one active workflow step",
+    )
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    m311_workflow.write_text(
+        original_m311_workflow.replace(
+            cleanup_step_block,
+            "m311-temporary-cleanup-step-block",
+            1,
+        ).replace(
+            planning_step_block,
+            cleanup_step_block,
+            1,
+        ).replace(
+            "m311-temporary-cleanup-step-block",
+            planning_step_block,
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "cleanup suspension regression must run before broader targeted suites")
     m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
 
     m311_workflow.write_text(
@@ -11915,6 +12946,548 @@ with tempfile.TemporaryDirectory() as temporary:
     run(root, "testInboundCloudAssetSurvivesCoordinatorRestoreCrashAndRepositoryRelaunch")
     photo_repository_tests.write_text(original_photo_repository_tests, encoding="utf-8")
 
+    for function_name, observation, asset in (
+        (
+            "testCleanupRetryRechecksInboundOwnershipAfterEarlierAssetDeleteSuspends",
+            "didSuspendA",
+            "assetA",
+        ),
+        (
+            "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
+            "didSuspendDelete",
+            "assetID",
+        ),
+    ):
+        observation_contract = (
+            f"let {observation} = "
+            f"await assetStore.waitUntilDeleteIsSuspended({asset})"
+        )
+        binding_failure = (
+            "M3 cleanup suspension observation must bind the exact retry and asset in "
+            + function_name
+        )
+        flow_failure = (
+            "M3 cleanup suspension XCTest must not bypass its executable path in "
+            + function_name
+        )
+        retry_contract = (
+            "let retryTask = Task { "
+            "try await repository.retryPendingAssetCleanup() }"
+        )
+        for early_exit in (
+            "if true { return }",
+            "_ = 0; if true { return }",
+            "bypass: if true { return }",
+            "kaçış: if true { return }",
+            'throw XCTSkip("bypassed")',
+            'try XCTSkipIf(true, "bypassed")',
+        ):
+            early_exit_failure = (
+                "M3 cleanup suspension XCTest file must not use skip or "
+                "expected-failure APIs"
+                if "XCTSkip" in early_exit
+                else flow_failure
+            )
+            mutate_function_fragment(
+                root,
+                photo_repository_tests,
+                original_photo_repository_tests,
+                function_name,
+                retry_contract,
+                early_exit + "\n        " + retry_contract,
+                early_exit_failure,
+            )
+        mutate_function_fragment(
+            root,
+            photo_repository_tests,
+            original_photo_repository_tests,
+            function_name,
+            observation_contract,
+            f"let {observation} = true",
+            binding_failure,
+        )
+        mutate_function_fragment(
+            root,
+            photo_repository_tests,
+            original_photo_repository_tests,
+            function_name,
+            observation_contract,
+            f"let {observation} = await assetStore.waitUntilDeleteIsSuspended(wrongAsset)",
+            binding_failure,
+        )
+        mutate_function_fragment(
+            root,
+            photo_repository_tests,
+            original_photo_repository_tests,
+            function_name,
+            observation_contract,
+            f"let {observation} = true\n"
+            f"        let uninvoked{observation}Observation = {{\n"
+            f"            let {observation} = "
+            f"await assetStore.waitUntilDeleteIsSuspended({asset})\n"
+            f"            _ = {observation}\n"
+            "        }\n"
+            f"        _ = uninvoked{observation}Observation",
+            binding_failure,
+        )
+        mutate_function_fragment(
+            root,
+            photo_repository_tests,
+            original_photo_repository_tests,
+            function_name,
+            observation_contract,
+            observation_contract + f"\n        _ = {observation}",
+            binding_failure,
+        )
+        mutate_function_fragment(
+            root,
+            photo_repository_tests,
+            original_photo_repository_tests,
+            function_name,
+            "try await repository.retryPendingAssetCleanup()",
+            "if false {\n"
+            "                try await repository.retryPendingAssetCleanup()\n"
+            "            }",
+            binding_failure,
+        )
+
+    cleanup_guard_a = "\n".join(
+        [
+            "guard didSuspendA else {",
+            "            await assetStore.resumeSuspendedDelete(of: assetA)",
+            "            retryTask.cancel()",
+            "            _ = try? await retryTask.value",
+            '            XCTFail("cleanup did not suspend")',
+            "            return",
+            "        }",
+        ]
+    )
+    cleanup_guard_a_decoy = "\n".join(
+        [
+            "XCTAssertTrue(didSuspendA)",
+            "        let uninvokedCleanupGuardADecoy = {",
+            "            guard didSuspendA else {",
+            "                await assetStore.resumeSuspendedDelete(of: assetA)",
+            "                retryTask.cancel()",
+            "                _ = try? await retryTask.value",
+            '                XCTFail("decoy")',
+            "                return",
+            "            }",
+            "        }",
+            "        _ = uninvokedCleanupGuardADecoy",
+        ]
+    )
+    mutate_function_fragment(
+        root,
+        photo_repository_tests,
+        original_photo_repository_tests,
+        "testCleanupRetryRechecksInboundOwnershipAfterEarlierAssetDeleteSuspends",
+        cleanup_guard_a,
+        cleanup_guard_a_decoy,
+        "M3 cleanup suspension guard must fail closed in "
+        "testCleanupRetryRechecksInboundOwnershipAfterEarlierAssetDeleteSuspends",
+    )
+
+    cleanup_guard_delete = "\n".join(
+        [
+            "guard didSuspendDelete else {",
+            "            await assetStore.resumeSuspendedDelete(of: assetID)",
+            "            retryTask.cancel()",
+            "            _ = try? await retryTask.value",
+            '            XCTFail("cleanup did not suspend")',
+            "            return",
+            "        }",
+        ]
+    )
+
+    for function_name, observation, asset in (
+        (
+            "testCleanupRetryRechecksInboundOwnershipAfterEarlierAssetDeleteSuspends",
+            "didSuspendA",
+            "assetA",
+        ),
+        (
+            "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
+            "didSuspendDelete",
+            "assetID",
+        ),
+    ):
+        exact_signature = f"    func {function_name}() async throws {{"
+        overload = "\n".join(
+            [
+                f"    private func {function_name}(verifierDecoy: Bool) async throws {{",
+                "        let retryTask = Task { try await repository.retryPendingAssetCleanup() }",
+                f"        let {observation} = await assetStore.waitUntilDeleteIsSuspended({asset})",
+                f"        guard {observation} else {{",
+                f"            await assetStore.resumeSuspendedDelete(of: {asset})",
+                "            retryTask.cancel()",
+                "            _ = try? await retryTask.value",
+                '            XCTFail("decoy")',
+                "            return",
+                "        }",
+                "    }",
+                "",
+                exact_signature,
+            ]
+        )
+        photo_repository_tests.write_text(
+            original_photo_repository_tests.replace(
+                exact_signature,
+                overload,
+                1,
+            ),
+            encoding="utf-8",
+        )
+        run(
+            root,
+            "M3 cleanup suspension XCTest must bind one exact discovered method in "
+            + function_name,
+        )
+        photo_repository_tests.write_text(
+            original_photo_repository_tests,
+            encoding="utf-8",
+        )
+
+    cleanup_guard_delete_decoy = "\n".join(
+        [
+            "XCTAssertTrue(didSuspendDelete)",
+            "        let uninvokedCleanupGuardDeleteDecoy = {",
+            "            guard didSuspendDelete else {",
+            "                await assetStore.resumeSuspendedDelete(of: assetID)",
+            "                retryTask.cancel()",
+            "                _ = try? await retryTask.value",
+            '                XCTFail("decoy")',
+            "                return",
+            "            }",
+            "        }",
+            "        _ = uninvokedCleanupGuardDeleteDecoy",
+        ]
+    )
+    mutate_function_fragment(
+        root,
+        photo_repository_tests,
+        original_photo_repository_tests,
+        "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
+        cleanup_guard_delete,
+        cleanup_guard_delete_decoy,
+        "M3 cleanup suspension guard must fail closed in "
+        "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
+    )
+
+    for function_name, guard_contract, observation, asset in (
+        (
+            "testCleanupRetryRechecksInboundOwnershipAfterEarlierAssetDeleteSuspends",
+            cleanup_guard_a,
+            "didSuspendA",
+            "assetA",
+        ),
+        (
+            "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
+            cleanup_guard_delete,
+            "didSuspendDelete",
+            "assetID",
+        ),
+    ):
+        hidden_cleanup = "\n".join(
+            [
+                f"guard {observation} else {{",
+                "            if false {",
+                f"                await assetStore.resumeSuspendedDelete(of: {asset})",
+                "                retryTask.cancel()",
+                "                _ = try? await retryTask.value",
+                '                XCTFail("hidden cleanup")',
+                "                return",
+                "            }",
+                "            return",
+                "        }",
+            ]
+        )
+        mutate_function_fragment(
+            root,
+            photo_repository_tests,
+            original_photo_repository_tests,
+            function_name,
+            guard_contract,
+            hidden_cleanup,
+            "M3 cleanup suspension guard must fail closed in " + function_name,
+        )
+        mutate_function_fragment(
+            root,
+            photo_repository_tests,
+            original_photo_repository_tests,
+            function_name,
+            guard_contract,
+            guard_contract + "\n        return",
+            "M3 cleanup suspension XCTest must not bypass its executable path in "
+            + function_name,
+        )
+
+    runtime_shadow_failure = (
+        "M3 cleanup suspension contracts must not shadow Swift concurrency or "
+        "XCTest runtime symbols"
+    )
+    for function_name in (
+        "testCleanupRetryRechecksInboundOwnershipAfterEarlierAssetDeleteSuspends",
+        "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
+    ):
+        retry_contract = (
+            "let retryTask = Task { "
+            "try await repository.retryPendingAssetCleanup() }"
+        )
+        for shadow_declaration in (
+            "let XCTFail: (String) -> Void = { _ in }",
+            "let (XCTFail, ignored): ((String) -> Void, Bool) = "
+            "({ _ in }, false)\n        _ = ignored",
+            "let (failure: XCTFail, value: ignored) = "
+            "(failure: { (_: String) in }, value: false)\n"
+            "        _ = ignored",
+            "let (outer: (failure: `XCTFail`, value: ignored), flag: other) = "
+            "(outer: (failure: { (_: String) in }, value: false), flag: true)\n"
+            "        _ = ignored\n"
+            "        _ = other",
+        ):
+            mutate_function_fragment(
+                root,
+                photo_repository_tests,
+                original_photo_repository_tests,
+                function_name,
+                retry_contract,
+                shadow_declaration + "\n        " + retry_contract,
+                runtime_shadow_failure,
+            )
+
+    cleanup_actor_marker = (
+        "private actor CleanupLeaseInterleavingAssetStore: PhotoAssetStoring {"
+    )
+    photo_repository_tests.write_text(
+        original_photo_repository_tests.replace(
+            cleanup_actor_marker,
+            cleanup_actor_marker
+            + "\n    enum Task {"
+            + "\n        static func sleep(nanoseconds: UInt64) async throws {"
+            + "\n            await withCheckedContinuation { _ in }"
+            + "\n        }"
+            + "\n    }",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, runtime_shadow_failure)
+    photo_repository_tests.write_text(
+        original_photo_repository_tests,
+        encoding="utf-8",
+    )
+
+    cleanup_suite_marker = "final class ProgressPhotoRepositoryTests: XCTestCase {"
+    helper_skip_mutation = original_photo_repository_tests.replace(
+        cleanup_suite_marker,
+        cleanup_suite_marker
+        + "\n    private func skipCleanupRegression() throws {"
+        + '\n        throw XCTSkip("bypassed")'
+        + "\n    }",
+        1,
+    )
+    helper_skip_mutation = helper_skip_mutation.replace(
+        "let retryTask = Task { try await repository.retryPendingAssetCleanup() }",
+        "try skipCleanupRegression()\n"
+        "        let retryTask = Task { "
+        "try await repository.retryPendingAssetCleanup() }",
+        1,
+    )
+    photo_repository_tests.write_text(
+        helper_skip_mutation,
+        encoding="utf-8",
+    )
+    run(
+        root,
+        "M3 cleanup suspension XCTest file must not use skip or "
+        "expected-failure APIs",
+    )
+    photo_repository_tests.write_text(
+        original_photo_repository_tests,
+        encoding="utf-8",
+    )
+
+    mutate_function_fragment(
+        root,
+        photo_repository_tests,
+        original_photo_repository_tests,
+        "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
+        cleanup_guard_delete,
+        "#if false\n"
+        "        "
+        + cleanup_guard_delete
+        + "\n        #endif\n"
+        "        XCTAssertTrue(didSuspendDelete)",
+        "M3 cleanup suspension contracts must not use conditional compilation",
+    )
+
+    photo_repository_tests.write_text(
+        original_photo_repository_tests
+        + '\n// #if false\nprivate let conditionalStringDecoy = "#if false"\n',
+        encoding="utf-8",
+    )
+    run(root)
+    photo_repository_tests.write_text(
+        original_photo_repository_tests,
+        encoding="utf-8",
+    )
+
+    mutate_function_fragment(
+        root,
+        photo_repository_tests,
+        original_photo_repository_tests,
+        "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
+        "await assetStore.resumeSuspendedDelete(of: assetID)\n"
+        "            retryTask.cancel()",
+        "retryTask.cancel()\n"
+        "            await assetStore.resumeSuspendedDelete(of: assetID)",
+        "M3 cleanup suspension guard must fail closed in "
+        "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
+    )
+
+    wait_signature = (
+        "    func waitUntilDeleteIsSuspended(_ assetID: String) async -> Bool {"
+    )
+    wait_overload = "\n".join(
+        [
+            "    func waitUntilDeleteIsSuspended(_ assetID: String, verifierDecoy: Bool) async -> Bool {",
+            "        for _ in 0..<5_000 {",
+            "            if suspendedDeleteAssetIDs.contains(assetID) { return true }",
+            "            try? await Task.sleep(nanoseconds: 1_000_000)",
+            "        }",
+            "        return suspendedDeleteAssetIDs.contains(assetID)",
+            "    }",
+            "",
+            wait_signature,
+        ]
+    )
+    photo_repository_tests.write_text(
+        original_photo_repository_tests.replace(
+            wait_signature,
+            wait_overload,
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3 cleanup suspension wait must use a bounded wall-clock deadline")
+    photo_repository_tests.write_text(
+        original_photo_repository_tests,
+        encoding="utf-8",
+    )
+
+    resume_signature = "    func resumeSuspendedDelete(of assetID: String) {"
+    resume_overload = "\n".join(
+        [
+            "    func resumeSuspendedDelete(of assetID: String, verifierDecoy: Bool) {",
+            "        if suspendedAssetID == assetID {",
+            "            suspendedAssetID = nil",
+            "        }",
+            "        let continuation = deleteContinuations.removeValue(forKey: assetID)",
+            "        continuation?.resume()",
+            "    }",
+            "",
+            resume_signature,
+        ]
+    )
+    photo_repository_tests.write_text(
+        original_photo_repository_tests.replace(
+            resume_signature,
+            resume_overload,
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3 cleanup suspension resume must disarm and release the exact delete")
+    photo_repository_tests.write_text(
+        original_photo_repository_tests,
+        encoding="utf-8",
+    )
+
+    cleanup_sleep = "try? await Task.sleep(nanoseconds: 1_000_000)"
+    mutate_function_fragment(
+        root,
+        photo_repository_tests,
+        original_photo_repository_tests,
+        "waitUntilDeleteIsSuspended",
+        cleanup_sleep,
+        "if false {\n"
+        "                try? await Task.sleep(nanoseconds: 1_000_000)\n"
+        "            }\n"
+        "            await Task.yield()",
+        "M3 cleanup suspension wait must use a bounded wall-clock deadline",
+    )
+
+    cleanup_wait_chain = "\n".join(
+        [
+            "for _ in 0..<5_000 {",
+            "            if suspendedDeleteAssetIDs.contains(assetID) { return true }",
+            "            try? await Task.sleep(nanoseconds: 1_000_000)",
+            "        }",
+            "        return suspendedDeleteAssetIDs.contains(assetID)",
+        ]
+    )
+    mutate_function_fragment(
+        root,
+        photo_repository_tests,
+        original_photo_repository_tests,
+        "waitUntilDeleteIsSuspended",
+        cleanup_wait_chain,
+        "if false {\n"
+        "            for _ in 0..<5_000 {\n"
+        "                if suspendedDeleteAssetIDs.contains(assetID) { return true }\n"
+        "                try? await Task.sleep(nanoseconds: 1_000_000)\n"
+        "            }\n"
+        "            return suspendedDeleteAssetIDs.contains(assetID)\n"
+        "        }\n"
+        "        return false",
+        "M3 cleanup suspension wait must use a bounded wall-clock deadline",
+    )
+
+    cleanup_disarm = "\n".join(
+        [
+            "if suspendedAssetID == assetID {",
+            "            suspendedAssetID = nil",
+            "        }",
+        ]
+    )
+    mutate_function_fragment(
+        root,
+        photo_repository_tests,
+        original_photo_repository_tests,
+        "resumeSuspendedDelete",
+        cleanup_disarm,
+        "if false {\n"
+        "            if suspendedAssetID == assetID {\n"
+        "                suspendedAssetID = nil\n"
+        "            }\n"
+        "        }",
+        "M3 cleanup suspension resume must disarm and release the exact delete",
+    )
+
+    cleanup_resume_chain = "\n".join(
+        [
+            cleanup_disarm,
+            "        let continuation = deleteContinuations.removeValue(forKey: assetID)",
+            "        continuation?.resume()",
+        ]
+    )
+    mutate_function_fragment(
+        root,
+        photo_repository_tests,
+        original_photo_repository_tests,
+        "resumeSuspendedDelete",
+        cleanup_resume_chain,
+        "if false {\n"
+        "            if suspendedAssetID == assetID {\n"
+        "                suspendedAssetID = nil\n"
+        "            }\n"
+        "            let continuation = deleteContinuations.removeValue(forKey: assetID)\n"
+        "            continuation?.resume()\n"
+        "        }",
+        "M3 cleanup suspension resume must disarm and release the exact delete",
+    )
+
     for regression in (
         "testSuccessfulInboundSyncRetainsIntentUntilMetadataReferencesAsset",
         "testRepositoryConsumesOnlyInboundIDsMatchedByMetadataAcrossRelaunches",
@@ -11943,8 +13516,6 @@ with tempfile.TemporaryDirectory() as temporary:
         "testInboundRestoreProtectsPreviouslyFailedOrphanFromCleanupRetry",
         "testInitialOrphanSweepRereadsInboundOwnershipAtDeleteBoundary",
         "testInboundJournalReadFailureStopsPendingCleanupRetryBeforeDelete",
-        "testCleanupRetryRechecksInboundOwnershipAfterEarlierAssetDeleteSuspends",
-        "testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary",
         "testCancelledInboundRecordRemovesExactWaiterAndAllowsLaterCleanupLease",
         "waitForInboundRecordWaiter",
         "inboundRecordWaiterIDs",

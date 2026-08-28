@@ -80,6 +80,10 @@ jobs:
         timeout-minutes: 15
         run: scripts/test-ios.sh --verify-bootstrap-idempotence
 
+      - name: Targeted cleanup suspension regression
+        timeout-minutes: 20
+        run: scripts/test-ios.sh --only-testing PersistenceKitTests/ProgressPhotoRepositoryTests/testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary
+
       - name: Targeted M3.11 notification planning and routing tests
         timeout-minutes: 20
         run: scripts/test-ios.sh --only-testing NotificationsKitTests

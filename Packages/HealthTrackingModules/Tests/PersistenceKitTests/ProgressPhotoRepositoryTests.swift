@@ -514,7 +514,13 @@ final class ProgressPhotoRepositoryTests: XCTestCase {
 
         let retryTask = Task { try await repository.retryPendingAssetCleanup() }
         let didSuspendA = await assetStore.waitUntilDeleteIsSuspended(assetA)
-        XCTAssertTrue(didSuspendA)
+        guard didSuspendA else {
+            await assetStore.resumeSuspendedDelete(of: assetA)
+            retryTask.cancel()
+            _ = try? await retryTask.value
+            XCTFail("The cleanup retry did not reach the requested delete suspension.")
+            return
+        }
         try await inboundJournal.recordInboundAssetID(assetB)
         await assetStore.restoreAsset(id: assetB, bytes: bytesB)
         await assetStore.resumeSuspendedDelete(of: assetA)
@@ -563,7 +569,13 @@ final class ProgressPhotoRepositoryTests: XCTestCase {
         await assetStore.suspendNextDelete(of: assetID)
         let retryTask = Task { try await repository.retryPendingAssetCleanup() }
         let didSuspendDelete = await assetStore.waitUntilDeleteIsSuspended(assetID)
-        XCTAssertTrue(didSuspendDelete)
+        guard didSuspendDelete else {
+            await assetStore.resumeSuspendedDelete(of: assetID)
+            retryTask.cancel()
+            _ = try? await retryTask.value
+            XCTFail("The cleanup retry did not reach the requested delete suspension.")
+            return
+        }
 
         let completion = CloudDeletionCompletionProbe()
         let restoreTask = Task {
@@ -3428,14 +3440,17 @@ private actor CleanupLeaseInterleavingAssetStore: PhotoAssetStoring {
     }
 
     func waitUntilDeleteIsSuspended(_ assetID: String) async -> Bool {
-        for _ in 0..<10_000 {
+        for _ in 0..<5_000 {
             if suspendedDeleteAssetIDs.contains(assetID) { return true }
-            await Task.yield()
+            try? await Task.sleep(nanoseconds: 1_000_000)
         }
-        return false
+        return suspendedDeleteAssetIDs.contains(assetID)
     }
 
     func resumeSuspendedDelete(of assetID: String) {
+        if suspendedAssetID == assetID {
+            suspendedAssetID = nil
+        }
         let continuation = deleteContinuations.removeValue(forKey: assetID)
         continuation?.resume()
     }
