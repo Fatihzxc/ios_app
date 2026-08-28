@@ -5954,7 +5954,7 @@ def canonical_test_job_steps(source: str) -> list[dict[str, object]]:
     if (
         set(job_keys) != {"runs-on", "timeout-minutes", "steps"}
         or [value for value, _ in job_keys["runs-on"]] != ["macos-15"]
-        or [value for value, _ in job_keys["timeout-minutes"]] != ["180"]
+        or [value for value, _ in job_keys["timeout-minutes"]] != ["300"]
         or [value for value, _ in job_keys["steps"]] != [""]
     ):
         raise SystemExit(
@@ -10741,6 +10741,17 @@ with tempfile.TemporaryDirectory() as temporary:
 
     m311_workflow = root / ".github/workflows/ios.yml"
     original_m311_workflow = m311_workflow.read_text(encoding="utf-8")
+    m311_workflow.write_text(
+        original_m311_workflow.replace(
+            "    timeout-minutes: 300\n",
+            "    timeout-minutes: 180\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.11 test workflow job must remain unconditional and canonical")
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
     m311_workflow.write_text(
         original_m311_workflow.replace(
             "scripts/test-ios.sh --only-testing NotificationsKitTests",
