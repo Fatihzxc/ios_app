@@ -105,14 +105,41 @@ final class AppBootstrapCompositionTests: XCTestCase {
     // Mutation caught: caching the startup dependency composition would make a
     // recoverable bootstrap retry reuse state from the first attempt.
     func testDependencyPrewarmerBuildsFreshDependenciesAfterInitialTaskIsConsumed() async throws {
-        let prewarmer = AppDependencyPrewarmer(environment: .uiTesting)
+        var constructionAttempts = 0
+        let prewarmer = AppDependencyPrewarmer(
+            environment: .uiTesting,
+            buildDependencies: { environment in
+                constructionAttempts += 1
+                return try AppDependencies(environment: environment)
+            }
+        )
+
+        XCTAssertEqual(constructionAttempts, 1)
 
         let initialDependencies = try await prewarmer.makeDependencies()
+        XCTAssertEqual(constructionAttempts, 1)
         let retryDependencies = try await prewarmer.makeDependencies()
 
+        XCTAssertEqual(constructionAttempts, 2)
         XCTAssertFalse(initialDependencies === retryDependencies)
         XCTAssertEqual(initialDependencies.persistencePresentation, .uiTestingInMemory)
         XCTAssertEqual(retryDependencies.persistencePresentation, .uiTestingInMemory)
+    }
+
+    func testDefaultDependencyPrewarmerPublishesTodayBeforeAsyncConsumption() async throws {
+        let prewarmer = AppDependencyPrewarmer(environment: .uiTesting)
+
+        let dependencies = try await prewarmer.makeDependencies()
+
+        guard case .content = dependencies.todayViewModel.state else {
+            return XCTFail("The default prewarmer must publish real seeded Today content.")
+        }
+        let preloadedState = dependencies.todayViewModel.state
+
+        try dependencies.load()
+        await dependencies.loadInitialContent()
+
+        XCTAssertEqual(dependencies.todayViewModel.state, preloadedState)
     }
 
     // Intentionally uninvoked: each call is type-checked without evaluating live

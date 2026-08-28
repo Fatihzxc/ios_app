@@ -1,7 +1,17 @@
 import Foundation
+import ProgressPhotosKit
 import SwiftUI
 
 #if DEBUG
+@MainActor
+final class NotificationAuthorizationUITestEvidence: ObservableObject {
+    @Published private(set) var requestCount = 0
+
+    func recordRequest() {
+        requestCount += 1
+    }
+}
+
 enum AppUITestScenario: String {
     case seeded
     case emptyOnce = "empty-once"
@@ -36,10 +46,33 @@ enum AppUITestScenario: String {
     case nutritionDeleteErrorOnce = "nutrition-delete-error-once"
     case nutritionQuickAdd = "nutrition-quick-add"
     case m2Acceptance = "m2-acceptance"
+    case m3BodyMetrics = "m3-body-metrics"
+    case m3SleepMood = "m3-sleep-mood"
+    case m3Posture = "m3-posture"
+    case m3HealthChecks = "m3-health-checks"
+    case m3Bloodwork = "m3-bloodwork"
+    case m3ProgressPhotos = "m3-progress-photos"
+    case m3PhotoGallery = "m3-photo-gallery"
 }
 
 struct AppUITestLaunchConfiguration {
     static let launchPerformanceEvidenceFlag = "-ui-test-launch-performance-evidence"
+    static let medicalSafetyFirstUseEvidenceFlag =
+        "-ui-test-medical-safety-first-use-evidence"
+    static let notificationAuthorizationRequestCountIdentifier =
+        "health-check.notifications.permission.request-count"
+    static let photoLibraryAccessFlag = "-ui-test-photo-library-access"
+    static let fixedNowFlag = "-ui-test-now"
+    @MainActor static let notificationAuthorizationEvidence =
+        NotificationAuthorizationUITestEvidence()
+    @MainActor static var notificationAuthorizationRequestCount: Int {
+        notificationAuthorizationEvidence.requestCount
+    }
+
+    @MainActor
+    static func recordNotificationAuthorizationRequest() {
+        notificationAuthorizationEvidence.recordRequest()
+    }
 
     enum Appearance: String {
         case light
@@ -57,6 +90,9 @@ struct AppUITestLaunchConfiguration {
     let appearance: Appearance
     let persistentStoreIdentifier: UUID?
     let exposesLaunchPerformanceEvidence: Bool
+    let exposesMedicalSafetyFirstUseEvidence: Bool
+    let broaderPhotoLibraryAccessState: PhotoLibraryAccessState
+    let fixedNow: Date?
 
     static func resolve(arguments: [String] = ProcessInfo.processInfo.arguments) -> Self? {
         guard arguments.filter({ $0 == "-ui-testing" }).count == 1,
@@ -64,7 +100,10 @@ struct AppUITestLaunchConfiguration {
               let scenario = AppUITestScenario(rawValue: scenarioValue),
               let appearanceValue = uniqueValue(after: "-ui-test-appearance", in: arguments),
               let appearance = Appearance(rawValue: appearanceValue),
-              arguments.filter({ $0 == launchPerformanceEvidenceFlag }).count <= 1 else {
+              arguments.filter({ $0 == launchPerformanceEvidenceFlag }).count <= 1,
+              arguments.filter({
+                  $0 == medicalSafetyFirstUseEvidenceFlag
+              }).count <= 1 else {
             return nil
         }
 
@@ -79,13 +118,40 @@ struct AppUITestLaunchConfiguration {
             persistentStoreIdentifier = nil
         }
 
+        let broaderPhotoLibraryAccessState: PhotoLibraryAccessState
+        if arguments.contains(photoLibraryAccessFlag) {
+            guard let value = uniqueValue(after: photoLibraryAccessFlag, in: arguments),
+                  let state = PhotoLibraryAccessState(rawValue: value) else {
+                return nil
+            }
+            broaderPhotoLibraryAccessState = state
+        } else {
+            broaderPhotoLibraryAccessState = .authorized
+        }
+
+        let fixedNow: Date?
+        if arguments.contains(fixedNowFlag) {
+            guard let value = uniqueValue(after: fixedNowFlag, in: arguments),
+                  let date = ISO8601DateFormatter().date(from: value) else {
+                return nil
+            }
+            fixedNow = date
+        } else {
+            fixedNow = nil
+        }
+
         return Self(
             scenario: scenario,
             appearance: appearance,
             persistentStoreIdentifier: persistentStoreIdentifier,
             exposesLaunchPerformanceEvidence: arguments.contains(
                 launchPerformanceEvidenceFlag
-            )
+            ),
+            exposesMedicalSafetyFirstUseEvidence: arguments.contains(
+                medicalSafetyFirstUseEvidenceFlag
+            ),
+            broaderPhotoLibraryAccessState: broaderPhotoLibraryAccessState,
+            fixedNow: fixedNow
         )
     }
 

@@ -16,6 +16,12 @@ let package = Package(
         .library(name: "PersistenceKit", targets: ["PersistenceKit"]),
         .library(name: "DesignSystem", targets: ["DesignSystem"]),
         .library(name: "NutritionKit", targets: ["NutritionKit"]),
+        .library(name: "HealthSafetyKit", targets: ["HealthSafetyKit"]),
+        .library(name: "HealthChecksKit", targets: ["HealthChecksKit"]),
+        .library(name: "NotificationsKit", targets: ["NotificationsKit"]),
+        .library(name: "ProgressPhotosKit", targets: ["ProgressPhotosKit"]),
+        .library(name: "MetricsKit", targets: ["MetricsKit"]),
+        .library(name: "SleepMoodKit", targets: ["SleepMoodKit"]),
         .library(name: "ReportsKit", targets: ["ReportsKit"]),
         .library(name: "SettingsKit", targets: ["SettingsKit"])
     ],
@@ -36,7 +42,7 @@ let package = Package(
         ),
         .target(
             name: "PersistenceKit",
-            dependencies: ["CoreModels", "GuidanceKit", "NutritionKit", "TrainingKit"],
+            dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "SleepMoodKit", "TrainingKit"],
             swiftSettings: strictConcurrency
         ),
         .target(
@@ -46,6 +52,40 @@ let package = Package(
         ),
         .target(
             name: "NutritionKit",
+            dependencies: ["CoreModels", "DesignSystem"],
+            resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
+        .target(
+            name: "HealthSafetyKit",
+            resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
+        .target(
+            name: "HealthChecksKit",
+            dependencies: ["CoreModels", "DesignSystem", "HealthSafetyKit"],
+            resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
+        .target(
+            name: "NotificationsKit",
+            resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
+        .target(
+            name: "ProgressPhotosKit",
+            dependencies: ["CoreModels", "DesignSystem"],
+            resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
+        .target(
+            name: "MetricsKit",
+            dependencies: ["CoreModels", "DesignSystem", "HealthSafetyKit"],
+            resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
+        .target(
+            name: "SleepMoodKit",
             dependencies: ["CoreModels", "DesignSystem"],
             resources: [.process("Resources")],
             swiftSettings: strictConcurrency
@@ -74,7 +114,7 @@ let package = Package(
         ),
         .testTarget(
             name: "PersistenceKitTests",
-            dependencies: ["CoreModels", "NutritionKit", "TrainingKit", "PersistenceKit"],
+            dependencies: ["CoreModels", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"],
             swiftSettings: strictConcurrency
         ),
         .testTarget(
@@ -90,6 +130,36 @@ let package = Package(
         .testTarget(
             name: "NutritionKitTests",
             dependencies: ["CoreModels", "NutritionKit"],
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
+            name: "HealthSafetyKitTests",
+            dependencies: ["HealthSafetyKit"],
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
+            name: "HealthChecksKitTests",
+            dependencies: ["CoreModels", "HealthChecksKit"],
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
+            name: "NotificationsKitTests",
+            dependencies: ["NotificationsKit"],
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
+            name: "ProgressPhotosKitTests",
+            dependencies: ["CoreModels", "ProgressPhotosKit"],
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
+            name: "MetricsKitTests",
+            dependencies: ["CoreModels", "HealthSafetyKit", "MetricsKit"],
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
+            name: "SleepMoodKitTests",
+            dependencies: ["CoreModels", "SleepMoodKit"],
             swiftSettings: strictConcurrency
         )
     ]

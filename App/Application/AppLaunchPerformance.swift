@@ -6,6 +6,11 @@ enum AppLaunchPerformance {
     enum Checkpoint: String, CaseIterable {
         case environment
         case container
+        case dependencyEntry
+        case dependencyContext
+        case dependencyRepository
+        case dependencyRouting
+        case dependencyViewModel
         case dependencies
         case seed
         case today

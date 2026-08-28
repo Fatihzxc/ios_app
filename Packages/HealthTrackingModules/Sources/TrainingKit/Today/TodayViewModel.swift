@@ -18,6 +18,8 @@ public final class TodayViewModel {
     @ObservationIgnored
     private let calendar: Calendar
     @ObservationIgnored
+    private let now: @MainActor () -> Date
+    @ObservationIgnored
     private let launchStartedAt: TimeInterval?
     @ObservationIgnored
     private let uptime: @MainActor () -> TimeInterval
@@ -29,6 +31,7 @@ public final class TodayViewModel {
     public init(
         repository: any TrainingRepository,
         calendar: Calendar = .current,
+        now: @escaping @MainActor () -> Date = { .now },
         launchStartedAt: TimeInterval? = nil,
         uptime: @escaping @MainActor () -> TimeInterval = {
             ProcessInfo.processInfo.systemUptime
@@ -37,17 +40,25 @@ public final class TodayViewModel {
     ) {
         self.repository = repository
         self.calendar = calendar
+        self.now = now
         self.launchStartedAt = launchStartedAt
         self.uptime = uptime
         self.onFirstMeaningfulContent = onFirstMeaningfulContent
     }
 
-    public func load(at date: Date = .now) async {
-        await performLoad(at: date, yieldAfterPublishingLoading: false)
+    public func load(at date: Date? = nil) async {
+        await performLoad(at: date ?? now(), yieldAfterPublishingLoading: false)
     }
 
-    public func retry(at date: Date = .now) async {
-        await performLoad(at: date, yieldAfterPublishingLoading: true)
+    public func retry(at date: Date? = nil) async {
+        await performLoad(at: date ?? now(), yieldAfterPublishingLoading: true)
+    }
+
+    public func applyInitialSnapshot(
+        _ snapshot: TodayRepositorySnapshot?,
+        evaluatedAt date: Date? = nil
+    ) {
+        publish(snapshot, evaluatedAt: date ?? now())
     }
 
     private func performLoad(
@@ -59,21 +70,29 @@ public final class TodayViewModel {
             await Task.yield()
         }
         do {
-            guard let snapshot = try await repository.fetchTodaySnapshot() else {
-                state = .empty
-                return
-            }
-            guard let semanticPresentation = makePresentation(
-                from: snapshot,
-                evaluatedAt: date
-            ) else {
-                state = .error
-                return
-            }
-            state = .content(attachLaunchEvidence(to: semanticPresentation))
+            let snapshot = try await repository.fetchTodaySnapshot()
+            publish(snapshot, evaluatedAt: date)
         } catch {
             state = .error
         }
+    }
+
+    private func publish(
+        _ snapshot: TodayRepositorySnapshot?,
+        evaluatedAt date: Date
+    ) {
+        guard let snapshot else {
+            state = .empty
+            return
+        }
+        guard let semanticPresentation = makePresentation(
+            from: snapshot,
+            evaluatedAt: date
+        ) else {
+            state = .error
+            return
+        }
+        state = .content(attachLaunchEvidence(to: semanticPresentation))
     }
 
     private func makePresentation(
@@ -253,7 +272,14 @@ public final class TodayViewModel {
             )
         }
 
-        for reminder in snapshot.healthChecks where reminder.dueDate <= date {
+        let startOfTomorrow = calendar.date(
+            byAdding: .day,
+            value: 1,
+            to: calendar.startOfDay(for: date)
+        )
+        for reminder in snapshot.healthChecks where startOfTomorrow.map({
+            reminder.dueDate < $0
+        }) ?? (reminder.dueDate <= date) {
             alerts.append(
                 AlertCandidate(
                     priority: .init(

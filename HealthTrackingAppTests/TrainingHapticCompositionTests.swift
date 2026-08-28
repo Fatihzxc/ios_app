@@ -32,6 +32,7 @@ final class TrainingHapticCompositionTests: XCTestCase {
             nutritionQuickAddViewModel: dependencies.nutritionQuickAddViewModel,
             nutritionManualEntryViewModel: dependencies.nutritionManualEntryViewModel,
             makeSessionViewModel: dependencies.makeSessionViewModel,
+            makeTrackerFeatureRouter: dependencies.makeTrackerFeatureRouter,
             trainingHapticController: dependencies.trainingHapticController,
             shouldLoadFoundation: dependencies.shouldLoadFoundation,
             persistencePresentation: dependencies.persistencePresentation

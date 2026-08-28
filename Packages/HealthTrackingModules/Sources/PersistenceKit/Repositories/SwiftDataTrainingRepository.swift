@@ -45,7 +45,8 @@ public enum TrainingRepositoryMutationError: Error, Equatable, Sendable {
 }
 
 @MainActor
-public final class SwiftDataTrainingRepository: TrainingRepository {
+public final class SwiftDataTrainingRepository: TrainingRepository,
+    SynchronousTodaySnapshotRepository {
     private let modelContext: ModelContext
     private let calendar: Calendar
 
@@ -55,6 +56,10 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
     }
 
     public func fetchTodaySnapshot() async throws -> TodayRepositorySnapshot? {
+        try fetchTodaySnapshotSynchronously()
+    }
+
+    public func fetchTodaySnapshotSynchronously() throws -> TodayRepositorySnapshot? {
         var profileDescriptor = FetchDescriptor<UserProfile>(
             sortBy: [SortDescriptor(\UserProfile.updatedAt, order: .reverse)]
         )
@@ -341,17 +346,6 @@ public final class SwiftDataTrainingRepository: TrainingRepository {
                 }
                 return lhs.id.uuidString < rhs.id.uuidString
             }
-    }
-
-    public func fetchHealthCheckReminders() async throws -> [HealthCheckReminder] {
-        let reminders = try modelContext.fetch(FetchDescriptor<HealthCheckReminder>())
-
-        return reminders.sorted { lhs, rhs in
-            if lhs.dueDate != rhs.dueDate {
-                return lhs.dueDate < rhs.dueDate
-            }
-            return lhs.id.uuidString < rhs.id.uuidString
-        }
     }
 
     public func fetchProgramState(programID: UUID) async throws -> ProgramState? {

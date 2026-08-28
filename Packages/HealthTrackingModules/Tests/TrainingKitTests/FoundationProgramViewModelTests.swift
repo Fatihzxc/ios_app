@@ -786,10 +786,6 @@ private final class FakeTrainingRepository: TrainingRepository {
         throw FakeRepositoryError.unexpectedCall("fetchCooldownItems")
     }
 
-    func fetchHealthCheckReminders() async throws -> [HealthCheckReminder] {
-        throw FakeRepositoryError.unexpectedCall("fetchHealthCheckReminders")
-    }
-
     func fetchProgramState(programID: UUID) async throws -> ProgramState? {
         programState?.programId == programID ? programState : nil
     }

@@ -10,6 +10,26 @@ final class TodayViewModelTests: XCTestCase {
     private let phase1 = UUID(uuidString: "00000000-0000-4000-8000-000000000301")!
     private let phase2 = UUID(uuidString: "00000000-0000-4000-8000-000000000302")!
 
+    func testApplyingPreloadedSnapshotPublishesContentWithoutRepositoryFetch() {
+        let repository = TodayRepositorySpy()
+        var callbackCount = 0
+        let viewModel = makeViewModel(
+            repository: repository,
+            launchStartedAt: 100,
+            uptime: { 100.25 },
+            onFirstMeaningfulContent: { _ in callbackCount += 1 }
+        )
+
+        viewModel.applyInitialSnapshot(makeSnapshot(), evaluatedAt: now)
+        viewModel.applyInitialSnapshot(makeSnapshot(), evaluatedAt: now)
+
+        guard case .content = viewModel.state else {
+            return XCTFail("A real preloaded snapshot must publish Today content.")
+        }
+        XCTAssertEqual(callbackCount, 1)
+        XCTAssertEqual(repository.fetchTodaySnapshotCallCount, 0)
+    }
+
     func testInitialLoadingWaitsForExactlyOneCompactRepositorySnapshot() async {
         let gate = TodayAsyncGate()
         let repository = TodayRepositorySpy()
@@ -269,6 +289,32 @@ final class TodayViewModelTests: XCTestCase {
         )
     }
 
+    func testHealthCheckDueLaterTodayUsesTheSameLocalDaySemanticsAsTrackerDetail() async {
+        let dueLaterToday = TodayRepositorySnapshot.Reminder(
+            id: uuid(604),
+            title: "Genel check-up",
+            dueDate: calendar.date(
+                from: DateComponents(year: 2026, month: 8, day: 20, hour: 17)
+            )!
+        )
+        let dueTomorrow = TodayRepositorySnapshot.Reminder(
+            id: uuid(605),
+            title: "Ferritin",
+            dueDate: calendar.date(
+                from: DateComponents(year: 2026, month: 8, day: 21, hour: 0)
+            )!
+        )
+
+        await assertPrimaryAlert(
+            snapshot: makeSnapshot(healthChecks: [dueTomorrow, dueLaterToday]),
+            expected: .bloodwork(
+                title: dueLaterToday.title,
+                dueDate: dueLaterToday.dueDate
+            ),
+            additionalCount: 0
+        )
+    }
+
     func testReactiveDeloadIsRecomputedFromTheSnapshotHistory() async {
         let exerciseID = uuid(701)
         let newerDate = now.addingTimeInterval(-7 * 86_400)
@@ -346,6 +392,34 @@ final class TodayViewModelTests: XCTestCase {
         XCTAssertEqual(repository.fetchTodaySnapshotCallCount, 2)
     }
 
+    func testFirstMeaningfulCallbackSkipsErrorAndEmptyThenPublishesExactlyOnce() async {
+        let repository = TodayRepositorySpy()
+        repository.responses = [
+            .failure(TodayTestError.load),
+            .success(nil),
+            .success(makeSnapshot()),
+            .success(makeSnapshot()),
+        ]
+        var callbackCount = 0
+        let viewModel = makeViewModel(
+            repository: repository,
+            launchStartedAt: 100,
+            uptime: { 100.25 },
+            onFirstMeaningfulContent: { _ in callbackCount += 1 }
+        )
+
+        await viewModel.load(at: now)
+        XCTAssertEqual(callbackCount, 0)
+        await viewModel.retry(at: now)
+        XCTAssertEqual(callbackCount, 0)
+        await viewModel.retry(at: now)
+        XCTAssertEqual(callbackCount, 1)
+        await viewModel.retry(at: now)
+
+        XCTAssertEqual(callbackCount, 1)
+        XCTAssertEqual(repository.fetchTodaySnapshotCallCount, 4)
+    }
+
     func testRepositoryFailureIsRecoverableErrorAndPreservesNoFabricatedContent() async {
         let repository = TodayRepositorySpy()
         repository.responses = [.failure(TodayTestError.load), .success(makeSnapshot())]
@@ -419,13 +493,15 @@ final class TodayViewModelTests: XCTestCase {
     private func makeViewModel(
         repository: TodayRepositorySpy,
         launchStartedAt: TimeInterval? = nil,
-        uptime: @escaping @MainActor () -> TimeInterval = { 0 }
+        uptime: @escaping @MainActor () -> TimeInterval = { 0 },
+        onFirstMeaningfulContent: @escaping @MainActor (TimeInterval) -> Void = { _ in }
     ) -> TodayViewModel {
         TodayViewModel(
             repository: repository,
             calendar: calendar,
             launchStartedAt: launchStartedAt,
-            uptime: uptime
+            uptime: uptime,
+            onFirstMeaningfulContent: onFirstMeaningfulContent
         )
     }
 
@@ -620,9 +696,6 @@ private final class TodayRepositorySpy: TrainingRepository {
         throw TodayTestError.unexpectedCall
     }
     func fetchCooldownItems(workoutDayID _: UUID) async throws -> [CooldownItem] {
-        throw TodayTestError.unexpectedCall
-    }
-    func fetchHealthCheckReminders() async throws -> [HealthCheckReminder] {
         throw TodayTestError.unexpectedCall
     }
     func fetchProgramState(programID _: UUID) async throws -> ProgramState? {

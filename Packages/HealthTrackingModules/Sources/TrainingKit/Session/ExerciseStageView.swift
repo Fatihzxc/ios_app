@@ -6,7 +6,9 @@ import SwiftUI
 @MainActor
 public struct ExerciseStageView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @AccessibilityFocusState private var isExerciseHeadingFocused: Bool
+    @AccessibilityFocusState private var levelTwoHeadingFocused: Bool
     @Bindable private var viewModel: SessionViewModel
     private let presentation: SessionPresentation
 
@@ -49,14 +51,18 @@ public struct ExerciseStageView: View {
                 }
             }
             .padding(.horizontal, AppSpacing.screenHorizontal)
-            .padding(.vertical, AppSpacing.large)
+            .padding(.top, AppSpacing.large)
+            .padding(.bottom, SessionStageLayout.bottomActionClearance)
         }
         .accessibilityIdentifier("session.stage.exercise")
         .task {
-            isExerciseHeadingFocused = true
+            isExerciseHeadingFocused = !isLevelTwoPresented
         }
         .onChange(of: viewModel.displayedExercise?.id) { _, _ in
-            isExerciseHeadingFocused = true
+            isExerciseHeadingFocused = !isLevelTwoPresented
+        }
+        .onChange(of: isLevelTwoPresented) { _, isPresented in
+            updateLevelTwoHeadingFocus(isPresented: isPresented)
         }
     }
 
@@ -184,18 +190,147 @@ public struct ExerciseStageView: View {
                         systemImage: "hand.raised.fill",
                         style: .danger
                     )
+                    .accessibilityIdentifier("session.ohp.stop")
                     Text(localized("session.ohp.stop.message"))
                         .font(AppTypography.body)
                         .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(localized("session.ohp.medicalDisclaimer"))
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))
-                        .fixedSize(horizontal: false, vertical: true)
+                    if let safety = viewModel.symptomSafetyPresentation {
+                        Text(safety.disclaimer)
+                            .font(AppTypography.caption)
+                            .foregroundStyle(
+                                AppColors.color(.inkSecondary, scheme: colorScheme)
+                            )
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("medical.disclaimer.l1")
+                        VStack(alignment: .leading, spacing: AppSpacing.compact) {
+                            Text(localized("medical.safety.l2.heading"))
+                                .font(AppTypography.label)
+                                .foregroundStyle(
+                                    AppColors.color(.stateDanger, scheme: colorScheme)
+                                )
+                                .accessibilityAddTraits(.isHeader)
+                                .accessibilityIdentifier("medical.safety.l2.heading")
+                                .accessibilityFocused($levelTwoHeadingFocused)
+                            Text(safety.levelTwoMessage)
+                                .font(AppTypography.body)
+                                .foregroundStyle(
+                                    AppColors.color(.stateDanger, scheme: colorScheme)
+                                )
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("medical.safety.l2")
+                        }
+                        .onAppear {
+                            updateLevelTwoHeadingFocus(isPresented: true)
+                        }
+                        .transition(levelTwoTransition)
+                    }
+                    if viewModel.hasSessionDeletionFailure {
+                        Text(localized("session.delete.error"))
+                            .font(AppTypography.caption)
+                            .foregroundStyle(
+                                AppColors.color(.stateDanger, scheme: colorScheme)
+                            )
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("session.delete.error")
+                    }
+                    ohpSymptomWriteStatus
+                    symptomJournalStatus
                 }
             }
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    private var isLevelTwoPresented: Bool {
+        guard viewModel.symptomSafetyPresentation != nil,
+              presentation.currentExercise?.progressionRule == .gradedEntryOHP,
+              case .stopped = viewModel.ohpSafetyState else {
+            return false
+        }
+        return true
+    }
+
+    private var levelTwoTransition: AnyTransition {
+        MedicalSafetyMotionPolicy.transition(
+            reduceMotion: accessibilityReduceMotion,
+            identity: .identity,
+            opacity: .opacity
+        )
+    }
+
+    private func updateLevelTwoHeadingFocus(isPresented: Bool) {
+        levelTwoHeadingFocused = MedicalSafetyFocusPolicy.headingFocused(
+            isLevelTwoPresented: isPresented
+        )
+        isExerciseHeadingFocused = !isPresented
+    }
+
+    @ViewBuilder
+    private var ohpSymptomWriteStatus: some View {
+        switch viewModel.ohpSymptomWriteState {
+        case .idle:
+            EmptyView()
+        case .saving:
+            HStack(spacing: AppSpacing.small) {
+                ProgressView()
+                Text(localized("session.ohp.persistence.saving"))
+            }
             .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("session.ohp.stop")
+            .accessibilityIdentifier("session.ohp.persistence.saving")
+        case .failed:
+            VStack(alignment: .leading, spacing: AppSpacing.small) {
+                Text(localized("session.ohp.persistence.error"))
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColors.color(.stateDanger, scheme: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("session.ohp.persistence.error")
+                Button {
+                    Task { await viewModel.retryCurrentOHPSymptomWrite() }
+                } label: {
+                    Text(localized("session.ohp.persistence.retry"))
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("session.ohp.persistence.retry")
+                .disabled(viewModel.isSessionDeletionInFlight)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var symptomJournalStatus: some View {
+        switch viewModel.symptomJournalState {
+        case .idle:
+            EmptyView()
+        case .recording:
+            HStack(spacing: AppSpacing.small) {
+                ProgressView()
+                Text(localized("session.ohp.journal.recording"))
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("session.ohp.journal.recording")
+        case .recorded:
+            Text(localized("session.ohp.journal.recorded"))
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColors.color(.stateSuccess, scheme: colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("session.ohp.journal.recorded")
+        case .failed:
+            VStack(alignment: .leading, spacing: AppSpacing.small) {
+                Text(localized("session.ohp.journal.error"))
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColors.color(.stateDanger, scheme: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("session.ohp.journal.error")
+                Button(localized("session.ohp.journal.retry")) {
+                    Task { await viewModel.retrySymptomJournal() }
+                }
+                .buttonStyle(.bordered)
+                .frame(minHeight: 52)
+                .accessibilityIdentifier("session.ohp.journal.retry")
+            }
         }
     }
 
@@ -235,6 +370,7 @@ public struct ExerciseStageView: View {
                 }
             )
             .accessibilityIdentifier("session.exercise.next")
+            .disabled(viewModel.hasPendingCurrentOHPSymptomWrite || viewModel.isSessionDeletionInFlight)
             .accessibilityHint(
                 String(localized: "session.exercise.next.hint", bundle: .module)
             )
@@ -249,6 +385,10 @@ public struct ExerciseStageView: View {
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity)
                 .accessibilityIdentifier("session.exercise.back")
+                .disabled(
+                    viewModel.hasPendingCurrentOHPSymptomWrite
+                        || viewModel.isSessionDeletionInFlight
+                )
 
                 Button(role: .destructive) {
                     Task { await viewModel.finishIncomplete() }
@@ -260,6 +400,10 @@ public struct ExerciseStageView: View {
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity)
                 .accessibilityIdentifier("session.exercise.finish-incomplete")
+                .disabled(
+                    viewModel.hasPendingCurrentOHPSymptomWrite
+                        || viewModel.isSessionDeletionInFlight
+                )
             }
             .font(AppTypography.label)
             .foregroundStyle(AppColors.color(.inkSecondary, scheme: colorScheme))

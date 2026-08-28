@@ -26,7 +26,12 @@ if package.is_file():
     package_text = package.read_text(encoding="utf-8")
     products_block = re.search(r'^    products:\s*\[\n(.*?)(?=^    targets:\s*\[)', package_text, re.M | re.S)
     products = re.findall(r'\.([A-Za-z][A-Za-z0-9_]*)\s*\(\s*name:\s*"([^"]+)"', products_block.group(1) if products_block else "")
-    expected_products = ["CoreModels", "TrainingKit", "GuidanceKit", "PersistenceKit", "DesignSystem", "NutritionKit", "ReportsKit", "SettingsKit"]
+    expected_products = [
+        "CoreModels", "TrainingKit", "GuidanceKit", "PersistenceKit", "DesignSystem",
+        "NutritionKit", "HealthSafetyKit", "HealthChecksKit", "NotificationsKit",
+        "ProgressPhotosKit", "MetricsKit",
+        "SleepMoodKit", "ReportsKit", "SettingsKit",
+    ]
     expected_product_declarations = [("library", name) for name in expected_products]
     if products != expected_product_declarations:
         errors.append(f"Package products must be exactly {expected_product_declarations}; found {products}")
@@ -41,6 +46,18 @@ if package.is_file():
         ("testTarget", "GuidanceKitTests"),
         ("target", "NutritionKit"),
         ("testTarget", "NutritionKitTests"),
+        ("target", "HealthSafetyKit"),
+        ("testTarget", "HealthSafetyKitTests"),
+        ("target", "HealthChecksKit"),
+        ("testTarget", "HealthChecksKitTests"),
+        ("target", "NotificationsKit"),
+        ("testTarget", "NotificationsKitTests"),
+        ("target", "ProgressPhotosKit"),
+        ("testTarget", "ProgressPhotosKitTests"),
+        ("target", "MetricsKit"),
+        ("testTarget", "MetricsKitTests"),
+        ("target", "SleepMoodKit"),
+        ("testTarget", "SleepMoodKitTests"),
     ]
     missing_module_targets = [
         declaration
@@ -49,7 +66,7 @@ if package.is_file():
     ]
     if missing_module_targets:
         errors.append(
-            f"Package must declare GuidanceKit and NutritionKit library/test targets; "
+            f"Package must declare GuidanceKit, NutritionKit, HealthSafetyKit, HealthChecksKit, NotificationsKit, ProgressPhotosKit, MetricsKit and SleepMoodKit library/test targets; "
             f"missing {missing_module_targets}"
         )
 
@@ -167,7 +184,9 @@ if project.is_file():
     ]
     expected_package_test_targets = [
         "CoreModelsTests", "GuidanceKitTests", "PersistenceKitTests", "TrainingKitTests",
-        "DesignSystemTests", "NutritionKitTests",
+        "DesignSystemTests", "NutritionKitTests", "HealthSafetyKitTests",
+        "HealthChecksKitTests", "NotificationsKitTests", "ProgressPhotosKitTests",
+        "MetricsKitTests", "SleepMoodKitTests",
     ]
     if local_package_test_targets != expected_package_test_targets:
         errors.append(
@@ -257,8 +276,30 @@ require_text_contract(
         "UICTContentSizeCategoryAccessibilityXL",
         "UICTContentSizeCategoryAccessibilityXXXL",
         "performAccessibilityAudit",
+        "scrollByShortDrag(",
+        "with bounded drags",
+        "acknowledgeFirstUseExplanationIfNeeded(in: app)",
+        'let explanation = identified("medical.explanation.l0", in: app)',
+        "guard explanation.waitForExistence(timeout: 2) else { return }",
+        "medical.explanation.l0.acknowledge",
+        "makeHittable(acknowledgement, in: app)",
+        "acknowledgement.frame.height + 0.01",
+        "acknowledgement.tap()",
     ],
 )
+training_accessibility_path = root / "HealthTrackingAppUITests/TrainingAccessibilityUITests.swift"
+if training_accessibility_path.is_file():
+    training_accessibility_text = training_accessibility_path.read_text(encoding="utf-8")
+    forbidden_full_swipes = [
+        token
+        for token in ("app.swipeUp()", "app.swipeDown()")
+        if token in training_accessibility_text
+    ]
+    if forbidden_full_swipes:
+        errors.append(
+            "AX5 positioning must use bounded short drags instead of full swipes; "
+            f"found {forbidden_full_swipes}"
+        )
 require_text_contract(
     ".github/workflows/ios.yml",
     [
@@ -314,6 +355,47 @@ for stage_file in [
         f"Packages/HealthTrackingModules/Sources/TrainingKit/Session/{stage_file}",
         required,
     )
+
+session_stage_layout = require_text_contract(
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.swift",
+    ["bottomActionClearance"],
+)
+bottom_clearance_match = re.search(
+    r'\bstatic\s+let\s+bottomActionClearance\s*:\s*CGFloat\s*=\s*([0-9]+(?:\.[0-9]+)?)\b',
+    session_stage_layout,
+)
+if not bottom_clearance_match or float(bottom_clearance_match.group(1)) < 52:
+    errors.append(
+        "Session-stage AX5 bottom clearance must be an explicit value of at least 52 points."
+    )
+
+for stage_file in [
+    "OHPPriorSymptomQuestionView.swift",
+    "DeloadRecommendationView.swift",
+    "WarmupStageView.swift",
+    "ExerciseStageView.swift",
+    "CooldownStageView.swift",
+    "SessionSummaryView.swift",
+]:
+    stage_path = (
+        root
+        / "Packages/HealthTrackingModules/Sources/TrainingKit/Session"
+        / stage_file
+    )
+    if not stage_path.is_file():
+        errors.append(f"Missing required M1 acceptance file: {stage_path.relative_to(root)}")
+        continue
+    stage_text = stage_path.read_text(encoding="utf-8")
+    required_padding = [
+        ".padding(.top, AppSpacing.large)",
+        ".padding(.bottom, SessionStageLayout.bottomActionClearance)",
+    ]
+    missing_padding = [token for token in required_padding if token not in stage_text]
+    if missing_padding:
+        errors.append(
+            f"Session-stage AX5 scroll content {stage_file} must retain large top padding "
+            f"and use the shared bottom clearance; missing {missing_padding}"
+        )
 require_text_contract(
     "App/Support/AppUITestLaunchConfiguration.swift",
     ["m1AcceptanceCatalog", "m1PRBaseline", "m1PRNew"],
@@ -412,6 +494,15 @@ contracts = {
         "UICTContentSizeCategoryAccessibilityXL",
         "UICTContentSizeCategoryAccessibilityXXXL",
         "performAccessibilityAudit",
+        "scrollByShortDrag(",
+        "with bounded drags",
+        "acknowledgeFirstUseExplanationIfNeeded(in: app)",
+        'let explanation = identified("medical.explanation.l0", in: app)',
+        "guard explanation.waitForExistence(timeout: 2) else { return }",
+        "medical.explanation.l0.acknowledge",
+        "makeHittable(acknowledgement, in: app)",
+        "acknowledgement.frame.height + 0.01",
+        "acknowledgement.tap()",
     ],
     ".github/workflows/ios.yml": [
         "training_accessibility_expected",
@@ -439,17 +530,39 @@ contracts = {
     "Packages/HealthTrackingModules/Sources/TrainingKit/Session/TrainingSessionView.swift": [
         "@Environment(\\.accessibilityReduceMotion)", ".transition(", "0.12",
     ],
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.swift": [
+        "import SwiftUI",
+        "enum SessionStageLayout {",
+        "static let bottomActionClearance: CGFloat = 52",
+        "}",
+    ],
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/OHPPriorSymptomQuestionView.swift": [
+        ".padding(.top, AppSpacing.large)",
+        ".padding(.bottom, SessionStageLayout.bottomActionClearance)",
+    ],
+    "Packages/HealthTrackingModules/Sources/TrainingKit/Session/DeloadRecommendationView.swift": [
+        ".padding(.top, AppSpacing.large)",
+        ".padding(.bottom, SessionStageLayout.bottomActionClearance)",
+    ],
     "Packages/HealthTrackingModules/Sources/TrainingKit/Session/WarmupStageView.swift": [
         "@AccessibilityFocusState", ".accessibilityFocused(",
+        ".padding(.top, AppSpacing.large)",
+        ".padding(.bottom, SessionStageLayout.bottomActionClearance)",
     ],
     "Packages/HealthTrackingModules/Sources/TrainingKit/Session/ExerciseStageView.swift": [
         "@AccessibilityFocusState", ".accessibilityFocused(", "session.exercise.next.hint",
+        ".padding(.top, AppSpacing.large)",
+        ".padding(.bottom, SessionStageLayout.bottomActionClearance)",
     ],
     "Packages/HealthTrackingModules/Sources/TrainingKit/Session/CooldownStageView.swift": [
         "@AccessibilityFocusState", ".accessibilityFocused(",
+        ".padding(.top, AppSpacing.large)",
+        ".padding(.bottom, SessionStageLayout.bottomActionClearance)",
     ],
     "Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionSummaryView.swift": [
         "@AccessibilityFocusState", ".accessibilityFocused(",
+        ".padding(.top, AppSpacing.large)",
+        ".padding(.bottom, SessionStageLayout.bottomActionClearance)",
     ],
     "App/Support/AppUITestLaunchConfiguration.swift": [
         "m1AcceptanceCatalog", "m1PRBaseline", "m1PRNew",
@@ -487,6 +600,60 @@ for relative, tokens in contracts.items():
     path.write_text("\n".join(tokens) + "\n", encoding="utf-8")
 PY
     verify_repo "$fixture"
+    cp "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.swift" "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.valid.swift"
+    printf '%s\n' 'app.swipeUp()' >> "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.swift"
+    if verify_repo "$fixture" >"$fixture/m1-ax5-full-swipe.out" 2>&1; then
+        echo "Requirements self-test expected an AX5 full-swipe regression failure." >&2
+        return 1
+    fi
+    grep -Fq 'AX5 positioning must use bounded short drags instead of full swipes' "$fixture/m1-ax5-full-swipe.out"
+    mv "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.valid.swift" "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.swift"
+    cp "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.swift" "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.valid.swift"
+    for contract in \
+        'acknowledgeFirstUseExplanationIfNeeded(in: app)' \
+        'let explanation = identified("medical.explanation.l0", in: app)' \
+        'guard explanation.waitForExistence(timeout: 2) else { return }' \
+        'medical.explanation.l0.acknowledge' \
+        'makeHittable(acknowledgement, in: app)' \
+        'acknowledgement.frame.height + 0.01' \
+        'acknowledgement.tap()'
+    do
+        python3 - "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.valid.swift" "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.swift" "$contract" <<'PY'
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
+contract = sys.argv[3]
+if contract not in source:
+    raise SystemExit(f"Missing first-use fixture mutation token: {contract}")
+Path(sys.argv[2]).write_text(
+    source.replace(contract, "firstUseContractWasRemoved", 1),
+    encoding="utf-8",
+)
+PY
+        if verify_repo "$fixture" >"$fixture/m1-medical-first-use.out" 2>&1; then
+            echo "Requirements self-test expected a missing first-use medical acknowledgement failure: $contract" >&2
+            return 1
+        fi
+        grep -Fq 'M1 contract HealthTrackingAppUITests/TrainingAccessibilityUITests.swift is missing required tokens' "$fixture/m1-medical-first-use.out"
+    done
+    mv "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.valid.swift" "$fixture/HealthTrackingAppUITests/TrainingAccessibilityUITests.swift"
+    cp "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.valid.swift"
+    sed 's/bottomActionClearance: CGFloat = 52/bottomActionClearance: CGFloat = 44/' "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.valid.swift" > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.swift"
+    if verify_repo "$fixture" >"$fixture/m1-ax5-bottom-clearance.out" 2>&1; then
+        echo "Requirements self-test expected an undersized AX5 session bottom-clearance failure." >&2
+        return 1
+    fi
+    grep -Fq 'Session-stage AX5 bottom clearance must be an explicit value of at least 52 points.' "$fixture/m1-ax5-bottom-clearance.out"
+    mv "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.valid.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/SessionStageLayout.swift"
+    cp "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/DeloadRecommendationView.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/DeloadRecommendationView.valid.swift"
+    sed 's/SessionStageLayout\.bottomActionClearance/AppSpacing.large/' "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/DeloadRecommendationView.valid.swift" > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/DeloadRecommendationView.swift"
+    if verify_repo "$fixture" >"$fixture/m1-ax5-stage-padding.out" 2>&1; then
+        echo "Requirements self-test expected a missing shared AX5 session bottom-clearance failure." >&2
+        return 1
+    fi
+    grep -Fq 'Session-stage AX5 scroll content DeloadRecommendationView.swift must retain large top padding and use the shared bottom clearance' "$fixture/m1-ax5-stage-padding.out"
+    mv "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/DeloadRecommendationView.valid.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Session/DeloadRecommendationView.swift"
     cp "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift" "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.valid.swift"
     sed '/today\.accessibility\.summary/d' "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.valid.swift" > "$fixture/Packages/HealthTrackingModules/Sources/TrainingKit/Today/TodayView.swift"
     if verify_repo "$fixture" >"$fixture/m1-today-summary.out" 2>&1; then
@@ -520,6 +687,23 @@ PY
         return 1
     fi
     grep -Fq 'Package products must be exactly' "$fixture/product.out"
+    cp "$repo_root/Packages/HealthTrackingModules/Package.swift" "$fixture/Packages/HealthTrackingModules/Package.swift"
+    python3 - "$fixture/Packages/HealthTrackingModules/Package.swift" <<'PY'
+from pathlib import Path
+path = Path(__import__('sys').argv[1])
+target = '''        .target(
+            name: "NotificationsKit",
+            resources: [.process("Resources")],
+            swiftSettings: strictConcurrency
+        ),
+'''
+path.write_text(path.read_text().replace(target, '', 1))
+PY
+    if verify_repo "$fixture" >"$fixture/notifications-target.out" 2>&1; then
+        echo "Requirements self-test expected a missing NotificationsKit target failure." >&2
+        return 1
+    fi
+    grep -Fq 'Package must declare GuidanceKit, NutritionKit, HealthSafetyKit, HealthChecksKit, NotificationsKit' "$fixture/notifications-target.out"
     cp "$repo_root/Packages/HealthTrackingModules/Package.swift" "$fixture/Packages/HealthTrackingModules/Package.swift"
     python3 - "$fixture/project.yml" <<'PY'
 from pathlib import Path
@@ -571,6 +755,17 @@ PY
         return 1
     fi
     grep -Fq 'Local scheme package tests must be exactly' "$fixture/guidance-test-target.out"
+    cp "$repo_root/project.yml" "$fixture/project.yml"
+    python3 - "$fixture/project.yml" <<'PY'
+from pathlib import Path
+path = Path(__import__('sys').argv[1])
+path.write_text(path.read_text().replace('        - package: HealthTrackingModules/NotificationsKitTests\n', '', 1))
+PY
+    if verify_repo "$fixture" >"$fixture/notifications-test-target.out" 2>&1; then
+        echo "Requirements self-test expected a missing NotificationsKit scheme test target failure." >&2
+        return 1
+    fi
+    grep -Fq 'Local scheme package tests must be exactly' "$fixture/notifications-test-target.out"
     cp "$repo_root/project.yml" "$fixture/project.yml"
     python3 - "$fixture/project.yml" <<'PY'
 from pathlib import Path

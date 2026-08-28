@@ -253,6 +253,7 @@ final class TrainingAccessibilityUITests: XCTestCase {
             "-ui-testing",
             "-ui-test-scenario", "session-flow",
             "-ui-test-appearance", appearance.rawValue,
+            "-ui-test-medical-safety-first-use-evidence",
             "-AppleLanguages", "(tr)",
             "-AppleLocale", "tr_TR",
         ] + textSize.launchArguments + extraArguments
@@ -261,7 +262,29 @@ final class TrainingAccessibilityUITests: XCTestCase {
             identified("root.today.content", in: app),
             "The accessibility fixture must load real Today content."
         )
+        acknowledgeFirstUseExplanationIfNeeded(in: app)
         return app
+    }
+
+    private func acknowledgeFirstUseExplanationIfNeeded(in app: XCUIApplication) {
+        let explanation = identified("medical.explanation.l0", in: app)
+        guard explanation.waitForExistence(timeout: 2) else { return }
+
+        let acknowledgement = require(
+            identified("medical.explanation.l0.acknowledge", in: app),
+            "A first-use session fixture must explicitly acknowledge the L0 explanation."
+        )
+        makeHittable(acknowledgement, in: app)
+        XCTAssertTrue(
+            acknowledgement.isHittable,
+            "The first-use L0 acknowledgement must remain operable before session navigation."
+        )
+        XCTAssertGreaterThanOrEqual(
+            acknowledgement.frame.height + 0.01,
+            52,
+            "The first-use L0 acknowledgement must retain its 52-point target at AX5."
+        )
+        acknowledgement.tap()
     }
 
     @discardableResult
@@ -307,18 +330,17 @@ final class TrainingAccessibilityUITests: XCTestCase {
             if isSafelyPositioned && (!requiresHittable || element.isHittable) {
                 return
             }
-            if !requiresHittable {
-                scrollByShortDrag(
-                    towardTop: !frame.isEmpty && frame.midY > app.frame.midY,
-                    in: app
-                )
-            } else if !frame.isEmpty, frame.midY < app.frame.midY {
-                app.swipeDown()
-            } else {
-                app.swipeUp()
-            }
+            scrollByShortDrag(
+                towardTop: frame.isEmpty || frame.midY >= app.frame.midY,
+                in: app
+            )
             remainingScrolls -= 1
         }
+        XCTFail(
+            "Unable to position \(element.identifier) with bounded drags. "
+                + "Element: \(element.frame), viewport: \(app.frame), "
+                + "requiresHittable: \(requiresHittable)."
+        )
     }
 
     private func scrollByShortDrag(towardTop: Bool, in app: XCUIApplication) {
@@ -335,7 +357,7 @@ final class TrainingAccessibilityUITests: XCTestCase {
 
     private func scrollToTop(in app: XCUIApplication) {
         for _ in 0..<10 {
-            app.swipeDown()
+            scrollByShortDrag(towardTop: false, in: app)
         }
     }
 

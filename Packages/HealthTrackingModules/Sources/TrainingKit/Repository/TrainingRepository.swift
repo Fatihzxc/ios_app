@@ -11,7 +11,6 @@ public protocol TrainingRepository: AnyObject {
     func fetchExerciseTemplates(workoutDayID: UUID) async throws -> [ExerciseTemplate]
     func fetchWarmupItems(workoutDayID: UUID) async throws -> [WarmupItem]
     func fetchCooldownItems(workoutDayID: UUID) async throws -> [CooldownItem]
-    func fetchHealthCheckReminders() async throws -> [HealthCheckReminder]
     func fetchProgramState(programID: UUID) async throws -> ProgramState?
     func recalculateProgramStateTrainingWeek(
         programID: UUID,
@@ -70,6 +69,14 @@ public protocol TrainingRepository: AnyObject {
         at date: Date
     ) async throws -> WorkoutSessionSnapshot
     func deleteWorkoutSession(id: UUID) async throws
+}
+
+/// Optional synchronous capability used only while the app is already isolated to
+/// the main actor during launch. General feature callers continue to use
+/// `TrainingRepository.fetchTodaySnapshot()`.
+@MainActor
+public protocol SynchronousTodaySnapshotRepository: AnyObject {
+    func fetchTodaySnapshotSynchronously() throws -> TodayRepositorySnapshot?
 }
 
 public enum TrainingRepositoryCapabilityError: Error, Equatable, Sendable {

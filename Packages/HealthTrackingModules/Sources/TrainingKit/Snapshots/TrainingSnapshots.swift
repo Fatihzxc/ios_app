@@ -669,6 +669,28 @@ public enum SessionOHPLoadIncreasePolicy: Equatable, Sendable {
     case blocked(SessionOHPLoadIncreaseBlockReason)
 }
 
+public struct SessionOHPSymptomWriteRequest: Equatable, Sendable {
+    public let sessionID: UUID
+    public let response: OHPSymptomResponse
+    public let reportedAt: Date
+
+    public init(
+        sessionID: UUID,
+        response: OHPSymptomResponse,
+        reportedAt: Date
+    ) {
+        self.sessionID = sessionID
+        self.response = response
+        self.reportedAt = reportedAt
+    }
+}
+
+public enum SessionOHPSymptomWriteState: Equatable, Sendable {
+    case idle
+    case saving(request: SessionOHPSymptomWriteRequest)
+    case failed(request: SessionOHPSymptomWriteRequest)
+}
+
 public enum SessionOHPSafetyState: Equatable, Sendable {
     case notRequired
     case awaitingPreviousSessionResponse(

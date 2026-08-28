@@ -33,8 +33,9 @@ final class TodayCompositionTests: XCTestCase {
         XCTAssertNotNil(content.firstMeaningfulContentElapsed)
     }
 
-    func testAppRootInitializerRequiresTheComposedTodayViewModel() {
+    func testAppRootExplicitInitializerSupportsComposedAndDefaultMedicalSafetyController() {
         withExtendedLifetime(Self.rootInitializerIsTypeChecked) {}
+        withExtendedLifetime(Self.rootInitializerWithMedicalSafetyControllerIsTypeChecked) {}
     }
 
     func testEveryTodayEvidenceScenarioHasAStableLaunchValue() {
@@ -59,7 +60,18 @@ final class TodayCompositionTests: XCTestCase {
     func testLaunchPerformanceCheckpointNamesAreStableAndOrdered() {
         XCTAssertEqual(
             AppLaunchPerformance.Checkpoint.allCases.map(\.rawValue),
-            ["environment", "container", "dependencies", "seed", "today"]
+            [
+                "environment",
+                "container",
+                "dependencyEntry",
+                "dependencyContext",
+                "dependencyRepository",
+                "dependencyRouting",
+                "dependencyViewModel",
+                "dependencies",
+                "seed",
+                "today",
+            ]
         )
     }
 
@@ -90,6 +102,33 @@ final class TodayCompositionTests: XCTestCase {
         )
     }
 
+    func testMedicalSafetyFirstUseEvidenceRequiresOneExplicitUITestFlag() throws {
+        let baseArguments = [
+            "HealthTrackingApp",
+            "-ui-testing",
+            "-ui-test-scenario", "m3-health-checks",
+            "-ui-test-appearance", "light",
+        ]
+        XCTAssertFalse(
+            try XCTUnwrap(
+                AppUITestLaunchConfiguration.resolve(arguments: baseArguments)
+            ).exposesMedicalSafetyFirstUseEvidence
+        )
+
+        let flag = AppUITestLaunchConfiguration.medicalSafetyFirstUseEvidenceFlag
+        XCTAssertTrue(
+            try XCTUnwrap(
+                AppUITestLaunchConfiguration.resolve(arguments: baseArguments + [flag])
+            ).exposesMedicalSafetyFirstUseEvidence
+        )
+        XCTAssertNil(
+            AppUITestLaunchConfiguration.resolve(
+                arguments: baseArguments + [flag, flag]
+            ),
+            "Duplicate medical-safety evidence flags must fail closed."
+        )
+    }
+
     private static let rootInitializerIsTypeChecked: () -> Void = {
         guard let dependencies = try? AppDependencies(environment: .uiTesting) else { return }
         _ = AppRootView(
@@ -104,9 +143,33 @@ final class TodayCompositionTests: XCTestCase {
             nutritionQuickAddViewModel: dependencies.nutritionQuickAddViewModel,
             nutritionManualEntryViewModel: dependencies.nutritionManualEntryViewModel,
             makeSessionViewModel: dependencies.makeSessionViewModel,
+            makeTrackerFeatureRouter: dependencies.makeTrackerFeatureRouter,
             trainingHapticController: dependencies.trainingHapticController,
             shouldLoadFoundation: dependencies.shouldLoadFoundation,
             persistencePresentation: dependencies.persistencePresentation
+        )
+    }
+
+    private static let rootInitializerWithMedicalSafetyControllerIsTypeChecked: () -> Void = {
+        guard let dependencies = try? AppDependencies(environment: .uiTesting) else { return }
+        _ = AppRootView(
+            todayViewModel: dependencies.todayViewModel,
+            foundationViewModel: dependencies.foundationViewModel,
+            phaseTransitionViewModel: dependencies.phaseTransitionViewModel,
+            trainingHistoryViewModel: dependencies.trainingHistoryViewModel,
+            todayNutritionViewModel: dependencies.todayNutritionViewModel,
+            nutritionDayViewModel: dependencies.nutritionDayViewModel,
+            foodLibraryViewModel: dependencies.foodLibraryViewModel,
+            recipeLibraryViewModel: dependencies.recipeLibraryViewModel,
+            nutritionQuickAddViewModel: dependencies.nutritionQuickAddViewModel,
+            nutritionManualEntryViewModel: dependencies.nutritionManualEntryViewModel,
+            makeSessionViewModel: dependencies.makeSessionViewModel,
+            makeTrackerFeatureRouter: dependencies.makeTrackerFeatureRouter,
+            trainingHapticController: dependencies.trainingHapticController,
+            shouldLoadFoundation: dependencies.shouldLoadFoundation,
+            persistencePresentation: dependencies.persistencePresentation,
+            medicalSafetyAcknowledgementController:
+                dependencies.medicalSafetyAcknowledgementController
         )
     }
 }

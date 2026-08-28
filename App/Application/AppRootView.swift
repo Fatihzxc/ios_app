@@ -18,14 +18,62 @@ struct AppRootView: View {
     let nutritionQuickAddViewModel: NutritionQuickAddViewModel
     let nutritionManualEntryViewModel: NutritionManualEntryViewModel
     let makeSessionViewModel: @MainActor () -> SessionViewModel
+    let makeTrackerFeatureRouter: @MainActor () -> any TrackerFeatureRouting
+    let trackerFeatureRouterInstantiationCount: @MainActor () -> Int
     let trainingHapticController: TrainingHapticController?
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
+    let medicalSafetyAcknowledgementController: MedicalSafetyAcknowledgementController?
+
+    init(
+        todayViewModel: TodayViewModel,
+        foundationViewModel: FoundationProgramViewModel,
+        phaseTransitionViewModel: PhaseTransitionViewModel,
+        trainingHistoryViewModel: TrainingHistoryViewModel,
+        todayNutritionViewModel: TodayNutritionViewModel,
+        nutritionDayViewModel: NutritionDayViewModel,
+        foodLibraryViewModel: FoodLibraryViewModel,
+        recipeLibraryViewModel: RecipeLibraryViewModel,
+        nutritionQuickAddViewModel: NutritionQuickAddViewModel,
+        nutritionManualEntryViewModel: NutritionManualEntryViewModel,
+        makeSessionViewModel: @escaping @MainActor () -> SessionViewModel,
+        makeTrackerFeatureRouter: @escaping @MainActor () -> any TrackerFeatureRouting,
+        trackerFeatureRouterInstantiationCount: @escaping @MainActor () -> Int = { 0 },
+        trainingHapticController: TrainingHapticController?,
+        shouldLoadFoundation: Bool,
+        persistencePresentation: FoundationPersistencePresentation,
+        medicalSafetyAcknowledgementController: MedicalSafetyAcknowledgementController? = nil
+    ) {
+        self.todayViewModel = todayViewModel
+        self.foundationViewModel = foundationViewModel
+        self.phaseTransitionViewModel = phaseTransitionViewModel
+        self.trainingHistoryViewModel = trainingHistoryViewModel
+        self.todayNutritionViewModel = todayNutritionViewModel
+        self.nutritionDayViewModel = nutritionDayViewModel
+        self.foodLibraryViewModel = foodLibraryViewModel
+        self.recipeLibraryViewModel = recipeLibraryViewModel
+        self.nutritionQuickAddViewModel = nutritionQuickAddViewModel
+        self.nutritionManualEntryViewModel = nutritionManualEntryViewModel
+        self.makeSessionViewModel = makeSessionViewModel
+        self.makeTrackerFeatureRouter = makeTrackerFeatureRouter
+        self.trackerFeatureRouterInstantiationCount =
+            trackerFeatureRouterInstantiationCount
+        self.trainingHapticController = trainingHapticController
+        self.shouldLoadFoundation = shouldLoadFoundation
+        self.persistencePresentation = persistencePresentation
+        self.medicalSafetyAcknowledgementController = medicalSafetyAcknowledgementController
+    }
 
     @State private var selectedTab = AppTab.today
     @State private var hasStartedFoundationLoad = false
     @State private var sessionRoute: SessionRoute?
     @State private var nutritionQuickAddIntent: NutritionQuickAddIntent?
+    @State private var trackerFeatureRouter: (any TrackerFeatureRouting)?
+    @State private var trackerEntryRoute: TrackerEntryRoute?
+    #if DEBUG
+    @StateObject private var notificationAuthorizationEvidence =
+        AppUITestLaunchConfiguration.notificationAuthorizationEvidence
+    #endif
 
     var body: some View {
         Group {
@@ -54,7 +102,42 @@ struct AppRootView: View {
                     .accessibilityValue(evidence)
                     .allowsHitTesting(false)
             }
+            if exposesNotificationAuthorizationEvidence {
+                Text(String(notificationAuthorizationEvidence.requestCount))
+                    .font(.system(size: 1))
+                    .foregroundStyle(.clear)
+                    .frame(width: 1, height: 1)
+                    .accessibilityIdentifier(
+                        "health-check.notifications.permission.request-count"
+                    )
+                    .allowsHitTesting(false)
+            }
+            if exposesTrackerFeatureRouterEvidence {
+                Text(String(trackerFeatureRouterInstantiationCount()))
+                    .font(.system(size: 1))
+                    .foregroundStyle(.clear)
+                    .frame(width: 1, height: 1)
+                    .accessibilityIdentifier("m3.tracker-router.instantiation-count")
+                    .accessibilityValue(
+                        String(trackerFeatureRouterInstantiationCount())
+                    )
+                    .allowsHitTesting(false)
+            }
+            if exposesTrackerFeatureRouterEvidence,
+               AppUITestLaunchConfiguration.resolve()?.fixedNow != nil {
+                let fixedNowEvidence = ISO8601DateFormatter().string(from: AppDomainContext.now())
+                Text(fixedNowEvidence)
+                    .font(.system(size: 1))
+                    .foregroundStyle(.clear)
+                    .frame(width: 1, height: 1)
+                    .accessibilityIdentifier("m3.fixed-now")
+                    .accessibilityValue(fixedNowEvidence)
+                    .allowsHitTesting(false)
+            }
             #endif
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            levelZeroExplanation
         }
         .task {
             guard shouldLoadFoundation, !hasStartedFoundationLoad else { return }
@@ -82,6 +165,76 @@ struct AppRootView: View {
                     }
                 }
             )
+        }
+        .sheet(item: $trackerEntryRoute) { route in
+            if let trackerFeatureRouter {
+                switch route {
+                case .bodyMetric:
+                    trackerFeatureRouter.makeBodyMetricEntryView(
+                        onClose: { trackerEntryRoute = nil }
+                    )
+                case .lifestyle:
+                    trackerFeatureRouter.makeLifestyleEntryView(
+                        onClose: { trackerEntryRoute = nil }
+                    )
+                case .posture:
+                    trackerFeatureRouter.makePostureEntryView(
+                        onClose: { trackerEntryRoute = nil }
+                    )
+                case .healthChecks:
+                    trackerFeatureRouter.makeHealthCheckListView(
+                        onCommittedMutation: {
+                            Task {
+                                try? await trackerFeatureRouter
+                                    .reconcileHealthCheckNotificationsAfterCommittedMutation()
+                                await todayViewModel.load()
+                            }
+                        },
+                        onClose: { trackerEntryRoute = nil }
+                    )
+                case .bloodwork:
+                    trackerFeatureRouter.makeBloodworkListView(
+                        onCommittedMutation: {},
+                        onClose: { trackerEntryRoute = nil }
+                    )
+                case .progressPhotos:
+                    trackerFeatureRouter.makeProgressPhotoLifecycleView(
+                        onClose: { trackerEntryRoute = nil }
+                    )
+                }
+            }
+        }
+        .onChange(of: selectedTab) { _, selectedTab in
+            if selectedTab == .progress {
+                resolveTrackerFeatureBundle()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var levelZeroExplanation: some View {
+        if let controller = medicalSafetyAcknowledgementController,
+           controller.isLevelZeroVisible {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(String(localized: "medical.explanation.l0"))
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("medical.explanation.l0")
+                Button {
+                    controller.acknowledge()
+                } label: {
+                    Text(String(localized: "medical.explanation.l0.acknowledge"))
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("medical.explanation.l0.acknowledge")
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.regularMaterial)
+            .accessibilityElement(children: .contain)
         }
     }
 
@@ -119,7 +272,12 @@ struct AppRootView: View {
                 nutritionState: todayNutritionViewModel.state,
                 exposesLaunchPerformanceEvidence: exposesLaunchPerformanceEvidence,
                 onPerformAction: performTodayAction,
-                onAddMeal: performTodayNutritionAction
+                onAddMeal: performTodayNutritionAction,
+                onOpenTrackers: performTodayTrackerAction,
+                onOpenLifestyle: performTodayLifestyleAction,
+                onOpenPosture: performTodayPostureAction,
+                onOpenHealthChecks: performTodayHealthCheckAction,
+                onOpenBloodwork: performTodayBloodworkAction
             )
         case .training:
             FoundationProgramView(
@@ -139,7 +297,22 @@ struct AppRootView: View {
                 onNutritionSnapshot: publishNutritionSnapshot
             )
         case .progress:
-            ReportsFoundationView()
+            if let trackerFeatureRouter {
+                trackerFeatureRouter.makeProgressView(
+                    onOpenBodyMetric: { trackerEntryRoute = .bodyMetric },
+                    onOpenLifestyle: { trackerEntryRoute = .lifestyle },
+                    onOpenPosture: { trackerEntryRoute = .posture },
+                    onOpenHealthChecks: { trackerEntryRoute = .healthChecks },
+                    onOpenBloodwork: {
+                        trackerEntryRoute = .bloodwork
+                    },
+                    onOpenProgressPhotos: {
+                        trackerEntryRoute = .progressPhotos
+                    }
+                )
+            } else {
+                ReportsFoundationView()
+            }
         case .settings:
             SettingsFoundationView(
                 persistencePresentation: persistencePresentation,
@@ -185,6 +358,36 @@ struct AppRootView: View {
         nutritionQuickAddIntent = intent
     }
 
+    private func performTodayTrackerAction() {
+        resolveTrackerFeatureBundle()
+        trackerEntryRoute = .bodyMetric
+    }
+
+    private func performTodayLifestyleAction() {
+        resolveTrackerFeatureBundle()
+        trackerEntryRoute = .lifestyle
+    }
+
+    private func performTodayPostureAction() {
+        resolveTrackerFeatureBundle()
+        trackerEntryRoute = .posture
+    }
+
+    private func performTodayHealthCheckAction() {
+        resolveTrackerFeatureBundle()
+        trackerEntryRoute = .healthChecks
+    }
+
+    private func performTodayBloodworkAction() {
+        resolveTrackerFeatureBundle()
+        trackerEntryRoute = .bloodwork
+    }
+
+    private func resolveTrackerFeatureBundle() {
+        guard trackerFeatureRouter == nil else { return }
+        trackerFeatureRouter = makeTrackerFeatureRouter()
+    }
+
     private func publishNutritionSnapshot(
         _ snapshot: NutritionDayEntriesSnapshot,
         _ targets: NutritionMacroTargets?
@@ -199,10 +402,37 @@ struct AppRootView: View {
         false
         #endif
     }
+
+    private var exposesNotificationAuthorizationEvidence: Bool {
+        #if DEBUG
+        AppUITestLaunchConfiguration.resolve()?.scenario == .m3HealthChecks
+        #else
+        false
+        #endif
+    }
+
+    private var exposesTrackerFeatureRouterEvidence: Bool {
+        #if DEBUG
+        AppUITestLaunchConfiguration.resolve()?.scenario == .m3HealthChecks
+        #else
+        false
+        #endif
+    }
 }
 
 private struct SessionRoute: Identifiable {
     let id = UUID()
     let workoutDayID: UUID
     let viewModel: SessionViewModel
+}
+
+private enum TrackerEntryRoute: String, Identifiable {
+    case bodyMetric
+    case lifestyle
+    case posture
+    case healthChecks
+    case bloodwork
+    case progressPhotos
+
+    var id: String { rawValue }
 }

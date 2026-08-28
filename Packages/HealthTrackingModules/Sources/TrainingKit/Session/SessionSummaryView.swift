@@ -87,7 +87,8 @@ public struct SessionSummaryView: View {
                 .accessibilityIdentifier("session.summary.done")
             }
             .padding(.horizontal, AppSpacing.screenHorizontal)
-            .padding(.vertical, AppSpacing.large)
+            .padding(.top, AppSpacing.large)
+            .padding(.bottom, SessionStageLayout.bottomActionClearance)
         }
         .accessibilityIdentifier("session.stage.summary")
         .task {

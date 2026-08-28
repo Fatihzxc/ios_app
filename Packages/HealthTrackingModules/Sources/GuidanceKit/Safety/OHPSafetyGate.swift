@@ -156,7 +156,7 @@ public enum OHPSafetyGate {
                     entryVariant: variant,
                     loadIncreasePolicy: .blocked(.previousSymptomsPresent),
                     priorSessionQuestion: nil,
-                    safetyStop: nil
+                    safetyStop: SafetyStop(alternative: .halfKneelingDBPress)
                 )
             )
         case .uncertain:
@@ -165,7 +165,7 @@ public enum OHPSafetyGate {
                     entryVariant: variant,
                     loadIncreasePolicy: .blocked(.previousResponseUncertain),
                     priorSessionQuestion: nil,
-                    safetyStop: nil
+                    safetyStop: SafetyStop(alternative: .halfKneelingDBPress)
                 )
             )
         }

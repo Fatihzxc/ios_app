@@ -158,6 +158,28 @@ final class TodayGuidanceUITests: XCTestCase {
         XCTAssertFalse(identified("today.alert.measurement", in: app).exists)
     }
 
+    func testBloodworkCardKeepsRemainingAlertCountWithoutDuplicateAlertCard() {
+        let app = launch(
+            scenario: "today-reminder",
+            appearance: .light,
+            textSize: .standard
+        )
+
+        require(
+            identified("today.health-check.summary", in: app),
+            "The reminder fixture must render the bloodwork action card."
+        )
+        let remaining = require(
+            identified("today.alert.additional", in: app),
+            "The bloodwork action card must preserve the hidden-alert count."
+        )
+        XCTAssertEqual(remaining.label, "+1")
+        XCTAssertFalse(
+            identified("today.alert.bloodwork", in: app).exists,
+            "Bloodwork must render as one action card, not a duplicate generic alert."
+        )
+    }
+
     func testLoadingStateAndEmptyErrorRetriesUseTheRealSnapshotLoad() {
         let loadingApp = launch(
             scenario: "loading",
@@ -194,7 +216,18 @@ final class TodayGuidanceUITests: XCTestCase {
         let stabilizationLaunchCount = 5
         var samples: [Double] = []
         var phaseSamples: [[String: Double]] = []
-        let phaseNames = ["environment", "container", "dependencies", "seed", "today"]
+        let phaseNames = [
+            "environment",
+            "container",
+            "dependencyEntry",
+            "dependencyContext",
+            "dependencyRepository",
+            "dependencyRouting",
+            "dependencyViewModel",
+            "dependencies",
+            "seed",
+            "today",
+        ]
 
         let preparationApp = launch(
             scenario: "seeded",

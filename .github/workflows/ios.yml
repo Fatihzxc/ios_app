@@ -8,7 +8,7 @@ on:
 jobs:
   test:
     runs-on: macos-15
-    timeout-minutes: 180
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
 
@@ -57,6 +57,14 @@ jobs:
           fi
           printf '%s\n' "$version_output"
 
+      - name: Qualifying M3.11 behavior RED
+        timeout-minutes: 20
+        run: scripts/test-ios.sh --m311-red-only
+
+      - name: Qualifying M3.12 integration RED
+        timeout-minutes: 25
+        run: scripts/test-ios.sh --m312-red-only
+
       - name: M0 acceptance gates
         run: |
           scripts/verify-localization.sh --self-test
@@ -69,14 +77,74 @@ jobs:
           scripts/verify-haptics.sh
           scripts/verify-nutrition.sh --self-test
           scripts/verify-nutrition.sh
+          scripts/verify-trackers.sh --self-test
+          scripts/verify-trackers.sh
+          scripts/verify-m3-acceptance.sh --self-test
+          scripts/verify-m3-acceptance.sh
 
       - name: Fresh-clone bootstrap idempotence
         timeout-minutes: 15
         run: scripts/test-ios.sh --verify-bootstrap-idempotence
 
-      - name: Targeted HealthTrackingApp tests
+      - name: Targeted cleanup suspension regression
+        timeout-minutes: 20
+        run: scripts/test-ios.sh --only-testing PersistenceKitTests/ProgressPhotoRepositoryTests/testInboundRecordWaitsForCleanupLeaseAndRestoreSurvivesDeleteBoundary
+
+      - name: Targeted M3.11 notification planning and routing tests
+        timeout-minutes: 20
+        run: scripts/test-ios.sh --only-testing NotificationsKitTests
+
+      - name: Targeted M3.12 tracker acceptance tests
+        timeout-minutes: 30
+        run: scripts/test-ios.sh --only-testing HealthTrackingAppUITests/M3AcceptanceUITests
+
+      - name: Targeted M3.12 text-field touch-target regression
+        timeout-minutes: 20
+        run: scripts/test-ios.sh --only-testing HealthTrackingAppUITests/M3AccessibilityUITests
+
+      - name: Targeted M3.6 bloodwork reference tests
+        timeout-minutes: 20
+        run: scripts/test-ios.sh --only-testing HealthChecksKitTests
+
+      - name: Targeted M3.7-M3.9 photo lifecycle, gallery, and cloud asset tests
+        timeout-minutes: 20
+        # ProgressPhotoLifecycleUITests remains in the complete app suite below.
+        run: scripts/test-ios.sh --only-testing ProgressPhotosKitTests
+
+      - name: Targeted M3.10 pure medical safety tests
+        timeout-minutes: 20
+        run: scripts/test-ios.sh --only-testing HealthSafetyKitTests
+
+      - name: Targeted M3.10 medical safety focus and motion policy tests
+        timeout-minutes: 20
+        run: scripts/test-ios.sh --only-testing DesignSystemTests
+
+      - name: Targeted M3.10 shipped session safety tests
+        timeout-minutes: 20
+        run: scripts/test-ios.sh --only-testing TrainingKitTests
+
+      - name: Targeted M3.10 app safety composition tests
         timeout-minutes: 20
         run: scripts/test-ios.sh --only-testing HealthTrackingAppTests
+
+      - name: Targeted M3.11 app notification lifecycle tests
+        timeout-minutes: 20
+        run: scripts/test-ios.sh --only-testing HealthTrackingAppTests/HealthCheckNotificationCompositionTests
+
+      - name: Targeted M3.11 explicit notification permission UI test
+        timeout-minutes: 20
+        run: scripts/test-ios.sh --only-testing HealthTrackingAppUITests/HealthCheckNotificationFlowUITests
+
+      - name: Reset selected simulator before complete functional suite
+        run: |
+          set -euo pipefail
+          destination="$(scripts/select-simulator.sh)"
+          case "$destination" in
+            *,id=*) simulator_udid="${destination##*,id=}" ;;
+            *) echo "Selected simulator destination has no UDID: $destination" >&2; exit 1 ;;
+          esac
+          xcrun simctl shutdown "$simulator_udid" 2>/dev/null || :
+          xcrun simctl erase "$simulator_udid"
 
       - name: Test iOS app
         timeout-minutes: 90
@@ -177,6 +245,58 @@ jobs:
               "m2-nutrition-dark-high-contrast-food",
               "m2-nutrition-reduce-motion",
           }
+          body_metric_expected = {
+              "m3-metrics-progress-light",
+              "m3-metrics-entry-dark",
+              "m3-metrics-entry-ax5",
+          }
+          lifestyle_expected = {
+              "m3-lifestyle-combined-light",
+              "m3-lifestyle-progress-light",
+              "m3-lifestyle-entry-dark",
+              "m3-lifestyle-entry-ax5",
+          }
+          posture_expected = {
+              "m3-posture-entry-light",
+              "m3-posture-progress-light",
+              "m3-posture-entry-dark",
+              "m3-posture-entry-ax5",
+              "m3-posture-high-contrast",
+          }
+          ohp_safety_expected = {
+              "session-ohp-prior-question-light",
+              "session-ohp-blocked-light",
+              "session-ohp-half-kneeling-alternative-light",
+          }
+          health_check_expected = {
+              "m3-health-check-completed-light",
+              "m3-health-check-progress-light",
+              "m3-health-check-detail-ax5",
+          }
+          bloodwork_expected = {
+              "m3-bloodwork-empty-light",
+              "m3-bloodwork-detail-light",
+              "m3-bloodwork-editor-dark-high-contrast",
+              "m3-bloodwork-editor-ax5",
+          }
+          m3_acceptance_expected = {
+              "m3-acceptance-us6-progress-light",
+              "m3-acceptance-us8-today-light",
+          }
+          m3_accessibility_expected = {
+              f"m3-progress-{appearance}-{size}"
+              for appearance in ["light", "dark"]
+              for size in ["default", "xxl", "ax3", "ax5"]
+          } | {
+              "m3-progress-reduce-motion",
+              "m3-progress-high-contrast",
+          }
+          progress_photo_lifecycle_expected = {
+              "m3-photo-local-lifecycle-light",
+          }
+          progress_photo_gallery_expected = {
+              "m3-photo-gallery-light",
+          }
           expected = (
               shell_expected
               | gallery_expected
@@ -188,6 +308,16 @@ jobs:
               | nutrition_quick_add_expected
               | m2_acceptance_expected
               | nutrition_accessibility_expected
+              | body_metric_expected
+              | lifestyle_expected
+              | posture_expected
+              | ohp_safety_expected
+              | health_check_expected
+              | bloodwork_expected
+              | m3_acceptance_expected
+              | m3_accessibility_expected
+              | progress_photo_lifecycle_expected
+              | progress_photo_gallery_expected
           )
 
           owners = {
@@ -230,6 +360,46 @@ jobs:
               "NutritionAccessibilityUITests": {
                   "module": "HealthTrackingAppUITests",
                   "expected": nutrition_accessibility_expected,
+              },
+              "BodyMetricFlowUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": body_metric_expected,
+              },
+              "LifestyleFlowUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": lifestyle_expected,
+              },
+              "PostureFlowUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": posture_expected,
+              },
+              "OHPSafetyFlowUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": ohp_safety_expected,
+              },
+              "HealthCheckFlowUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": health_check_expected,
+              },
+              "BloodworkFlowUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": bloodwork_expected,
+              },
+              "M3AcceptanceUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": m3_acceptance_expected,
+              },
+              "M3AccessibilityUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": m3_accessibility_expected,
+              },
+              "ProgressPhotoLifecycleUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": progress_photo_lifecycle_expected,
+              },
+              "ProgressPhotoGalleryUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": progress_photo_gallery_expected,
               },
           }
 
@@ -485,8 +655,10 @@ jobs:
           fi
           xcodegen --version
 
-      - name: Test M1 on small iPhone at AX5
+      - name: Test M1 and M3 on small iPhone at AX5
         timeout-minutes: 20
+        env:
+          M3_SMALL_PHONE_GATE: "1"
         run: |
           set -euo pipefail
           scripts/bootstrap.sh
@@ -499,6 +671,8 @@ jobs:
             -destination "$destination" \
             -resultBundlePath "$result_bundle" \
             -only-testing:HealthTrackingAppUITests/TrainingAccessibilityUITests/testSmallPhoneAX5SessionRemainsOperable \
+            -only-testing:HealthTrackingAppUITests/M3AccessibilityUITests/testSmallPhoneAX5TrackerRoutesRemainOperable \
+            M3_SMALL_PHONE_GATE=1 \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Export small-phone screenshot evidence
@@ -520,28 +694,32 @@ jobs:
 
           export_directory = Path(sys.argv[1])
           manifest = json.loads((export_directory / "manifest.json").read_text())
-          matches = []
+          expected = {
+              "m1-session-small-ax5": "TrainingAccessibilityUITests",
+              "m3-progress-small-ax5": "M3AccessibilityUITests",
+          }
+          matches = {canonical: [] for canonical in expected}
           for record in manifest:
               identifier = record.get("testIdentifier", "")
-              if "TrainingAccessibilityUITests" not in identifier:
-                  continue
               for attachment in record.get("attachments", []):
                   suggested = attachment.get("suggestedHumanReadableName", "").lower()
-                  if suggested == "m1-session-small-ax5" or suggested.startswith(
-                      "m1-session-small-ax5_"
-                  ):
-                      matches.append(attachment["exportedFileName"])
-          if len(matches) != 1:
-              raise SystemExit(
-                  f"Expected one m1-session-small-ax5 screenshot; found {matches}"
+                  for canonical, owner in expected.items():
+                      if owner not in identifier:
+                          continue
+                      if suggested == canonical or suggested.startswith(f"{canonical}_"):
+                          matches[canonical].append(attachment["exportedFileName"])
+          for canonical, exported_names in matches.items():
+              if len(exported_names) != 1:
+                  raise SystemExit(
+                      f"Expected one {canonical} screenshot; found {exported_names}"
+                  )
+              source = export_directory / exported_names[0]
+              if source.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+                  raise SystemExit(f"Unsupported small-phone screenshot: {source}")
+              shutil.copyfile(
+                  source,
+                  export_directory / f"{canonical}{source.suffix.lower()}",
               )
-          source = export_directory / matches[0]
-          if source.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
-              raise SystemExit(f"Unsupported small-phone screenshot: {source}")
-          shutil.copyfile(
-              source,
-              export_directory / f"m1-session-small-ax5{source.suffix.lower()}",
-          )
           PY
 
       - name: Upload small-phone test results

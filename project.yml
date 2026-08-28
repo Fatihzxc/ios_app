@@ -32,6 +32,18 @@ targets:
       - package: HealthTrackingModules
         product: NutritionKit
       - package: HealthTrackingModules
+        product: HealthSafetyKit
+      - package: HealthTrackingModules
+        product: HealthChecksKit
+      - package: HealthTrackingModules
+        product: NotificationsKit
+      - package: HealthTrackingModules
+        product: ProgressPhotosKit
+      - package: HealthTrackingModules
+        product: MetricsKit
+      - package: HealthTrackingModules
+        product: SleepMoodKit
+      - package: HealthTrackingModules
         product: ReportsKit
       - package: HealthTrackingModules
         product: SettingsKit
@@ -82,6 +94,14 @@ schemes:
         - package: HealthTrackingModules/TrainingKitTests
         - package: HealthTrackingModules/DesignSystemTests
         - package: HealthTrackingModules/NutritionKitTests
+        - package: HealthTrackingModules/HealthSafetyKitTests
+        - package: HealthTrackingModules/HealthChecksKitTests
+        - package: HealthTrackingModules/NotificationsKitTests
+        - package: HealthTrackingModules/ProgressPhotosKitTests
+        - package: HealthTrackingModules/MetricsKitTests
+        - package: HealthTrackingModules/SleepMoodKitTests
+      environmentVariables:
+        M3_SMALL_PHONE_GATE: "$(M3_SMALL_PHONE_GATE)"
     archive:
       config: Release
   HealthTrackingApp-Cloud:

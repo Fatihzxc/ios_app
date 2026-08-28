@@ -1,6 +1,13 @@
 {
   "sourceLanguage" : "tr",
   "strings" : {
+    "progress.bloodwork.action" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Kan sonuçlarını aç" } } } },
+    "progress.health-check.action" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Sağlık kontrollerini aç" } } } },
+    "progress.lifestyle.action" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Uyku ve ruh hali ekle" } } } },
+    "progress.metrics.action" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Vücut ölçümü ekle" } } } },
+    "progress.photos.action" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "İlerleme fotoğraflarını aç" } } } },
+    "progress.posture.action" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Duruş ve belirti ekle" } } } },
+    "progress.quick-actions.heading" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Hızlı takip" } } } },
     "bootstrap.configurationError" : {
       "localizations" : {
         "tr" : {
@@ -43,6 +50,12 @@
     },
     "foundation.empty.accessibility" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Programı yeniden yükle" } } }
+    },
+    "medical.explanation.l0" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Bu uygulama yalnızca takip ve alışkanlık kaydı içindir; tıbbi değerlendirme yapmaz." } } }
+    },
+    "medical.explanation.l0.acknowledge" : {
+      "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Anladım" } } }
     },
     "foundation.empty.action" : {
       "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Yeniden yükle" } } }

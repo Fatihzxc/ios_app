@@ -473,10 +473,24 @@ final class SessionViewModelTests: XCTestCase {
             ]
         )
         repository.completedExerciseHistory[exercise.id] = [prior]
-        let viewModel = makeViewModel(repository)
+        var safetyContexts: [TrainingSymptomSafetyContext] = []
+        let viewModel = SessionViewModel(
+            repository: repository,
+            now: { self.now },
+            symptomSafetyPresentationProvider: { context in
+                safetyContexts.append(context)
+                guard context == .priorOverheadPressResponse(.notAsked) else { return nil }
+                return self.missingAnswerSafetyPresentation
+            }
+        )
 
         await viewModel.start(workoutDayID: plan.workoutDayID)
 
+        XCTAssertEqual(safetyContexts.last, .priorOverheadPressResponse(.notAsked))
+        XCTAssertEqual(
+            viewModel.symptomSafetyPresentation,
+            missingAnswerSafetyPresentation
+        )
         XCTAssertEqual(
             viewModel.ohpSafetyState,
             .awaitingPreviousSessionResponse(
@@ -503,6 +517,10 @@ final class SessionViewModelTests: XCTestCase {
             viewModel.ohpSafetyState,
             .ready(entryVariant: .standingNeutral, loadIncreasePolicy: .allowed)
         )
+        XCTAssertNil(
+            viewModel.symptomSafetyPresentation,
+            "An explicit symptom-free answer must clear only the fail-closed missing-answer L2."
+        )
 
         await viewModel.skipWarmup()
 
@@ -513,6 +531,96 @@ final class SessionViewModelTests: XCTestCase {
             "standing-neutral"
         )
         XCTAssertEqual(viewModel.recommendationReason, .ohp(.increaseAllowed))
+    }
+
+    func testStoredPriorSymptomsAndUncertaintyStopOHPAtTheSafeAlternative() async {
+        for response in [OHPSymptomResponse.symptomsPresent, .uncertain] {
+            let plan = makeOHPPlan()
+            let repository = FakeSessionRepository(plan: plan)
+            repository.configureProgram(week: 3)
+            let exercise = plan.exercises[0]
+            repository.completedExerciseHistory[exercise.id] = [
+                makeCompletedHistory(
+                    dayID: plan.workoutDayID,
+                    exerciseID: exercise.id,
+                    ohpSymptomResponse: response,
+                    measurements: [
+                        .init(weightKg: 10, reps: 12, rir: 1),
+                        .init(weightKg: 10, reps: 12, rir: 1),
+                        .init(weightKg: 10, reps: 12, rir: 1),
+                    ]
+                ),
+            ]
+            let viewModel = SessionViewModel(
+                repository: repository,
+                now: { self.now },
+                symptomSafetyPresentationProvider: { context in
+                    guard context == .priorOverheadPressResponse(response) else { return nil }
+                    return self.missingAnswerSafetyPresentation
+                }
+            )
+
+            await viewModel.start(workoutDayID: plan.workoutDayID)
+            await viewModel.skipWarmup()
+
+            XCTAssertEqual(
+                viewModel.ohpSafetyState,
+                .stopped(alternative: repository.ohpSafeAlternative),
+                "Stored prior \(response) must stop OHP instead of merely holding its load."
+            )
+            XCTAssertEqual(viewModel.displayedExercise, repository.ohpSafeAlternative)
+            XCTAssertFalse(viewModel.canReportCurrentOHPSymptom)
+            XCTAssertEqual(
+                viewModel.symptomSafetyPresentation,
+                missingAnswerSafetyPresentation
+            )
+        }
+    }
+
+    func testAnsweringPriorSymptomsOrUncertaintyStopsOHPAtTheSafeAlternative() async {
+        for response in [OHPSymptomResponse.symptomsPresent, .uncertain] {
+            let plan = makeOHPPlan()
+            let repository = FakeSessionRepository(plan: plan)
+            repository.configureProgram(week: 3)
+            let exercise = plan.exercises[0]
+            let prior = makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                ohpSymptomResponse: .notAsked,
+                measurements: [
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                ]
+            )
+            repository.completedExerciseHistory[exercise.id] = [prior]
+            let viewModel = SessionViewModel(
+                repository: repository,
+                now: { self.now },
+                symptomSafetyPresentationProvider: { _ in
+                    self.missingAnswerSafetyPresentation
+                }
+            )
+
+            await viewModel.start(workoutDayID: plan.workoutDayID)
+            await viewModel.answerPreviousOHPSymptom(response)
+            await viewModel.skipWarmup()
+
+            XCTAssertEqual(
+                repository.ohpSymptomUpdates,
+                [.init(id: prior.session.id, response: response, date: now)]
+            )
+            XCTAssertEqual(
+                viewModel.ohpSafetyState,
+                .stopped(alternative: repository.ohpSafeAlternative)
+            )
+            XCTAssertEqual(viewModel.displayedExercise, repository.ohpSafeAlternative)
+            XCTAssertFalse(viewModel.canReportCurrentOHPSymptom)
+            XCTAssertEqual(
+                viewModel.symptomSafetyPresentation,
+                missingAnswerSafetyPresentation
+            )
+        }
     }
 
     func testOHPFirstSessionAndUncertainHistoryNeverIncreaseLoad() async {
@@ -554,16 +662,41 @@ final class SessionViewModelTests: XCTestCase {
                 ]
             ),
         ]
-        let heldViewModel = makeViewModel(heldRepository)
+        var heldSafetyContexts: [TrainingSymptomSafetyContext] = []
+        let heldViewModel = SessionViewModel(
+            repository: heldRepository,
+            now: { self.now },
+            symptomSafetyPresentationProvider: { context in
+                heldSafetyContexts.append(context)
+                guard context == .priorOverheadPressResponse(.uncertain) else { return nil }
+                return self.missingAnswerSafetyPresentation
+            }
+        )
 
         await heldViewModel.start(workoutDayID: heldPlan.workoutDayID)
+        XCTAssertEqual(
+            heldSafetyContexts.last,
+            .priorOverheadPressResponse(.uncertain)
+        )
+        XCTAssertEqual(
+            heldViewModel.symptomSafetyPresentation,
+            missingAnswerSafetyPresentation
+        )
         await heldViewModel.skipWarmup()
 
-        XCTAssertEqual(heldViewModel.currentSetDraft?.measurement.weightKg, 10)
-        XCTAssertNotEqual(heldViewModel.currentSetDraft?.measurement.weightKg, 12.5)
         XCTAssertEqual(
-            heldViewModel.recommendationReason,
-            .ohp(.previousResponseUncertain)
+            heldViewModel.ohpSafetyState,
+            .stopped(alternative: heldRepository.ohpSafeAlternative)
+        )
+        XCTAssertEqual(heldViewModel.displayedExercise, heldRepository.ohpSafeAlternative)
+        XCTAssertEqual(
+            heldViewModel.currentSetDraft?.exerciseTemplateID,
+            heldRepository.ohpSafeAlternative.id
+        )
+        XCTAssertNotEqual(heldViewModel.currentSetDraft?.measurement.weightKg, 12.5)
+        XCTAssertFalse(heldViewModel.canReportCurrentOHPSymptom)
+        XCTAssertTrue(
+            heldSafetyContexts.contains(.priorOverheadPressResponse(.uncertain))
         )
     }
 
@@ -605,6 +738,7 @@ final class SessionViewModelTests: XCTestCase {
     func testCurrentOHPSymptomWritesCurrentSessionAndRoutesOnlyTheExerciseToAlternative() async {
         let plan = makeOHPPlan()
         let repository = FakeSessionRepository(plan: plan)
+        let symptomClient = SymptomEventClientSpy()
         repository.configureProgram(week: 5)
         let exercise = plan.exercises[0]
         repository.completedExerciseHistory[exercise.id] = [
@@ -619,7 +753,10 @@ final class SessionViewModelTests: XCTestCase {
                 ]
             ),
         ]
-        let viewModel = makeViewModel(repository)
+        let viewModel = makeViewModel(
+            repository,
+            symptomEventClient: symptomClient
+        )
         await viewModel.start(workoutDayID: plan.workoutDayID)
         await viewModel.skipWarmup()
         let currentSessionID = requireActive(viewModel.state).session.id
@@ -647,6 +784,1129 @@ final class SessionViewModelTests: XCTestCase {
         XCTAssertEqual(
             requireActive(viewModel.state).session.ohpSymptomResponse,
             .symptomsPresent
+        )
+        let event = SymptomJournalEvent(
+            id: currentSessionID,
+            occurredAt: now,
+            source: .overheadPressCurrentSymptom
+        )
+        XCTAssertEqual(symptomClient.events, [event])
+        XCTAssertEqual(viewModel.symptomJournalState, .recorded(event: event))
+    }
+
+    func testCurrentOHPSymptomStopsBeforeTheRepositoryWriteCompletes() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        let symptomClient = SymptomEventClientSpy()
+        repository.configureProgram(week: 5)
+        let exercise = plan.exercises[0]
+        repository.completedExerciseHistory[exercise.id] = [
+            makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                ohpSymptomResponse: .symptomFree,
+                measurements: [
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                ]
+            ),
+        ]
+        repository.suspendNextOHPSymptomUpdate()
+        let viewModel = SessionViewModel(
+            repository: repository,
+            now: { self.now },
+            symptomEventClient: symptomClient,
+            symptomSafetyPresentationProvider: { context in
+                guard context == .currentOverheadPressResponse(.symptomsPresent) else {
+                    return nil
+                }
+                return self.missingAnswerSafetyPresentation
+            }
+        )
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let currentSessionID = requireActive(viewModel.state).session.id
+        let expectedRequest = SessionOHPSymptomWriteRequest(
+            sessionID: currentSessionID,
+            response: .symptomsPresent,
+            reportedAt: now
+        )
+        let progressUpdateCount = repository.progressUpdates.count
+        let transitionCount = repository.transitions.count
+        let deletionCount = repository.deletedSessionIDs.count
+
+        let report = Task { await viewModel.reportCurrentOHPSymptom() }
+        await repository.waitUntilOHPSymptomUpdateIsSuspended()
+
+        XCTAssertEqual(
+            viewModel.ohpSymptomWriteState,
+            .saving(request: expectedRequest)
+        )
+        XCTAssertNotNil(activePresentation(from: viewModel.state))
+        XCTAssertEqual(
+            viewModel.ohpSafetyState,
+            .stopped(alternative: repository.ohpSafeAlternative)
+        )
+        XCTAssertEqual(viewModel.displayedExercise, repository.ohpSafeAlternative)
+        XCTAssertFalse(viewModel.canReportCurrentOHPSymptom)
+        XCTAssertEqual(
+            requireActive(viewModel.state).session.ohpSymptomCheckedAt,
+            expectedRequest.reportedAt
+        )
+        XCTAssertEqual(
+            viewModel.symptomSafetyPresentation,
+            missingAnswerSafetyPresentation
+        )
+        XCTAssertEqual(viewModel.symptomJournalState, .idle)
+        XCTAssertTrue(symptomClient.events.isEmpty)
+        XCTAssertTrue(viewModel.hasPendingCurrentOHPSymptomWrite)
+
+        let stoppedState = viewModel.state
+        await viewModel.advanceExercise()
+        await viewModel.goBack()
+        await viewModel.finishIncomplete()
+        viewModel.requestDeletion()
+        await viewModel.confirmDeletion()
+
+        XCTAssertEqual(
+            repository.progressUpdates.count,
+            progressUpdateCount,
+            "Pending current-symptom persistence must block exercise progress and completion."
+        )
+        XCTAssertEqual(repository.transitions.count, transitionCount)
+        XCTAssertEqual(repository.deletedSessionIDs.count, deletionCount)
+        XCTAssertEqual(viewModel.state, stoppedState)
+        XCTAssertFalse(viewModel.isDeleteConfirmationPresented)
+        XCTAssertEqual(viewModel.symptomJournalState, .idle)
+
+        await viewModel.reportCurrentOHPSymptom()
+        await viewModel.retryCurrentOHPSymptomWrite()
+        XCTAssertEqual(
+            repository.ohpSymptomUpdates,
+            [expectedRequest.repositoryUpdate],
+            "A pending exact write must reject a second write or retry."
+        )
+        XCTAssertTrue(symptomClient.events.isEmpty)
+
+        repository.resumeSuspendedOHPSymptomUpdate()
+        await report.value
+
+        XCTAssertEqual(viewModel.ohpSymptomWriteState, .idle)
+        XCTAssertFalse(viewModel.hasPendingCurrentOHPSymptomWrite)
+        XCTAssertFalse(viewModel.isSessionRouteMutationInFlight)
+
+        let progressCountAfterSymptomWrite = repository.progressUpdates.count
+        await viewModel.advanceExercise()
+        XCTAssertEqual(repository.progressUpdates.count, progressCountAfterSymptomWrite + 1)
+        XCTAssertEqual(requireActive(viewModel.state).progress.stage, .cooldown)
+        XCTAssertFalse(viewModel.isSessionRouteMutationInFlight)
+    }
+
+    func testAdvanceRouteFirstRejectsSymptomAndDuplicateRoutesUntilChosenProgressCompletes() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        configureCurrentOHPSymptomScenario(repository)
+        let symptomClient = SymptomEventClientSpy()
+        let viewModel = makeViewModel(repository, symptomEventClient: symptomClient)
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let safetyState = viewModel.ohpSafetyState
+        let progressCount = repository.progressUpdates.count
+        let transitionCount = repository.transitions.count
+        repository.suspendNextProgressUpdate()
+
+        let advance = Task { await viewModel.advanceExercise() }
+        await repository.waitUntilProgressUpdateIsSuspended()
+
+        XCTAssertTrue(viewModel.isSessionRouteMutationInFlight)
+        XCTAssertFalse(viewModel.canReportCurrentOHPSymptom)
+        XCTAssertEqual(repository.progress?.stage, .cooldown)
+        await viewModel.reportCurrentOHPSymptom()
+        await viewModel.advanceExercise()
+        await viewModel.goBack()
+        await viewModel.finishIncomplete()
+        XCTAssertTrue(repository.ohpSymptomUpdates.isEmpty)
+        XCTAssertTrue(symptomClient.events.isEmpty)
+        XCTAssertEqual(viewModel.ohpSymptomWriteState, .idle)
+        XCTAssertEqual(viewModel.ohpSafetyState, safetyState)
+        XCTAssertEqual(repository.progressUpdates.count, progressCount + 1)
+        XCTAssertEqual(repository.transitions.count, transitionCount)
+
+        repository.resumeSuspendedProgressUpdate()
+        await advance.value
+
+        XCTAssertFalse(viewModel.isSessionRouteMutationInFlight)
+        XCTAssertEqual(requireActive(viewModel.state).progress.stage, .cooldown)
+        XCTAssertEqual(repository.progress?.stage, .cooldown)
+        XCTAssertTrue(repository.ohpSymptomUpdates.isEmpty)
+        XCTAssertTrue(symptomClient.events.isEmpty)
+    }
+
+    func testGoBackRouteFirstRejectsSymptomUntilChosenProgressCompletes() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        configureCurrentOHPSymptomScenario(repository)
+        let symptomClient = SymptomEventClientSpy()
+        let viewModel = makeViewModel(repository, symptomEventClient: symptomClient)
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let safetyState = viewModel.ohpSafetyState
+        let progressCount = repository.progressUpdates.count
+        repository.suspendNextProgressUpdate()
+
+        let goBack = Task { await viewModel.goBack() }
+        await repository.waitUntilProgressUpdateIsSuspended()
+
+        XCTAssertTrue(viewModel.isSessionRouteMutationInFlight)
+        XCTAssertFalse(viewModel.canReportCurrentOHPSymptom)
+        XCTAssertEqual(repository.progress?.stage, .warmup)
+        await viewModel.reportCurrentOHPSymptom()
+        await viewModel.goBack()
+        XCTAssertTrue(repository.ohpSymptomUpdates.isEmpty)
+        XCTAssertTrue(symptomClient.events.isEmpty)
+        XCTAssertEqual(viewModel.ohpSymptomWriteState, .idle)
+        XCTAssertEqual(viewModel.ohpSafetyState, safetyState)
+        XCTAssertEqual(repository.progressUpdates.count, progressCount + 1)
+
+        repository.resumeSuspendedProgressUpdate()
+        await goBack.value
+
+        XCTAssertFalse(viewModel.isSessionRouteMutationInFlight)
+        XCTAssertEqual(requireActive(viewModel.state).progress.stage, .warmup)
+        XCTAssertEqual(repository.progress?.stage, .warmup)
+        XCTAssertTrue(repository.ohpSymptomUpdates.isEmpty)
+    }
+
+    func testFinishRouteFirstKeepsTheLockThroughProgressAndTransition() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        configureCurrentOHPSymptomScenario(repository)
+        let symptomClient = SymptomEventClientSpy()
+        let viewModel = makeViewModel(repository, symptomEventClient: symptomClient)
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let progressCount = repository.progressUpdates.count
+        let transitionCount = repository.transitions.count
+        repository.suspendNextProgressUpdate()
+        repository.suspendNextTransition()
+
+        let finish = Task { await viewModel.finishIncomplete() }
+        await repository.waitUntilProgressUpdateIsSuspended()
+
+        XCTAssertTrue(viewModel.isSessionRouteMutationInFlight)
+        XCTAssertFalse(viewModel.canReportCurrentOHPSymptom)
+        XCTAssertEqual(repository.progress?.stage, .summary)
+        await viewModel.reportCurrentOHPSymptom()
+        XCTAssertTrue(repository.ohpSymptomUpdates.isEmpty)
+        XCTAssertEqual(repository.progressUpdates.count, progressCount + 1)
+        XCTAssertEqual(repository.transitions.count, transitionCount)
+
+        repository.resumeSuspendedProgressUpdate()
+        await repository.waitUntilTransitionIsSuspended()
+
+        XCTAssertTrue(viewModel.isSessionRouteMutationInFlight)
+        XCTAssertEqual(requireActive(viewModel.state).progress.stage, .summary)
+        XCTAssertEqual(repository.transitions.count, transitionCount + 1)
+        XCTAssertNil(repository.inProgressSession)
+        await viewModel.reportCurrentOHPSymptom()
+        XCTAssertTrue(repository.ohpSymptomUpdates.isEmpty)
+        XCTAssertTrue(symptomClient.events.isEmpty)
+
+        repository.resumeSuspendedTransition()
+        await finish.value
+
+        let completed = requireActive(viewModel.state)
+        XCTAssertFalse(viewModel.isSessionRouteMutationInFlight)
+        XCTAssertEqual(completed.progress.stage, .summary)
+        XCTAssertEqual(completed.session.status, .completed)
+        XCTAssertEqual(repository.progress?.stage, .summary)
+        XCTAssertEqual(repository.transitions.count, transitionCount + 1)
+        XCTAssertTrue(repository.ohpSymptomUpdates.isEmpty)
+    }
+
+    func testRouteLockClearsAfterAppliedProgressFailureWithoutAcceptingSymptom() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        configureCurrentOHPSymptomScenario(repository)
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        repository.progressUpdateOutcomes = [.failure(FakeSessionError.save)]
+        repository.suspendNextProgressUpdate()
+
+        let advance = Task { await viewModel.advanceExercise() }
+        await repository.waitUntilProgressUpdateIsSuspended()
+        XCTAssertTrue(viewModel.isSessionRouteMutationInFlight)
+        await viewModel.reportCurrentOHPSymptom()
+        XCTAssertTrue(repository.ohpSymptomUpdates.isEmpty)
+
+        repository.resumeSuspendedProgressUpdate()
+        await advance.value
+
+        XCTAssertFalse(viewModel.isSessionRouteMutationInFlight)
+        XCTAssertEqual(viewModel.state, .failed(.progress))
+        XCTAssertEqual(repository.progress?.stage, .cooldown)
+        XCTAssertTrue(repository.ohpSymptomUpdates.isEmpty)
+    }
+
+    func testCurrentOHPSymptomWriteFailureRetainsStopAndRetriesTheExactRequestOnce() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        repository.ohpSymptomUpdateOutcomes = [
+            .failure(FakeSessionError.save),
+            .success(()),
+        ]
+        let symptomClient = SymptomEventClientSpy()
+        repository.configureProgram(week: 5)
+        let exercise = plan.exercises[0]
+        repository.completedExerciseHistory[exercise.id] = [
+            makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                ohpSymptomResponse: .symptomFree,
+                measurements: [
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                ]
+            ),
+        ]
+        var clock = now
+        let viewModel = SessionViewModel(
+            repository: repository,
+            now: { clock },
+            symptomEventClient: symptomClient,
+            symptomSafetyPresentationProvider: { context in
+                guard context == .currentOverheadPressResponse(.symptomsPresent) else {
+                    return nil
+                }
+                return self.missingAnswerSafetyPresentation
+            }
+        )
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let sessionID = requireActive(viewModel.state).session.id
+        let request = SessionOHPSymptomWriteRequest(
+            sessionID: sessionID,
+            response: .symptomsPresent,
+            reportedAt: now
+        )
+
+        await viewModel.reportCurrentOHPSymptom()
+
+        XCTAssertNotNil(activePresentation(from: viewModel.state))
+        XCTAssertEqual(viewModel.ohpSymptomWriteState, .failed(request: request))
+        XCTAssertEqual(
+            viewModel.ohpSafetyState,
+            .stopped(alternative: repository.ohpSafeAlternative)
+        )
+        XCTAssertEqual(viewModel.displayedExercise, repository.ohpSafeAlternative)
+        XCTAssertFalse(viewModel.canReportCurrentOHPSymptom)
+        XCTAssertEqual(
+            requireActive(viewModel.state).session.ohpSymptomResponse,
+            .symptomsPresent
+        )
+        XCTAssertEqual(
+            requireActive(viewModel.state).session.ohpSymptomCheckedAt,
+            request.reportedAt
+        )
+        XCTAssertEqual(
+            viewModel.symptomSafetyPresentation,
+            missingAnswerSafetyPresentation
+        )
+        XCTAssertEqual(repository.ohpSymptomUpdates, [request.repositoryUpdate])
+        XCTAssertEqual(viewModel.symptomJournalState, .idle)
+        XCTAssertTrue(symptomClient.events.isEmpty)
+        XCTAssertTrue(viewModel.hasPendingCurrentOHPSymptomWrite)
+
+        let failedStoppedState = viewModel.state
+        let progressUpdateCount = repository.progressUpdates.count
+        let transitionCount = repository.transitions.count
+        await viewModel.advanceExercise()
+        await viewModel.goBack()
+        await viewModel.finishIncomplete()
+
+        XCTAssertEqual(
+            repository.progressUpdates.count,
+            progressUpdateCount,
+            "A failed pending write must keep route actions fail closed until exact retry succeeds."
+        )
+        XCTAssertEqual(repository.transitions.count, transitionCount)
+        XCTAssertEqual(viewModel.state, failedStoppedState)
+        XCTAssertEqual(viewModel.ohpSymptomWriteState, .failed(request: request))
+        XCTAssertEqual(viewModel.symptomJournalState, .idle)
+        XCTAssertTrue(symptomClient.events.isEmpty)
+
+        clock = now.addingTimeInterval(3_600)
+        await viewModel.retryCurrentOHPSymptomWrite()
+
+        let expectedEvent = SymptomJournalEvent(
+            id: sessionID,
+            occurredAt: request.reportedAt,
+            source: .overheadPressCurrentSymptom
+        )
+        XCTAssertEqual(
+            repository.ohpSymptomUpdates,
+            [request.repositoryUpdate, request.repositoryUpdate],
+            "Retry must preserve the original session, response, and timestamp."
+        )
+        XCTAssertEqual(viewModel.ohpSymptomWriteState, .idle)
+        XCTAssertFalse(viewModel.hasPendingCurrentOHPSymptomWrite)
+        XCTAssertEqual(symptomClient.events, [expectedEvent])
+        XCTAssertEqual(viewModel.symptomJournalState, .recorded(event: expectedEvent))
+
+        await viewModel.retryCurrentOHPSymptomWrite()
+        await viewModel.reportCurrentOHPSymptom()
+        XCTAssertEqual(repository.ohpSymptomUpdates.count, 2)
+        XCTAssertEqual(symptomClient.events, [expectedEvent])
+    }
+
+    func testDeletionFailurePreservesStoppedSymptomRetryAndExactRequest() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        configureCurrentOHPSymptomScenario(repository)
+        repository.ohpSymptomUpdateOutcomes = [
+            .failure(FakeSessionError.save),
+            .success(()),
+        ]
+        repository.deleteOutcomes = [.failure(FakeSessionError.save)]
+        let symptomClient = SymptomEventClientSpy()
+        let viewModel = SessionViewModel(
+            repository: repository,
+            now: { self.now },
+            symptomEventClient: symptomClient,
+            symptomSafetyPresentationProvider: { context in
+                guard context == .currentOverheadPressResponse(.symptomsPresent) else {
+                    return nil
+                }
+                return self.missingAnswerSafetyPresentation
+            }
+        )
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let sessionID = requireActive(viewModel.state).session.id
+        let request = SessionOHPSymptomWriteRequest(
+            sessionID: sessionID,
+            response: .symptomsPresent,
+            reportedAt: now
+        )
+        await viewModel.reportCurrentOHPSymptom()
+        let stoppedState = viewModel.state
+
+        viewModel.requestDeletion()
+        await viewModel.confirmDeletion()
+
+        XCTAssertEqual(viewModel.state, stoppedState)
+        XCTAssertEqual(viewModel.ohpSymptomWriteState, .failed(request: request))
+        XCTAssertTrue(viewModel.hasPendingCurrentOHPSymptomWrite)
+        XCTAssertEqual(
+            viewModel.ohpSafetyState,
+            .stopped(alternative: repository.ohpSafeAlternative)
+        )
+        XCTAssertEqual(viewModel.symptomSafetyPresentation, missingAnswerSafetyPresentation)
+        XCTAssertTrue(viewModel.hasSessionDeletionFailure)
+        XCTAssertFalse(viewModel.isDeleteConfirmationPresented)
+        XCTAssertTrue(repository.deletedSessionIDs.isEmpty)
+        XCTAssertTrue(symptomClient.events.isEmpty)
+
+        await viewModel.retryCurrentOHPSymptomWrite()
+
+        XCTAssertEqual(
+            repository.ohpSymptomUpdates,
+            [request.repositoryUpdate, request.repositoryUpdate]
+        )
+        XCTAssertEqual(viewModel.ohpSymptomWriteState, .idle)
+        XCTAssertFalse(viewModel.hasPendingCurrentOHPSymptomWrite)
+        XCTAssertNotNil(activePresentation(from: viewModel.state))
+        XCTAssertEqual(
+            viewModel.ohpSafetyState,
+            .stopped(alternative: repository.ohpSafeAlternative)
+        )
+        XCTAssertEqual(symptomClient.events.count, 1)
+    }
+
+    func testSuccessfulDeletionIsTheOnlyDeletionPathThatDiscardsPendingSymptomRetry() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        configureCurrentOHPSymptomScenario(repository)
+        repository.ohpSymptomUpdateOutcomes = [.failure(FakeSessionError.save)]
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let sessionID = requireActive(viewModel.state).session.id
+        await viewModel.reportCurrentOHPSymptom()
+        XCTAssertTrue(viewModel.hasPendingCurrentOHPSymptomWrite)
+
+        viewModel.requestDeletion()
+        await viewModel.confirmDeletion()
+
+        XCTAssertEqual(repository.deletedSessionIDs, [sessionID])
+        XCTAssertEqual(viewModel.state, .dismissed)
+        XCTAssertEqual(viewModel.ohpSymptomWriteState, .idle)
+        XCTAssertFalse(viewModel.hasPendingCurrentOHPSymptomWrite)
+        XCTAssertFalse(viewModel.hasSessionDeletionFailure)
+    }
+
+    func testDeleteFirstLeaseRejectsSymptomRoutesAndDuplicateDeleteUntilSuccess() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        configureCurrentOHPSymptomScenario(repository)
+        let symptomClient = SymptomEventClientSpy()
+        let viewModel = makeViewModel(repository, symptomEventClient: symptomClient)
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let sessionID = requireActive(viewModel.state).session.id
+        let progressCount = repository.progressUpdates.count
+        let transitionCount = repository.transitions.count
+        repository.suspendNextDeletion()
+
+        viewModel.requestDeletion()
+        let deletion = Task { await viewModel.confirmDeletion() }
+        await repository.waitUntilDeletionIsSuspended()
+
+        XCTAssertTrue(viewModel.isSessionDeletionInFlight)
+        XCTAssertFalse(viewModel.canReportCurrentOHPSymptom)
+        await viewModel.reportCurrentOHPSymptom()
+        await viewModel.advanceExercise()
+        await viewModel.goBack()
+        await viewModel.finishIncomplete()
+        XCTAssertTrue(repository.ohpSymptomUpdates.isEmpty)
+        XCTAssertTrue(symptomClient.events.isEmpty)
+        XCTAssertEqual(repository.progressUpdates.count, progressCount)
+        XCTAssertEqual(repository.transitions.count, transitionCount)
+
+        viewModel.cancelDeletion()
+        viewModel.requestDeletion()
+        XCTAssertFalse(viewModel.isDeleteConfirmationPresented)
+        await viewModel.confirmDeletion()
+        XCTAssertEqual(repository.deleteAttempts, [sessionID])
+        XCTAssertTrue(repository.deletedSessionIDs.isEmpty)
+
+        repository.resumeSuspendedDeletion()
+        await deletion.value
+
+        XCTAssertFalse(viewModel.isSessionDeletionInFlight)
+        XCTAssertEqual(repository.deleteAttempts, [sessionID])
+        XCTAssertEqual(repository.deletedSessionIDs, [sessionID])
+        XCTAssertEqual(viewModel.state, .dismissed)
+        XCTAssertTrue(repository.ohpSymptomUpdates.isEmpty)
+        XCTAssertTrue(symptomClient.events.isEmpty)
+    }
+
+    func testSuspendedDeletionFailureRetainsStoppedExactRetryUntilLeaseReleases() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        configureCurrentOHPSymptomScenario(repository)
+        repository.ohpSymptomUpdateOutcomes = [
+            .failure(FakeSessionError.save),
+            .success(()),
+        ]
+        repository.deleteOutcomes = [.failure(FakeSessionError.save)]
+        let symptomClient = SymptomEventClientSpy()
+        let viewModel = SessionViewModel(
+            repository: repository,
+            now: { self.now },
+            symptomEventClient: symptomClient,
+            symptomSafetyPresentationProvider: { context in
+                guard context == .currentOverheadPressResponse(.symptomsPresent) else {
+                    return nil
+                }
+                return self.missingAnswerSafetyPresentation
+            }
+        )
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let sessionID = requireActive(viewModel.state).session.id
+        let request = SessionOHPSymptomWriteRequest(
+            sessionID: sessionID,
+            response: .symptomsPresent,
+            reportedAt: now
+        )
+        await viewModel.reportCurrentOHPSymptom()
+        repository.suspendNextDeletion()
+
+        viewModel.requestDeletion()
+        let deletion = Task { await viewModel.confirmDeletion() }
+        await repository.waitUntilDeletionIsSuspended()
+
+        XCTAssertTrue(viewModel.isSessionDeletionInFlight)
+        await viewModel.retryCurrentOHPSymptomWrite()
+        XCTAssertEqual(repository.ohpSymptomUpdates, [request.repositoryUpdate])
+        XCTAssertEqual(viewModel.ohpSymptomWriteState, .failed(request: request))
+        XCTAssertTrue(viewModel.hasPendingCurrentOHPSymptomWrite)
+
+        repository.resumeSuspendedDeletion()
+        await deletion.value
+
+        XCTAssertFalse(viewModel.isSessionDeletionInFlight)
+        XCTAssertEqual(viewModel.ohpSymptomWriteState, .failed(request: request))
+        XCTAssertEqual(
+            viewModel.ohpSafetyState,
+            .stopped(alternative: repository.ohpSafeAlternative)
+        )
+        XCTAssertEqual(viewModel.symptomSafetyPresentation, missingAnswerSafetyPresentation)
+        XCTAssertTrue(viewModel.hasSessionDeletionFailure)
+        XCTAssertTrue(repository.deletedSessionIDs.isEmpty)
+        XCTAssertTrue(symptomClient.events.isEmpty)
+
+        await viewModel.retryCurrentOHPSymptomWrite()
+
+        XCTAssertEqual(
+            repository.ohpSymptomUpdates,
+            [request.repositoryUpdate, request.repositoryUpdate]
+        )
+        XCTAssertEqual(viewModel.ohpSymptomWriteState, .idle)
+        XCTAssertFalse(viewModel.hasPendingCurrentOHPSymptomWrite)
+        XCTAssertEqual(symptomClient.events.count, 1)
+    }
+
+    func testRouteFirstLeaseRejectsDeletionRequestAndConfirmationBeforeRepositoryAwait() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        configureCurrentOHPSymptomScenario(repository)
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        repository.suspendNextProgressUpdate()
+
+        let advance = Task { await viewModel.advanceExercise() }
+        await repository.waitUntilProgressUpdateIsSuspended()
+
+        XCTAssertTrue(viewModel.isSessionRouteMutationInFlight)
+        viewModel.requestDeletion()
+        XCTAssertFalse(viewModel.isDeleteConfirmationPresented)
+        await viewModel.confirmDeletion()
+        XCTAssertTrue(repository.deleteAttempts.isEmpty)
+        XCTAssertTrue(repository.deletedSessionIDs.isEmpty)
+
+        repository.resumeSuspendedProgressUpdate()
+        await advance.value
+
+        XCTAssertFalse(viewModel.isSessionRouteMutationInFlight)
+        XCTAssertEqual(requireActive(viewModel.state).progress.stage, .cooldown)
+        XCTAssertTrue(repository.deleteAttempts.isEmpty)
+    }
+
+    func testCancelledDeletionReleasesLeaseAndPreservesExactStoppedRetry() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        configureCurrentOHPSymptomScenario(repository)
+        repository.ohpSymptomUpdateOutcomes = [
+            .failure(FakeSessionError.save),
+            .success(()),
+        ]
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let sessionID = requireActive(viewModel.state).session.id
+        let request = SessionOHPSymptomWriteRequest(
+            sessionID: sessionID,
+            response: .symptomsPresent,
+            reportedAt: now
+        )
+        await viewModel.reportCurrentOHPSymptom()
+        repository.suspendNextDeletion()
+
+        viewModel.requestDeletion()
+        let deletion = Task { await viewModel.confirmDeletion() }
+        await repository.waitUntilDeletionIsSuspended()
+        XCTAssertTrue(viewModel.isSessionDeletionInFlight)
+
+        deletion.cancel()
+        repository.resumeSuspendedDeletion()
+        await deletion.value
+
+        XCTAssertFalse(viewModel.isSessionDeletionInFlight)
+        XCTAssertEqual(repository.deleteAttempts, [sessionID])
+        XCTAssertTrue(repository.deletedSessionIDs.isEmpty)
+        XCTAssertEqual(viewModel.ohpSymptomWriteState, .failed(request: request))
+        XCTAssertEqual(
+            viewModel.ohpSafetyState,
+            .stopped(alternative: repository.ohpSafeAlternative)
+        )
+        XCTAssertNotNil(activePresentation(from: viewModel.state))
+
+        await viewModel.retryCurrentOHPSymptomWrite()
+        XCTAssertEqual(viewModel.ohpSymptomWriteState, .idle)
+        XCTAssertFalse(viewModel.hasPendingCurrentOHPSymptomWrite)
+    }
+
+    func testStartTailOwnsSessionUntilInitialProgressFinishesAndDeleteFirstRejectsRestart() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        let viewModel = makeViewModel(repository)
+        repository.suspendNextProgressUpdate()
+
+        let start = Task { await viewModel.start(workoutDayID: repository.plan.workoutDayID) }
+        await repository.waitUntilProgressUpdateIsSuspended()
+
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 1)
+        XCTAssertTrue(viewModel.isSessionMutationInFlight)
+        await assertDeletionRejectedWhileSessionMutationOwned(viewModel, repository)
+
+        repository.resumeSuspendedProgressUpdate()
+        await start.value
+
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 0)
+        XCTAssertFalse(viewModel.isSessionMutationInFlight)
+        XCTAssertNotNil(activePresentation(from: viewModel.state))
+
+        let createCount = repository.createRequests.count
+        let transitionCount = repository.transitions.count
+        let progressCount = repository.progressUpdates.count
+        repository.suspendNextDeletion()
+        viewModel.requestDeletion()
+        let deletion = Task { await viewModel.confirmDeletion() }
+        await repository.waitUntilDeletionIsSuspended()
+
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+
+        XCTAssertTrue(viewModel.isSessionDeletionInFlight)
+        XCTAssertEqual(repository.createRequests.count, createCount)
+        XCTAssertEqual(repository.transitions.count, transitionCount)
+        XCTAssertEqual(repository.progressUpdates.count, progressCount)
+
+        repository.resumeSuspendedDeletion()
+        await deletion.value
+
+        XCTAssertEqual(viewModel.state, .dismissed)
+        XCTAssertFalse(viewModel.isSessionDeletionInFlight)
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 0)
+    }
+
+    func testRestoredStartKeepsItsOwnerThroughTheActiveSymptomJournalTail() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        repository.configureProgram(week: 5)
+        let checkedAt = now.addingTimeInterval(-300)
+        let sessionID = uuid("00000000-0000-4000-8000-000000000758")
+        repository.inProgressSession = WorkoutSessionSnapshot(
+            id: sessionID,
+            createdAt: checkedAt.addingTimeInterval(-600),
+            updatedAt: checkedAt,
+            date: checkedAt.addingTimeInterval(-600),
+            status: .inProgress,
+            workoutDayTemplateID: plan.workoutDayID,
+            ohpSymptomResponse: .symptomsPresent,
+            ohpSymptomCheckedAt: checkedAt
+        )
+        repository.progress = WorkoutSessionProgressSnapshot(
+            id: uuid("00000000-0000-4000-8000-000000000759"),
+            createdAt: checkedAt,
+            updatedAt: checkedAt,
+            workoutSessionID: sessionID,
+            stage: .movement,
+            currentExerciseTemplateID: plan.exercises[0].id,
+            completedWarmupItemIDs: Set(plan.warmupItems.map(\.id)),
+            warmupDisposition: .completed
+        )
+        let symptomClient = SymptomEventClientSpy()
+        symptomClient.suspendNextRecord()
+        let viewModel = makeViewModel(repository, symptomEventClient: symptomClient)
+
+        let start = Task { await viewModel.start(workoutDayID: plan.workoutDayID) }
+        await symptomClient.waitUntilRecordIsSuspended()
+
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 1)
+        await assertDeletionRejectedWhileSessionMutationOwned(viewModel, repository)
+
+        symptomClient.resumeSuspendedRecord()
+        await start.value
+
+        let expected = SymptomJournalEvent(
+            id: sessionID,
+            occurredAt: checkedAt,
+            source: .overheadPressCurrentSymptom
+        )
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 0)
+        XCTAssertEqual(symptomClient.events, [expected])
+        XCTAssertEqual(viewModel.symptomJournalState, .recorded(event: expected))
+        XCTAssertNotNil(activePresentation(from: viewModel.state))
+    }
+
+    func testWarmupAndCooldownChecklistOwnersBlockDeletionUntilProgressReturns() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+        repository.suspendNextProgressUpdate()
+
+        let warmup = Task {
+            await viewModel.toggleWarmupItem(id: repository.plan.warmupItems[0].id)
+        }
+        await repository.waitUntilProgressUpdateIsSuspended()
+
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 1)
+        await assertDeletionRejectedWhileSessionMutationOwned(viewModel, repository)
+
+        repository.resumeSuspendedProgressUpdate()
+        await warmup.value
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 0)
+
+        await viewModel.skipWarmup()
+        await viewModel.advanceExercise()
+        await viewModel.advanceExercise()
+        XCTAssertEqual(requireActive(viewModel.state).progress.stage, .cooldown)
+        repository.suspendNextProgressUpdate()
+
+        let cooldown = Task {
+            await viewModel.toggleCooldownItem(id: repository.plan.cooldownItems[0].id)
+        }
+        await repository.waitUntilProgressUpdateIsSuspended()
+
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 1)
+        await assertDeletionRejectedWhileSessionMutationOwned(viewModel, repository)
+
+        repository.resumeSuspendedProgressUpdate()
+        await cooldown.value
+
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 0)
+        XCTAssertEqual(
+            requireActive(viewModel.state).progress.completedCooldownItemIDs,
+            [repository.plan.cooldownItems[0].id]
+        )
+    }
+
+    func testPriorResponseAndDeloadOwnersBlockDeletionThroughRepositoryStateWrites() async {
+        do {
+            let plan = makeOHPPlan()
+            let repository = FakeSessionRepository(plan: plan)
+            repository.configureProgram(week: 3)
+            let exercise = plan.exercises[0]
+            let prior = makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                ohpSymptomResponse: .notAsked,
+                measurements: [.init(weightKg: 10, reps: 12, rir: 1)]
+            )
+            repository.completedExerciseHistory[exercise.id] = [prior]
+            let viewModel = makeViewModel(repository)
+            await viewModel.start(workoutDayID: plan.workoutDayID)
+            repository.suspendNextOHPSymptomUpdate()
+
+            let answer = Task { await viewModel.answerPreviousOHPSymptom(.symptomFree) }
+            await repository.waitUntilOHPSymptomUpdateIsSuspended()
+
+            XCTAssertEqual(viewModel.activeSessionMutationCount, 1)
+            await assertDeletionRejectedWhileSessionMutationOwned(viewModel, repository)
+
+            repository.resumeSuspendedOHPSymptomUpdate()
+            await answer.value
+
+            XCTAssertEqual(viewModel.activeSessionMutationCount, 0)
+            XCTAssertEqual(repository.ohpSymptomUpdates.first?.id, prior.session.id)
+        }
+
+        do {
+            let plan = makePlan()
+            let repository = FakeSessionRepository(plan: plan)
+            repository.configureProgram(week: 5, deloadStatus: .none)
+            let viewModel = makeViewModel(repository)
+            await viewModel.start(workoutDayID: plan.workoutDayID)
+            repository.suspendNextDeloadUpdate()
+
+            let response = Task { await viewModel.respondToDeload(.accepted) }
+            await repository.waitUntilDeloadUpdateIsSuspended()
+
+            XCTAssertEqual(viewModel.activeSessionMutationCount, 1)
+            await assertDeletionRejectedWhileSessionMutationOwned(viewModel, repository)
+
+            repository.resumeSuspendedDeloadUpdate()
+            await response.value
+
+            XCTAssertEqual(viewModel.activeSessionMutationCount, 0)
+            XCTAssertEqual(repository.deloadUpdates.count, 1)
+            XCTAssertNotNil(activePresentation(from: viewModel.state))
+        }
+    }
+
+    func testSetSaveAndExactRetryEachOwnTheirWholeRepositoryLifetime() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        repository.saveSetOutcomes = [
+            .failure(FakeSessionError.save),
+            .success(()),
+        ]
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+        await viewModel.skipWarmup()
+        repository.suspendNextSetSave()
+
+        let save = Task { await viewModel.saveCurrentSet() }
+        await repository.waitUntilSetSaveIsSuspended()
+
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 1)
+        await assertDeletionRejectedWhileSessionMutationOwned(viewModel, repository)
+
+        repository.resumeSuspendedSetSave()
+        await save.value
+
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 0)
+        XCTAssertEqual(viewModel.setSaveState, .repositoryFailed)
+        let failedRequest = repository.saveSetRequests[0]
+        repository.suspendNextSetSave()
+
+        let retry = Task { await viewModel.retrySetSave() }
+        await repository.waitUntilSetSaveIsSuspended()
+
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 1)
+        await assertDeletionRejectedWhileSessionMutationOwned(viewModel, repository)
+
+        repository.resumeSuspendedSetSave()
+        await retry.value
+
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 0)
+        XCTAssertEqual(repository.saveSetRequests, [failedRequest, failedRequest])
+        XCTAssertEqual(viewModel.setSaveState, .saved(setID: failedRequest.id))
+    }
+
+    func testSummarySaveOwnerBlocksDeletionUntilItsDismissalCommits() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+        await viewModel.skipWarmup()
+        await viewModel.finishIncomplete()
+        repository.suspendNextSummaryUpdate()
+
+        let save = Task { await viewModel.saveSummary() }
+        await repository.waitUntilSummaryUpdateIsSuspended()
+
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 1)
+        await assertDeletionRejectedWhileSessionMutationOwned(viewModel, repository)
+
+        repository.resumeSuspendedSummaryUpdate()
+        await save.value
+
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 0)
+        XCTAssertEqual(repository.summaryUpdates.count, 1)
+        XCTAssertEqual(viewModel.state, .dismissed)
+        XCTAssertTrue(repository.deletedSessionIDs.isEmpty)
+    }
+
+    func testOverlappingOwnersReleaseOnlyTheirExactTokenBeforeDeletionBecomesAvailable() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let sessionID = requireActive(viewModel.state).session.id
+        repository.suspendNextSetSave()
+        repository.suspendNextProgressUpdate()
+
+        let save = Task { await viewModel.saveCurrentSet() }
+        await repository.waitUntilSetSaveIsSuspended()
+        let advance = Task { await viewModel.advanceExercise() }
+        await repository.waitUntilProgressUpdateIsSuspended()
+
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 2)
+        XCTAssertTrue(viewModel.isSessionMutationInFlight)
+
+        repository.resumeSuspendedSetSave()
+        await save.value
+
+        XCTAssertEqual(
+            viewModel.activeSessionMutationCount,
+            1,
+            "The first completion must remove only its exact owner token."
+        )
+        await assertDeletionRejectedWhileSessionMutationOwned(viewModel, repository)
+
+        repository.resumeSuspendedProgressUpdate()
+        await advance.value
+
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 0)
+        XCTAssertFalse(viewModel.isSessionMutationInFlight)
+        viewModel.requestDeletion()
+        await viewModel.confirmDeletion()
+        XCTAssertEqual(repository.deletedSessionIDs, [sessionID])
+        XCTAssertEqual(viewModel.state, .dismissed)
+    }
+
+    func testCancelledSessionMutationReleasesOnlyItsOwnerAndAllowsDeletion() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let sessionID = requireActive(viewModel.state).session.id
+        repository.suspendNextSetSave()
+
+        let save = Task { await viewModel.saveCurrentSet() }
+        await repository.waitUntilSetSaveIsSuspended()
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 1)
+
+        save.cancel()
+        repository.resumeSuspendedSetSave()
+        await save.value
+
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 0)
+        XCTAssertEqual(viewModel.setSaveState, .repositoryFailed)
+        XCTAssertNotNil(activePresentation(from: viewModel.state))
+        viewModel.requestDeletion()
+        await viewModel.confirmDeletion()
+        XCTAssertEqual(repository.deletedSessionIDs, [sessionID])
+        XCTAssertEqual(viewModel.state, .dismissed)
+    }
+
+    func testJournalRetryMayFinishAfterDeletionWithoutRepublishingSessionState() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        configureCurrentOHPSymptomScenario(repository)
+        let symptomClient = SymptomEventClientSpy(
+            outcomes: [.failure(FakeSessionError.save), .success(())]
+        )
+        let viewModel = makeViewModel(repository, symptomEventClient: symptomClient)
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let sessionID = requireActive(viewModel.state).session.id
+        let event = SymptomJournalEvent(
+            id: sessionID,
+            occurredAt: now,
+            source: .overheadPressCurrentSymptom
+        )
+        await viewModel.reportCurrentOHPSymptom()
+        XCTAssertEqual(viewModel.activeSessionMutationCount, 0)
+        symptomClient.suspendNextRecord()
+
+        let retry = Task { await viewModel.retrySymptomJournal() }
+        await symptomClient.waitUntilRecordIsSuspended()
+
+        XCTAssertEqual(
+            viewModel.activeSessionMutationCount,
+            0,
+            "Metrics-only journal retry must not own the session deletion boundary."
+        )
+        viewModel.requestDeletion()
+        await viewModel.confirmDeletion()
+        XCTAssertEqual(repository.deletedSessionIDs, [sessionID])
+        XCTAssertEqual(viewModel.state, .dismissed)
+
+        symptomClient.resumeSuspendedRecord()
+        await retry.value
+
+        XCTAssertEqual(viewModel.state, .dismissed)
+        XCTAssertEqual(symptomClient.events, [event, event])
+        XCTAssertEqual(viewModel.symptomJournalState, .recorded(event: event))
+        XCTAssertEqual(repository.ohpSymptomUpdates.count, 1)
+    }
+
+    func testOrdinaryDeletionFailureRetainsTheExistingRecoverableFailureRoute() async {
+        let repository = FakeSessionRepository(plan: makePlan())
+        repository.deleteOutcomes = [.failure(FakeSessionError.save)]
+        let viewModel = makeViewModel(repository)
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+
+        viewModel.requestDeletion()
+        await viewModel.confirmDeletion()
+
+        XCTAssertEqual(viewModel.state, .failed(.deletion))
+        XCTAssertFalse(viewModel.hasPendingCurrentOHPSymptomWrite)
+        XCTAssertFalse(viewModel.hasSessionDeletionFailure)
+        XCTAssertFalse(viewModel.isDeleteConfirmationPresented)
+        XCTAssertTrue(repository.deletedSessionIDs.isEmpty)
+
+        await viewModel.start(workoutDayID: repository.plan.workoutDayID)
+        XCTAssertNotNil(activePresentation(from: viewModel.state))
+    }
+
+    func testJournalFailureKeepsOHPStoppedAndRetryDoesNotRewriteTrainingState() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        repository.configureProgram(week: 5)
+        let exercise = plan.exercises[0]
+        repository.completedExerciseHistory[exercise.id] = [
+            makeCompletedHistory(
+                dayID: plan.workoutDayID,
+                exerciseID: exercise.id,
+                ohpSymptomResponse: .symptomFree,
+                measurements: [
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                ]
+            ),
+        ]
+        let symptomClient = SymptomEventClientSpy(
+            outcomes: [.failure(FakeSessionError.save), .success(())]
+        )
+        let viewModel = makeViewModel(
+            repository,
+            symptomEventClient: symptomClient
+        )
+        await viewModel.start(workoutDayID: plan.workoutDayID)
+        await viewModel.skipWarmup()
+        let sessionID = requireActive(viewModel.state).session.id
+
+        await viewModel.reportCurrentOHPSymptom()
+
+        let event = SymptomJournalEvent(
+            id: sessionID,
+            occurredAt: now,
+            source: .overheadPressCurrentSymptom
+        )
+        XCTAssertNotNil(activePresentation(from: viewModel.state))
+        XCTAssertEqual(
+            viewModel.ohpSafetyState,
+            .stopped(alternative: repository.ohpSafeAlternative)
+        )
+        XCTAssertEqual(viewModel.symptomJournalState, .failed(event: event))
+        XCTAssertEqual(repository.ohpSymptomUpdates.count, 1)
+
+        await viewModel.retrySymptomJournal()
+
+        XCTAssertEqual(symptomClient.events, [event, event])
+        XCTAssertEqual(viewModel.symptomJournalState, .recorded(event: event))
+        XCTAssertEqual(
+            repository.ohpSymptomUpdates.count,
+            1,
+            "Retrying the journal must not rewrite the safety response."
+        )
+        XCTAssertEqual(
+            viewModel.ohpSafetyState,
+            .stopped(alternative: repository.ohpSafeAlternative)
+        )
+    }
+
+    func testRestoringSymptomPresentSessionReemitsTheSameStableEvent() async {
+        let plan = makeOHPPlan()
+        let repository = FakeSessionRepository(plan: plan)
+        repository.configureProgram(week: 5)
+        let checkedAt = now.addingTimeInterval(-300)
+        let sessionID = uuid("00000000-0000-4000-8000-000000000756")
+        repository.inProgressSession = WorkoutSessionSnapshot(
+            id: sessionID,
+            createdAt: checkedAt.addingTimeInterval(-600),
+            updatedAt: checkedAt,
+            date: checkedAt.addingTimeInterval(-600),
+            status: .inProgress,
+            workoutDayTemplateID: plan.workoutDayID,
+            ohpSymptomResponse: .symptomsPresent,
+            ohpSymptomCheckedAt: checkedAt
+        )
+        repository.progress = WorkoutSessionProgressSnapshot(
+            id: uuid("00000000-0000-4000-8000-000000000757"),
+            createdAt: checkedAt,
+            updatedAt: checkedAt,
+            workoutSessionID: sessionID,
+            stage: .movement,
+            currentExerciseTemplateID: plan.exercises[0].id,
+            completedWarmupItemIDs: Set(plan.warmupItems.map(\.id)),
+            warmupDisposition: .completed
+        )
+        let symptomClient = SymptomEventClientSpy()
+        let expected = SymptomJournalEvent(
+            id: sessionID,
+            occurredAt: checkedAt,
+            source: .overheadPressCurrentSymptom
+        )
+
+        let first = makeViewModel(repository, symptomEventClient: symptomClient)
+        await first.start(workoutDayID: UUID())
+        let restoredAgain = makeViewModel(repository, symptomEventClient: symptomClient)
+        await restoredAgain.start(workoutDayID: UUID())
+
+        XCTAssertEqual(symptomClient.events, [expected, expected])
+        XCTAssertEqual(first.symptomJournalState, .recorded(event: expected))
+        XCTAssertEqual(restoredAgain.symptomJournalState, .recorded(event: expected))
+        XCTAssertEqual(
+            first.ohpSafetyState,
+            .stopped(alternative: repository.ohpSafeAlternative)
         )
     }
 
@@ -847,8 +2107,61 @@ final class SessionViewModelTests: XCTestCase {
         XCTAssertNotNil(activePresentation(from: viewModel.state))
     }
 
-    private func makeViewModel(_ repository: FakeSessionRepository) -> SessionViewModel {
-        SessionViewModel(repository: repository, now: { self.now })
+    private func assertDeletionRejectedWhileSessionMutationOwned(
+        _ viewModel: SessionViewModel,
+        _ repository: FakeSessionRepository,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        let attemptCount = repository.deleteAttempts.count
+        viewModel.requestDeletion()
+        XCTAssertFalse(viewModel.isDeleteConfirmationPresented, file: file, line: line)
+        await viewModel.confirmDeletion()
+        XCTAssertEqual(repository.deleteAttempts.count, attemptCount, file: file, line: line)
+        XCTAssertTrue(repository.deletedSessionIDs.isEmpty, file: file, line: line)
+    }
+
+    private func makeViewModel(
+        _ repository: FakeSessionRepository,
+        symptomEventClient: (any SymptomEventClient)? = nil
+    ) -> SessionViewModel {
+        if let symptomEventClient {
+            return SessionViewModel(
+                repository: repository,
+                now: { self.now },
+                symptomEventClient: symptomEventClient
+            )
+        }
+        return SessionViewModel(repository: repository, now: { self.now })
+    }
+
+    private func configureCurrentOHPSymptomScenario(
+        _ repository: FakeSessionRepository
+    ) {
+        repository.configureProgram(week: 5)
+        let exercise = repository.plan.exercises[0]
+        repository.completedExerciseHistory[exercise.id] = [
+            makeCompletedHistory(
+                dayID: repository.plan.workoutDayID,
+                exerciseID: exercise.id,
+                ohpSymptomResponse: .symptomFree,
+                measurements: [
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                    .init(weightKg: 10, reps: 12, rir: 1),
+                ]
+            ),
+        ]
+    }
+
+    private var missingAnswerSafetyPresentation: TrainingSymptomSafetyPresentation {
+        TrainingSymptomSafetyPresentation(
+            disclaimer: "Bu bir tıbbi tavsiye değildir; değerleri bir hekimle değerlendir.",
+            levelTwoMessage:
+                "Hareketi durdur. Kalıcı veya kötüleşen belirtiler bir sağlık "
+                + "profesyoneli tarafından değerlendirilmelidir.",
+            requiresUrgentAssessment: false
+        )
     }
 
     private func makePlan() -> SessionWorkoutPlanSnapshot {
@@ -1162,6 +2475,10 @@ private final class FakeSessionRepository: TrainingRepository {
         completions: []
     )
     var saveSetOutcomes: [Result<Void, Error>] = []
+    var ohpSymptomUpdateOutcomes: [Result<Void, Error>] = []
+    var progressUpdateOutcomes: [Result<Void, Error>] = []
+    var transitionOutcomes: [Result<Void, Error>] = []
+    var deleteOutcomes: [Result<Void, Error>] = []
     var fetchPlanError: Error?
     var activeProgram: Program?
     var programState: ProgramState?
@@ -1187,13 +2504,133 @@ private final class FakeSessionRepository: TrainingRepository {
     private(set) var transitions: [Transition] = []
     private(set) var progressUpdates: [WorkoutSessionProgressUpdate] = []
     private(set) var saveSetRequests: [SetLogSaveRequest] = []
+    private(set) var deleteAttempts: [UUID] = []
     private(set) var deletedSessionIDs: [UUID] = []
     private(set) var summaryUpdates: [SummaryUpdate] = []
     private(set) var ohpSymptomUpdates: [OHPSymptomUpdate] = []
     private(set) var deloadUpdates: [DeloadUpdate] = []
+    private var suspendsNextOHPSymptomUpdate = false
+    private var ohpSymptomUpdateIsSuspended = false
+    private var ohpSymptomUpdateStartWaiters: [CheckedContinuation<Void, Never>] = []
+    private var ohpSymptomUpdateResumeContinuation: CheckedContinuation<Void, Never>?
+    private var suspendsNextProgressUpdate = false
+    private var progressUpdateIsSuspended = false
+    private var progressUpdateStartWaiters: [CheckedContinuation<Void, Never>] = []
+    private var progressUpdateResumeContinuation: CheckedContinuation<Void, Never>?
+    private var suspendsNextTransition = false
+    private var transitionIsSuspended = false
+    private var transitionStartWaiters: [CheckedContinuation<Void, Never>] = []
+    private var transitionResumeContinuation: CheckedContinuation<Void, Never>?
+    private var suspendsNextDeletion = false
+    private var deletionIsSuspended = false
+    private var deletionStartWaiters: [CheckedContinuation<Void, Never>] = []
+    private var deletionResumeContinuation: CheckedContinuation<Void, Never>?
+    private let deloadUpdateSuspension = OneShotSuspensionGate()
+    private let setSaveSuspension = OneShotSuspensionGate()
+    private let summaryUpdateSuspension = OneShotSuspensionGate()
 
     init(plan: SessionWorkoutPlanSnapshot) {
         self.plan = plan
+    }
+
+    func suspendNextOHPSymptomUpdate() {
+        suspendsNextOHPSymptomUpdate = true
+    }
+
+    func waitUntilOHPSymptomUpdateIsSuspended() async {
+        if ohpSymptomUpdateIsSuspended { return }
+        await withCheckedContinuation { continuation in
+            ohpSymptomUpdateStartWaiters.append(continuation)
+        }
+    }
+
+    func resumeSuspendedOHPSymptomUpdate() {
+        ohpSymptomUpdateResumeContinuation?.resume()
+        ohpSymptomUpdateResumeContinuation = nil
+    }
+
+    func suspendNextProgressUpdate() {
+        suspendsNextProgressUpdate = true
+    }
+
+    func waitUntilProgressUpdateIsSuspended() async {
+        if progressUpdateIsSuspended { return }
+        await withCheckedContinuation { continuation in
+            progressUpdateStartWaiters.append(continuation)
+        }
+    }
+
+    func resumeSuspendedProgressUpdate() {
+        progressUpdateResumeContinuation?.resume()
+        progressUpdateResumeContinuation = nil
+    }
+
+    func suspendNextTransition() {
+        suspendsNextTransition = true
+    }
+
+    func waitUntilTransitionIsSuspended() async {
+        if transitionIsSuspended { return }
+        await withCheckedContinuation { continuation in
+            transitionStartWaiters.append(continuation)
+        }
+    }
+
+    func resumeSuspendedTransition() {
+        transitionResumeContinuation?.resume()
+        transitionResumeContinuation = nil
+    }
+
+    func suspendNextDeletion() {
+        suspendsNextDeletion = true
+    }
+
+    func waitUntilDeletionIsSuspended() async {
+        if deletionIsSuspended { return }
+        await withCheckedContinuation { continuation in
+            deletionStartWaiters.append(continuation)
+        }
+    }
+
+    func resumeSuspendedDeletion() {
+        deletionResumeContinuation?.resume()
+        deletionResumeContinuation = nil
+    }
+
+    func suspendNextDeloadUpdate() {
+        deloadUpdateSuspension.suspendNext()
+    }
+
+    func waitUntilDeloadUpdateIsSuspended() async {
+        await deloadUpdateSuspension.waitUntilSuspended()
+    }
+
+    func resumeSuspendedDeloadUpdate() {
+        deloadUpdateSuspension.resume()
+    }
+
+    func suspendNextSetSave() {
+        setSaveSuspension.suspendNext()
+    }
+
+    func waitUntilSetSaveIsSuspended() async {
+        await setSaveSuspension.waitUntilSuspended()
+    }
+
+    func resumeSuspendedSetSave() {
+        setSaveSuspension.resume()
+    }
+
+    func suspendNextSummaryUpdate() {
+        summaryUpdateSuspension.suspendNext()
+    }
+
+    func waitUntilSummaryUpdateIsSuspended() async {
+        await summaryUpdateSuspension.waitUntilSuspended()
+    }
+
+    func resumeSuspendedSummaryUpdate() {
+        summaryUpdateSuspension.resume()
     }
 
     func fetchUserProfile() async throws -> UserProfile? { nil }
@@ -1205,7 +2642,6 @@ private final class FakeSessionRepository: TrainingRepository {
     func fetchExerciseTemplates(workoutDayID: UUID) async throws -> [ExerciseTemplate] { [] }
     func fetchWarmupItems(workoutDayID: UUID) async throws -> [WarmupItem] { [] }
     func fetchCooldownItems(workoutDayID: UUID) async throws -> [CooldownItem] { [] }
-    func fetchHealthCheckReminders() async throws -> [HealthCheckReminder] { [] }
     func fetchProgramState(programID: UUID) async throws -> ProgramState? {
         programState?.programId == programID ? programState : nil
     }
@@ -1255,6 +2691,8 @@ private final class FakeSessionRepository: TrainingRepository {
         programState.lastDeloadSkippedAt = action == .accepted ? nil : date
         programState.lastDeloadAction = action
         programState.updatedAt = date
+        await deloadUpdateSuspension.pauseIfRequested()
+        try Task.checkCancellation()
         return programState
     }
 
@@ -1299,6 +2737,20 @@ private final class FakeSessionRepository: TrainingRepository {
             ohpSymptomCheckedAt: source.ohpSymptomCheckedAt
         )
         inProgressSession = status == .inProgress ? updated : nil
+        if suspendsNextTransition {
+            suspendsNextTransition = false
+            transitionIsSuspended = true
+            let waiters = transitionStartWaiters
+            transitionStartWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+            await withCheckedContinuation { continuation in
+                transitionResumeContinuation = continuation
+            }
+            transitionIsSuspended = false
+        }
+        if !transitionOutcomes.isEmpty {
+            try transitionOutcomes.removeFirst().get()
+        }
         return updated
     }
 
@@ -1325,6 +2777,20 @@ private final class FakeSessionRepository: TrainingRepository {
             cooldownDisposition: update.state.cooldownDisposition
         )
         progress = snapshot
+        if suspendsNextProgressUpdate {
+            suspendsNextProgressUpdate = false
+            progressUpdateIsSuspended = true
+            let waiters = progressUpdateStartWaiters
+            progressUpdateStartWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+            await withCheckedContinuation { continuation in
+                progressUpdateResumeContinuation = continuation
+            }
+            progressUpdateIsSuspended = false
+        }
+        if !progressUpdateOutcomes.isEmpty {
+            try progressUpdateOutcomes.removeFirst().get()
+        }
         return snapshot
     }
 
@@ -1358,6 +2824,20 @@ private final class FakeSessionRepository: TrainingRepository {
         at date: Date
     ) async throws -> WorkoutSessionSnapshot {
         ohpSymptomUpdates.append(.init(id: id, response: response, date: date))
+        if suspendsNextOHPSymptomUpdate {
+            suspendsNextOHPSymptomUpdate = false
+            ohpSymptomUpdateIsSuspended = true
+            let waiters = ohpSymptomUpdateStartWaiters
+            ohpSymptomUpdateStartWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+            await withCheckedContinuation { continuation in
+                ohpSymptomUpdateResumeContinuation = continuation
+            }
+            ohpSymptomUpdateIsSuspended = false
+        }
+        if !ohpSymptomUpdateOutcomes.isEmpty {
+            try ohpSymptomUpdateOutcomes.removeFirst().get()
+        }
         let historySession = completedExerciseHistory.values
             .flatMap { $0 }
             .map(\.session)
@@ -1384,6 +2864,8 @@ private final class FakeSessionRepository: TrainingRepository {
 
     func saveSet(_ request: SetLogSaveRequest) async throws -> SetLogSnapshot {
         saveSetRequests.append(request)
+        await setSaveSuspension.pauseIfRequested()
+        try Task.checkCancellation()
         if !saveSetOutcomes.isEmpty {
             try saveSetOutcomes.removeFirst().get()
         }
@@ -1403,6 +2885,22 @@ private final class FakeSessionRepository: TrainingRepository {
     }
 
     func deleteWorkoutSession(id: UUID) async throws {
+        deleteAttempts.append(id)
+        if suspendsNextDeletion {
+            suspendsNextDeletion = false
+            deletionIsSuspended = true
+            let waiters = deletionStartWaiters
+            deletionStartWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+            await withCheckedContinuation { continuation in
+                deletionResumeContinuation = continuation
+            }
+            deletionIsSuspended = false
+        }
+        try Task.checkCancellation()
+        if !deleteOutcomes.isEmpty {
+            try deleteOutcomes.removeFirst().get()
+        }
         deletedSessionIDs.append(id)
         inProgressSession = nil
         progress = nil
@@ -1425,6 +2923,8 @@ private final class FakeSessionRepository: TrainingRepository {
         summaryUpdates.append(
             .init(id: id, recovery: perceivedRecovery, note: note, date: date)
         )
+        await summaryUpdateSuspension.pauseIfRequested()
+        try Task.checkCancellation()
         return WorkoutSessionSnapshot(
             id: id,
             date: date,
@@ -1436,9 +2936,84 @@ private final class FakeSessionRepository: TrainingRepository {
     }
 }
 
+private extension SessionOHPSymptomWriteRequest {
+    var repositoryUpdate: FakeSessionRepository.OHPSymptomUpdate {
+        .init(id: sessionID, response: response, date: reportedAt)
+    }
+}
+
 private enum FakeSessionError: Error {
     case load
     case save
+}
+
+@MainActor
+private final class OneShotSuspensionGate {
+    private var suspendsNextCall = false
+    private var isSuspended = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var resumeContinuation: CheckedContinuation<Void, Never>?
+
+    func suspendNext() {
+        suspendsNextCall = true
+    }
+
+    func waitUntilSuspended() async {
+        if isSuspended { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func pauseIfRequested() async {
+        guard suspendsNextCall else { return }
+        suspendsNextCall = false
+        isSuspended = true
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { continuation in
+            resumeContinuation = continuation
+        }
+        isSuspended = false
+    }
+
+    func resume() {
+        resumeContinuation?.resume()
+        resumeContinuation = nil
+    }
+}
+
+@MainActor
+private final class SymptomEventClientSpy: SymptomEventClient {
+    var outcomes: [Result<Void, Error>]
+    private(set) var events: [SymptomJournalEvent] = []
+    private let recordSuspension = OneShotSuspensionGate()
+
+    init(outcomes: [Result<Void, Error>] = []) {
+        self.outcomes = outcomes
+    }
+
+    func suspendNextRecord() {
+        recordSuspension.suspendNext()
+    }
+
+    func waitUntilRecordIsSuspended() async {
+        await recordSuspension.waitUntilSuspended()
+    }
+
+    func resumeSuspendedRecord() {
+        recordSuspension.resume()
+    }
+
+    func record(_ event: SymptomJournalEvent) async throws {
+        events.append(event)
+        await recordSuspension.pauseIfRequested()
+        try Task.checkCancellation()
+        if !outcomes.isEmpty {
+            try outcomes.removeFirst().get()
+        }
+    }
 }
 
 private extension SessionPresentation {

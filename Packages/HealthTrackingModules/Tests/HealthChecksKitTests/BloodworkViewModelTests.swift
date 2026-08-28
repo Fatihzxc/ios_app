@@ -1,0 +1,419 @@
+import Foundation
+import HealthChecksKit
+import XCTest
+
+@MainActor
+final class BloodworkViewModelTests: XCTestCase {
+    func testLoadPublishesStableNewestFirstSnapshots() async throws {
+        let older = try makeSnapshot(idSuffix: 2, date: 100)
+        let newer = try makeSnapshot(idSuffix: 1, date: 200)
+        let repository = BloodworkRepositoryFake(results: [older, newer])
+        let viewModel = BloodworkViewModel(repository: repository)
+
+        await viewModel.load()
+
+        XCTAssertEqual(viewModel.loadPhase, .loaded)
+        XCTAssertEqual(viewModel.snapshots.map(\.id), [newer.id, older.id])
+    }
+
+    func testStaleLoadCompletionCannotReplaceNewerSnapshot() async throws {
+        let older = try makeSnapshot(idSuffix: 2, date: 100)
+        let newer = try makeSnapshot(idSuffix: 1, date: 200)
+        let repository = ControlledLoadBloodworkRepository()
+        let viewModel = BloodworkViewModel(repository: repository)
+
+        let firstLoad = Task { await viewModel.load() }
+        await repository.waitForFetchRequestCount(1)
+        let secondLoad = Task { await viewModel.load() }
+        await repository.waitForFetchRequestCount(2)
+
+        repository.resumeFetch(at: 1, with: .success([newer]))
+        await secondLoad.value
+        repository.resumeFetch(at: 0, with: .success([older]))
+        await firstLoad.value
+
+        XCTAssertEqual(viewModel.loadPhase, .loaded)
+        XCTAssertEqual(viewModel.snapshots, [newer])
+    }
+
+    func testFailedCreateKeepsExactInputForRetryThenUndoRemovesCommittedSnapshot() async throws {
+        let input = try makeInput(marker: "Ferritin", value: 19)
+        let snapshot = try makeSnapshot(idSuffix: 1, date: input.date.timeIntervalSince1970)
+        let token = BloodworkCreationUndoToken(
+            id: snapshot.id,
+            expectedUpdatedAt: snapshot.updatedAt
+        )
+        let repository = BloodworkRepositoryFake(
+            createResults: [
+                .failure(.saveFailed),
+                .success(
+                    BloodworkCreationMutation(snapshot: snapshot, undoToken: token)
+                ),
+            ]
+        )
+        let requestID = UUID(uuidString: "00000000-0000-0000-0000-000000000099")!
+        let viewModel = BloodworkViewModel(
+            repository: repository,
+            makeRequestID: { requestID }
+        )
+
+        let firstCreateSucceeded = await viewModel.create(input)
+        XCTAssertFalse(firstCreateSucceeded)
+        guard case .saveFailed = viewModel.mutationPhase else {
+            return XCTFail("The failed input must remain retryable.")
+        }
+        XCTAssertEqual(repository.createRequests, [input])
+
+        let retrySucceeded = await viewModel.retryCreate()
+        XCTAssertTrue(retrySucceeded)
+        guard case let .saved(savedToken) = viewModel.mutationPhase else {
+            return XCTFail("The exact retry must publish its undo token.")
+        }
+        XCTAssertEqual(savedToken, token)
+        XCTAssertEqual(repository.createRequests, [input, input])
+        XCTAssertEqual(viewModel.snapshots, [snapshot])
+
+        let undoSucceeded = await viewModel.undoLastCreate()
+        XCTAssertTrue(undoSucceeded)
+        XCTAssertEqual(repository.undoRequests, [token])
+        XCTAssertTrue(viewModel.snapshots.isEmpty)
+        XCTAssertEqual(viewModel.mutationPhase, .idle)
+    }
+
+    func testSecondCreateWhileSavingCannotReplacePendingRetryInput() async throws {
+        let first = try makeInput(marker: "Ferritin", value: 21)
+        let second = try makeInput(marker: "D vitamini", value: 22)
+        let repository = SuspendingBloodworkRepository()
+        let viewModel = BloodworkViewModel(repository: repository)
+
+        let firstTask = Task { await viewModel.create(first) }
+        await repository.waitForCreateRequestCount(1)
+        let secondCreateSucceeded = await viewModel.create(second)
+        XCTAssertFalse(secondCreateSucceeded)
+        repository.resumeCreate(with: .failure(.saveFailed))
+        let firstCreateSucceeded = await firstTask.value
+        XCTAssertFalse(firstCreateSucceeded)
+
+        guard case .saveFailed = viewModel.mutationPhase else {
+            return XCTFail("The first request must remain the failed retry payload.")
+        }
+        repository.resumeImmediately = true
+        let retrySucceeded = await viewModel.retryCreate()
+        XCTAssertFalse(retrySucceeded)
+        XCTAssertEqual(repository.createRequests, [first, first])
+    }
+
+    func testUpdateAndDeleteUseExactExpectedTimestampAndKeepSnapshotOnFailure() async throws {
+        let original = try makeSnapshot(idSuffix: 1, date: 100)
+        let editedInput = try makeInput(marker: "Ferritin", value: 31)
+        let repository = BloodworkRepositoryFake(
+            results: [original],
+            updateResults: [.failure(.saveFailed)],
+            deleteResults: [.failure(.saveFailed)]
+        )
+        let viewModel = BloodworkViewModel(repository: repository)
+        await viewModel.load()
+
+        let updateSucceeded = await viewModel.update(original, input: editedInput)
+        XCTAssertFalse(updateSucceeded)
+        XCTAssertEqual(
+            repository.updateRequests,
+            [.init(id: original.id, expectedUpdatedAt: original.updatedAt, input: editedInput)]
+        )
+        XCTAssertEqual(viewModel.snapshots, [original])
+
+        let deleteSucceeded = await viewModel.delete(original)
+        XCTAssertFalse(deleteSucceeded)
+        XCTAssertEqual(
+            repository.deleteRequests,
+            [.init(id: original.id, expectedUpdatedAt: original.updatedAt)]
+        )
+        XCTAssertEqual(viewModel.snapshots, [original])
+    }
+
+    func testFailedUpdateRetryKeepsExactTargetTimestampAndInput() async throws {
+        let original = try makeSnapshot(idSuffix: 1, date: 100)
+        let editedInput = try makeInput(marker: "Ferritin", value: 31)
+        let repository = BloodworkRepositoryFake(
+            results: [original],
+            updateResults: [
+                .failure(.saveFailed),
+                .success(original),
+            ]
+        )
+        let viewModel = BloodworkViewModel(repository: repository)
+        await viewModel.load()
+
+        let firstAttemptSucceeded = await viewModel.update(original, input: editedInput)
+        XCTAssertFalse(firstAttemptSucceeded)
+        XCTAssertEqual(viewModel.editFailure, .update(id: original.id))
+
+        let retrySucceeded = await viewModel.retryEditMutation()
+        XCTAssertTrue(retrySucceeded)
+        let exactRequest = BloodworkRepositoryFake.UpdateRequest(
+            id: original.id,
+            expectedUpdatedAt: original.updatedAt,
+            input: editedInput
+        )
+        XCTAssertEqual(repository.updateRequests, [exactRequest, exactRequest])
+        XCTAssertNil(viewModel.editFailure)
+    }
+
+    func testFailedDeleteRetryCannotMoveToAnotherSelectedRecord() async throws {
+        let original = try makeSnapshot(idSuffix: 1, date: 100)
+        let another = try makeSnapshot(idSuffix: 2, date: 200)
+        let repository = BloodworkRepositoryFake(
+            results: [original, another],
+            deleteResults: [
+                .failure(.saveFailed),
+                .success(()),
+            ]
+        )
+        let viewModel = BloodworkViewModel(repository: repository)
+        await viewModel.load()
+
+        let firstAttemptSucceeded = await viewModel.delete(original)
+        XCTAssertFalse(firstAttemptSucceeded)
+        XCTAssertEqual(viewModel.editFailure, .delete(id: original.id))
+        XCTAssertNotEqual(viewModel.editFailure, .delete(id: another.id))
+
+        let retrySucceeded = await viewModel.retryEditMutation()
+        XCTAssertTrue(retrySucceeded)
+        let exactRequest = BloodworkRepositoryFake.DeleteRequest(
+            id: original.id,
+            expectedUpdatedAt: original.updatedAt
+        )
+        XCTAssertEqual(repository.deleteRequests, [exactRequest, exactRequest])
+        XCTAssertEqual(viewModel.snapshots, [another])
+        XCTAssertNil(viewModel.editFailure)
+    }
+
+    func testPreparingAnotherEditorExpiresFailedEditRetry() async throws {
+        let original = try makeSnapshot(idSuffix: 1, date: 100)
+        let editedInput = try makeInput(marker: "Ferritin", value: 31)
+        let repository = BloodworkRepositoryFake(
+            results: [original],
+            updateResults: [.failure(.saveFailed)]
+        )
+        let viewModel = BloodworkViewModel(repository: repository)
+        await viewModel.load()
+
+        let firstAttemptSucceeded = await viewModel.update(original, input: editedInput)
+        XCTAssertFalse(firstAttemptSucceeded)
+        viewModel.prepareForEditing()
+
+        XCTAssertNil(viewModel.editFailure)
+        let retrySucceeded = await viewModel.retryEditMutation()
+        XCTAssertFalse(retrySucceeded)
+        XCTAssertEqual(repository.updateRequests.count, 1)
+    }
+
+    private func makeInput(
+        marker: String,
+        value: Double
+    ) throws -> BloodworkResultInput {
+        try BloodworkResultInput(
+            date: Date(timeIntervalSince1970: 200),
+            marker: marker,
+            value: value,
+            unit: "ng/mL",
+            note: "Referans kaydı"
+        )
+    }
+
+    private func makeSnapshot(
+        idSuffix: Int,
+        date: TimeInterval
+    ) throws -> BloodworkResultSnapshot {
+        let id = UUID(
+            uuidString: String(
+                format: "00000000-0000-0000-0000-%012d",
+                idSuffix
+            )
+        )!
+        let timestamp = Date(timeIntervalSince1970: date)
+        return BloodworkResultSnapshot(
+            id: id,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            date: timestamp,
+            marker: "Ferritin",
+            value: 20,
+            unit: "ng/mL",
+            note: nil
+        )
+    }
+}
+
+@MainActor
+private final class BloodworkRepositoryFake: BloodworkRepository {
+    struct UpdateRequest: Equatable {
+        let id: UUID
+        let expectedUpdatedAt: Date
+        let input: BloodworkResultInput
+    }
+
+    struct DeleteRequest: Equatable {
+        let id: UUID
+        let expectedUpdatedAt: Date
+    }
+
+    var results: [BloodworkResultSnapshot]
+    var createResults: [Result<BloodworkCreationMutation, BloodworkRepositoryOperationError>]
+    var updateResults: [Result<BloodworkResultSnapshot, BloodworkRepositoryOperationError>]
+    var deleteResults: [Result<Void, BloodworkRepositoryOperationError>]
+    private(set) var createRequests: [BloodworkResultInput] = []
+    private(set) var updateRequests: [UpdateRequest] = []
+    private(set) var deleteRequests: [DeleteRequest] = []
+    private(set) var undoRequests: [BloodworkCreationUndoToken] = []
+
+    init(
+        results: [BloodworkResultSnapshot] = [],
+        createResults: [Result<BloodworkCreationMutation, BloodworkRepositoryOperationError>] = [],
+        updateResults: [Result<BloodworkResultSnapshot, BloodworkRepositoryOperationError>] = [],
+        deleteResults: [Result<Void, BloodworkRepositoryOperationError>] = []
+    ) {
+        self.results = results
+        self.createResults = createResults
+        self.updateResults = updateResults
+        self.deleteResults = deleteResults
+    }
+
+    func fetchResults() async throws -> [BloodworkResultSnapshot] {
+        results
+    }
+
+    func createResult(
+        _ input: BloodworkResultInput
+    ) async throws -> BloodworkCreationMutation {
+        createRequests.append(input)
+        guard !createResults.isEmpty else {
+            throw BloodworkRepositoryOperationError.saveFailed
+        }
+        return try createResults.removeFirst().get()
+    }
+
+    func updateResult(
+        id: UUID,
+        expectedUpdatedAt: Date,
+        input: BloodworkResultInput
+    ) async throws -> BloodworkResultSnapshot {
+        updateRequests.append(
+            .init(id: id, expectedUpdatedAt: expectedUpdatedAt, input: input)
+        )
+        guard !updateResults.isEmpty else {
+            throw BloodworkRepositoryOperationError.saveFailed
+        }
+        return try updateResults.removeFirst().get()
+    }
+
+    func deleteResult(id: UUID, expectedUpdatedAt: Date) async throws {
+        deleteRequests.append(.init(id: id, expectedUpdatedAt: expectedUpdatedAt))
+        guard !deleteResults.isEmpty else {
+            throw BloodworkRepositoryOperationError.saveFailed
+        }
+        try deleteResults.removeFirst().get()
+    }
+
+    func undoResultCreation(_ token: BloodworkCreationUndoToken) async throws {
+        undoRequests.append(token)
+    }
+}
+
+@MainActor
+private final class SuspendingBloodworkRepository: BloodworkRepository {
+    var resumeImmediately = false
+    private(set) var createRequests: [BloodworkResultInput] = []
+    private var continuation:
+        CheckedContinuation<BloodworkCreationMutation, Error>?
+
+    func fetchResults() async throws -> [BloodworkResultSnapshot] { [] }
+
+    func createResult(
+        _ input: BloodworkResultInput
+    ) async throws -> BloodworkCreationMutation {
+        createRequests.append(input)
+        if resumeImmediately {
+            throw BloodworkRepositoryOperationError.saveFailed
+        }
+        return try await withCheckedThrowingContinuation { continuation = $0 }
+    }
+
+    func updateResult(
+        id: UUID,
+        expectedUpdatedAt: Date,
+        input: BloodworkResultInput
+    ) async throws -> BloodworkResultSnapshot {
+        throw BloodworkRepositoryOperationError.saveFailed
+    }
+
+    func deleteResult(id: UUID, expectedUpdatedAt: Date) async throws {
+        throw BloodworkRepositoryOperationError.saveFailed
+    }
+
+    func undoResultCreation(_ token: BloodworkCreationUndoToken) async throws {
+        throw BloodworkRepositoryOperationError.saveFailed
+    }
+
+    func waitForCreateRequestCount(_ count: Int) async {
+        while createRequests.count < count {
+            await Task.yield()
+        }
+    }
+
+    func resumeCreate(
+        with result: Result<BloodworkCreationMutation, BloodworkRepositoryOperationError>
+    ) {
+        let pending = continuation
+        continuation = nil
+        pending?.resume(with: result.mapError { $0 as Error })
+    }
+}
+
+@MainActor
+private final class ControlledLoadBloodworkRepository: BloodworkRepository {
+    private var fetchContinuations: [CheckedContinuation<[BloodworkResultSnapshot], Error>?] = []
+
+    func fetchResults() async throws -> [BloodworkResultSnapshot] {
+        try await withCheckedThrowingContinuation { continuation in
+            fetchContinuations.append(continuation)
+        }
+    }
+
+    func createResult(
+        _ input: BloodworkResultInput
+    ) async throws -> BloodworkCreationMutation {
+        throw BloodworkRepositoryOperationError.saveFailed
+    }
+
+    func updateResult(
+        id: UUID,
+        expectedUpdatedAt: Date,
+        input: BloodworkResultInput
+    ) async throws -> BloodworkResultSnapshot {
+        throw BloodworkRepositoryOperationError.saveFailed
+    }
+
+    func deleteResult(id: UUID, expectedUpdatedAt: Date) async throws {
+        throw BloodworkRepositoryOperationError.saveFailed
+    }
+
+    func undoResultCreation(_ token: BloodworkCreationUndoToken) async throws {
+        throw BloodworkRepositoryOperationError.saveFailed
+    }
+
+    func waitForFetchRequestCount(_ count: Int) async {
+        while fetchContinuations.count < count {
+            await Task.yield()
+        }
+    }
+
+    func resumeFetch(
+        at index: Int,
+        with result: Result<[BloodworkResultSnapshot], BloodworkRepositoryOperationError>
+    ) {
+        let continuation = fetchContinuations[index]
+        fetchContinuations[index] = nil
+        continuation?.resume(with: result.mapError { $0 as Error })
+    }
+}

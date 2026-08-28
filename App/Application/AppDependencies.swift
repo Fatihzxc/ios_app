@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import NotificationsKit
 import NutritionKit
 import PersistenceKit
 import SettingsKit
@@ -24,12 +25,20 @@ final class AppDependencies: AppDependencyLoading {
     private let installUITestFixture: @MainActor () throws -> Void
     private let injectedHapticClient: (any TrainingHapticClient)?
     private let hapticControllerReference: TrainingHapticControllerReference
+    private var didLoad = false
+    private let trackerFeatureBundleFactory:
+        @MainActor (ModelContext) -> any TrackerFeatureRouting
+    let healthCheckNotificationComposition: HealthCheckNotificationComposition
+    private let notificationLaunchGate: HealthCheckNotificationLaunchGate
     let trainingRepository: any TrainingRepository
     let todayViewModel: TodayViewModel
     private lazy var deferredTrainingDependencies = DeferredTrainingDependencies(
         repository: trainingRepository,
         todayViewModel: todayViewModel,
-        hapticControllerReference: hapticControllerReference
+        hapticControllerReference: hapticControllerReference,
+        makeSymptomEventClient: { [unowned self] in
+            self.trainingSymptomEventClient
+        }
     )
     var foundationViewModel: FoundationProgramViewModel {
         deferredTrainingDependencies.foundationViewModel
@@ -86,7 +95,30 @@ final class AppDependencies: AppDependencyLoading {
     lazy var todayNutritionViewModel = TodayNutritionViewModel(
         repository: nutritionRepository
     )
+    private(set) var trackerFeatureRouterInstantiationCount = 0
+    private lazy var trackerFeatureRouter: any TrackerFeatureRouting = {
+        trackerFeatureRouterInstantiationCount += 1
+        return trackerFeatureBundleFactory(mainContext)
+    }()
+    private lazy var trainingSymptomEventClient: any SymptomEventClient = {
+        let adapter = DefaultTrainingSymptomEventFactory.make(
+            modelContext: mainContext
+        )
+        #if DEBUG
+        if AppUITestLaunchConfiguration.resolve()?.scenario == .ohpSafety {
+            return UITestSymptomEventClient(
+                client: adapter,
+                failsFirstRecord: true
+            )
+        }
+        #endif
+        return adapter
+    }()
+    var makeTrackerFeatureRouter: @MainActor () -> any TrackerFeatureRouting {
+        { self.trackerFeatureRouter }
+    }
     private(set) var trainingHapticController: TrainingHapticController?
+    let medicalSafetyAcknowledgementController: MedicalSafetyAcknowledgementController
     let shouldLoadFoundation: Bool
     let persistencePresentation: FoundationPersistencePresentation
 
@@ -97,7 +129,16 @@ final class AppDependencies: AppDependencyLoading {
 
     convenience init(
         environment: AppEnvironment,
-        hapticClient: (any TrainingHapticClient)? = nil
+        hapticClient: (any TrainingHapticClient)? = nil,
+        makeTrackerFeatureBundle: (
+            @MainActor (ModelContext) -> any TrackerFeatureRouting
+        )? = nil,
+        reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent: (
+            @MainActor () async throws -> Void
+        )? = nil,
+        healthCheckNotificationCenter: any NotificationCenterClient =
+            SystemNotificationCenterAdapter(),
+        healthCheckNotificationComposition: HealthCheckNotificationComposition? = nil
     ) throws {
         let persistence = try Self.persistencePreparation(for: environment)
         let modelContainer = try ModelContainerFactory.make(for: persistence.mode)
@@ -106,7 +147,12 @@ final class AppDependencies: AppDependencyLoading {
             environment: environment,
             persistence: persistence,
             modelContainer: modelContainer,
-            hapticClient: hapticClient
+            hapticClient: hapticClient,
+            makeTrackerFeatureBundle: makeTrackerFeatureBundle,
+            reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent:
+                reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent,
+            healthCheckNotificationCenter: healthCheckNotificationCenter,
+            healthCheckNotificationComposition: healthCheckNotificationComposition
         )
     }
 
@@ -114,9 +160,19 @@ final class AppDependencies: AppDependencyLoading {
         environment: AppEnvironment,
         persistence: PersistencePreparation,
         modelContainer: ModelContainer,
-        hapticClient: (any TrainingHapticClient)?
+        hapticClient: (any TrainingHapticClient)?,
+        makeTrackerFeatureBundle: (
+            @MainActor (ModelContext) -> any TrackerFeatureRouting
+        )?,
+        reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent: (
+            @MainActor () async throws -> Void
+        )?,
+        healthCheckNotificationCenter: any NotificationCenterClient,
+        healthCheckNotificationComposition: HealthCheckNotificationComposition?
     ) {
+        AppLaunchPerformance.record(.dependencyEntry)
         let mainContext = ModelContext(modelContainer)
+        AppLaunchPerformance.record(.dependencyContext)
         self.modelContainer = modelContainer
         self.mainContext = mainContext
         persistencePresentation = persistence.presentation
@@ -124,8 +180,44 @@ final class AppDependencies: AppDependencyLoading {
         trainingHapticController = nil
         let hapticControllerReference = TrainingHapticControllerReference()
         self.hapticControllerReference = hapticControllerReference
+        let resolvedHealthCheckNotificationComposition =
+            healthCheckNotificationComposition
+            ?? DefaultHealthCheckNotificationFactory.make(
+                modelContext: mainContext,
+                notificationCenter: healthCheckNotificationCenter
+            )
+        self.healthCheckNotificationComposition =
+            resolvedHealthCheckNotificationComposition
+        let launchReconciliation: @MainActor () async throws -> Bool
+        if let injectedLaunchReconciliation =
+            reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent {
+            launchReconciliation = {
+                try await injectedLaunchReconciliation()
+                return true
+            }
+        } else {
+            launchReconciliation = {
+                try await resolvedHealthCheckNotificationComposition
+                    .lifecycleCoordinator
+                    .reconcileAfterFirstMeaningfulTodayContent()
+            }
+        }
+        let notificationLaunchGate = HealthCheckNotificationLaunchGate(
+            reconcile: launchReconciliation
+        )
+        self.notificationLaunchGate = notificationLaunchGate
+        trackerFeatureBundleFactory = makeTrackerFeatureBundle ?? { modelContext in
+            DefaultTrackerFeatureFactory.make(
+                environment: environment,
+                modelContext: modelContext,
+                healthCheckNotificationCenter: healthCheckNotificationCenter,
+                healthCheckNotificationComposition:
+                    resolvedHealthCheckNotificationComposition
+            )
+        }
         seedLoader = SwiftDataSeedLoader(modelContext: mainContext)
         let repository = SwiftDataTrainingRepository(modelContext: mainContext)
+        AppLaunchPerformance.record(.dependencyRepository)
 
         #if DEBUG
         if environment == .uiTesting,
@@ -158,13 +250,24 @@ final class AppDependencies: AppDependencyLoading {
             case .loading:
                 trainingRepository = repository
                 shouldLoadFoundation = false
+            case .ohpSafety:
+                trainingRepository = UITestFoundationRepository(
+                    repository: repository,
+                    failsFirstCurrentOHPSymptomWrite: true,
+                    failsFirstSessionDeletion: true
+                )
+                shouldLoadFoundation = true
             case .seeded, .fatalConfiguration, .sessionFlow, .sessionFamilies, .sessionResume,
-                 .progressionMissingRIR, .weeklyPallof, .ohpSafety, .deloadScheduled,
+                 .progressionMissingRIR, .weeklyPallof, .deloadScheduled,
                  .deloadReactive, .phaseTransition, .trainingHistory, .todayTrain,
                  .todayRest, .todayResume, .todayDeload, .todayPhase, .todayReminder,
                  .todayPriority, .m1AcceptanceCatalog, .m1PRBaseline, .m1PRNew,
                  .nutritionContent, .nutritionEmpty, .nutritionErrorOnce,
                  .nutritionDeleteErrorOnce, .nutritionQuickAdd, .m2Acceptance:
+                trainingRepository = repository
+                shouldLoadFoundation = true
+            case .m3BodyMetrics, .m3SleepMood, .m3Posture, .m3HealthChecks,
+                 .m3Bloodwork, .m3ProgressPhotos, .m3PhotoGallery:
                 trainingRepository = repository
                 shouldLoadFoundation = true
             }
@@ -176,14 +279,20 @@ final class AppDependencies: AppDependencyLoading {
         trainingRepository = repository
         shouldLoadFoundation = true
         #endif
+        AppLaunchPerformance.record(.dependencyRouting)
 
         todayViewModel = TodayViewModel(
             repository: trainingRepository,
+            calendar: AppDomainContext.makeCalendar(),
+            now: { AppDomainContext.now() },
             launchStartedAt: AppLaunchPerformance.startedAt,
             onFirstMeaningfulContent: { elapsed in
                 AppLaunchPerformance.finish(elapsed)
+                notificationLaunchGate.markTodayContentMeaningful()
+                Task { await notificationLaunchGate.reconcileIfNeeded() }
             }
         )
+        AppLaunchPerformance.record(.dependencyViewModel)
 
         #if DEBUG
         let scenario = environment == .uiTesting
@@ -195,6 +304,16 @@ final class AppDependencies: AppDependencyLoading {
         }
         #else
         installUITestFixture = {}
+        #endif
+        medicalSafetyAcknowledgementController = MedicalSafetyAcknowledgementController(
+            store: SwiftDataMedicalSafetyAcknowledgementStore(modelContext: mainContext)
+        )
+        #if DEBUG
+        if environment == .uiTesting,
+           let launchConfiguration = AppUITestLaunchConfiguration.resolve(),
+           !launchConfiguration.exposesMedicalSafetyFirstUseEvidence {
+            _ = medicalSafetyAcknowledgementController.acknowledge()
+        }
         #endif
         AppLaunchPerformance.record(.dependencies)
     }
@@ -236,17 +355,36 @@ final class AppDependencies: AppDependencyLoading {
     }
 
     func load() throws {
+        guard !didLoad else { return }
         try seedLoader.seedIfNeeded(installedAt: .now)
         try installUITestFixture()
+        didLoad = true
         AppLaunchPerformance.record(.seed)
     }
 
     func loadInitialContent() async {
-        if shouldLoadFoundation {
+        if shouldLoadFoundation, todayViewModel.state == .loading {
             await todayViewModel.load()
         }
+        await notificationLaunchGate.reconcileIfNeeded()
         let hapticController = ensureTrainingHapticController()
         hapticController.loadPreference()
+    }
+
+    func prepareInitialContentForLaunch() throws {
+        try load()
+        guard shouldLoadFoundation,
+              todayViewModel.state == .loading,
+              let synchronousRepository = trainingRepository
+                as? any SynchronousTodaySnapshotRepository else {
+            return
+        }
+        do {
+            let snapshot = try synchronousRepository.fetchTodaySnapshotSynchronously()
+            todayViewModel.applyInitialSnapshot(snapshot)
+        } catch {
+            // Preserve the existing async load path so a transient read failure can retry.
+        }
     }
 
     private func ensureTrainingHapticController() -> TrainingHapticController {
@@ -307,48 +445,59 @@ final class AppDependencies: AppDependencyLoading {
 
 @MainActor
 final class AppDependencyPrewarmer {
-    private struct PreparedContainer {
-        let persistence: AppDependencies.PersistencePreparation
-        let modelContainer: ModelContainer
-    }
-
     private let environment: AppEnvironment
-    private var initialAttempt: Result<PreparedContainer, Error>?
+    private let buildDependencies: @MainActor (AppEnvironment) throws -> AppDependencies
+    private var initialAttempt: Result<AppDependencies, Error>?
 
-    init(environment: AppEnvironment) {
+    init(
+        environment: AppEnvironment,
+        healthCheckNotificationCenter: any NotificationCenterClient =
+            SystemNotificationCenterAdapter(),
+        healthCheckNotificationComposition: HealthCheckNotificationComposition? = nil,
+        buildDependencies: (@MainActor (AppEnvironment) throws -> AppDependencies)? = nil
+    ) {
+        let dependencyBuilder = buildDependencies ?? { environment in
+            try Self.prepareDependencies(
+                for: environment,
+                healthCheckNotificationCenter: healthCheckNotificationCenter,
+                healthCheckNotificationComposition: healthCheckNotificationComposition
+            )
+        }
         self.environment = environment
+        self.buildDependencies = dependencyBuilder
         initialAttempt = Result {
-            try Self.prepareContainer(for: environment)
+            try dependencyBuilder(environment)
         }
     }
 
     func makeDependencies() async throws -> AppDependencies {
-        let prepared: PreparedContainer
         if let initialAttempt {
             self.initialAttempt = nil
-            prepared = try initialAttempt.get()
-        } else {
-            prepared = try Self.prepareContainer(for: environment)
+            return try initialAttempt.get()
         }
-
-        return AppDependencies(
-            environment: environment,
-            persistence: prepared.persistence,
-            modelContainer: prepared.modelContainer,
-            hapticClient: nil
-        )
+        return try buildDependencies(environment)
     }
 
-    private static func prepareContainer(
-        for environment: AppEnvironment
-    ) throws -> PreparedContainer {
+    private static func prepareDependencies(
+        for environment: AppEnvironment,
+        healthCheckNotificationCenter: any NotificationCenterClient,
+        healthCheckNotificationComposition: HealthCheckNotificationComposition?
+    ) throws -> AppDependencies {
         let persistence = try AppDependencies.persistencePreparation(for: environment)
         let modelContainer = try ModelContainerFactory.make(for: persistence.mode)
         AppLaunchPerformance.record(.container)
-        return PreparedContainer(
+        let dependencies = AppDependencies(
+            environment: environment,
             persistence: persistence,
-            modelContainer: modelContainer
+            modelContainer: modelContainer,
+            hapticClient: nil,
+            makeTrackerFeatureBundle: nil,
+            reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent: nil,
+            healthCheckNotificationCenter: healthCheckNotificationCenter,
+            healthCheckNotificationComposition: healthCheckNotificationComposition
         )
+        try dependencies.prepareInitialContentForLaunch()
+        return dependencies
     }
 }
 
@@ -367,7 +516,8 @@ private final class DeferredTrainingDependencies {
     init(
         repository: any TrainingRepository,
         todayViewModel: TodayViewModel,
-        hapticControllerReference: TrainingHapticControllerReference
+        hapticControllerReference: TrainingHapticControllerReference,
+        makeSymptomEventClient: @escaping @MainActor () -> any SymptomEventClient
     ) {
         let foundationViewModel = FoundationProgramViewModel(repository: repository)
         let phaseTransitionViewModel = PhaseTransitionViewModel(repository: repository)
@@ -385,13 +535,40 @@ private final class DeferredTrainingDependencies {
         makeSessionViewModel = {
             SessionViewModel(
                 repository: repository,
-                haptics: hapticControllerReference.value
+                haptics: hapticControllerReference.value,
+                symptomEventClient: makeSymptomEventClient(),
+                symptomSafetyPresentationProvider: { context in
+                    TrainingSymptomSafetyMapper.presentation(for: context)
+                }
             )
         }
     }
 }
 
 #if DEBUG
+@MainActor
+private final class UITestSymptomEventClient: SymptomEventClient {
+    private enum FixtureFailure: Error {
+        case record
+    }
+
+    private let client: any SymptomEventClient
+    private var failsNextRecord: Bool
+
+    init(client: any SymptomEventClient, failsFirstRecord: Bool) {
+        self.client = client
+        failsNextRecord = failsFirstRecord
+    }
+
+    func record(_ event: SymptomJournalEvent) async throws {
+        if failsNextRecord {
+            failsNextRecord = false
+            throw FixtureFailure.record
+        }
+        try await client.record(event)
+    }
+}
+
 @MainActor
 private final class UITestNutritionDayRepository: NutritionDayViewRepository {
     private enum FixtureFailure: Error {
@@ -602,10 +779,55 @@ private enum UITestSessionFixture {
             try installNutritionQuickAdd(in: modelContext)
         case .m2Acceptance:
             try installM2Acceptance(in: modelContext)
+        case .m3Posture:
+            try installM3Posture(in: modelContext)
+        case .m3HealthChecks:
+            try installM3HealthChecks(in: modelContext)
         case .seeded, .emptyOnce, .errorOnce, .loading, .fatalConfiguration, .sessionFlow,
-             .todayEmptyOnce, .todayErrorOnce, .nutritionEmpty:
+             .todayEmptyOnce, .todayErrorOnce, .nutritionEmpty, .m3BodyMetrics,
+             .m3SleepMood, .m3Bloodwork, .m3ProgressPhotos, .m3PhotoGallery:
             return
         }
+    }
+
+    private static func installM3HealthChecks(in modelContext: ModelContext) throws {
+        let reminderID = SeedIdentifiers.generalCheckupReminder
+        guard let reminder = try modelContext.fetch(
+            FetchDescriptor<HealthCheckReminder>(
+                predicate: #Predicate { $0.id == reminderID }
+            )
+        ).first,
+        reminder.status == .pending else {
+            return
+        }
+        let now = AppDomainContext.now()
+        reminder.dueDate = now.addingTimeInterval(-60)
+        reminder.updatedAt = now
+        try modelContext.save()
+    }
+
+    private static func installM3Posture(in modelContext: ModelContext) throws {
+        let fixtureID = uuid("00000000-0000-4000-8000-00000000d401")
+        let existing = try modelContext.fetch(
+            FetchDescriptor<PostureMetric>(
+                predicate: #Predicate { $0.id == fixtureID }
+            )
+        )
+        guard existing.isEmpty else { return }
+        let date = installedAt.addingTimeInterval(-7 * 24 * 60 * 60)
+        modelContext.insert(
+            PostureMetric(
+                id: fixtureID,
+                createdAt: date,
+                updatedAt: date,
+                date: date,
+                wallTestPass: true,
+                symptomScore: 2,
+                region: "Boyun",
+                note: "Haftalık başlangıç kaydı"
+            )
+        )
+        try modelContext.save()
     }
 
     private static func installNutritionContent(
@@ -834,6 +1056,18 @@ private enum UITestSessionFixture {
         reminder.status = .pending
         reminder.dueDate = .now.addingTimeInterval(-60)
         reminder.updatedAt = .now
+        let now = Date.now
+        modelContext.insert(
+            AppReminder(
+                id: todayMeasurementReminderID,
+                createdAt: now,
+                updatedAt: now,
+                type: .measurement,
+                schedule: "today-reminder-ui-test",
+                message: "Bel ölçümünü kaydet",
+                isEnabled: true
+            )
+        )
         try modelContext.save()
     }
 
@@ -1398,15 +1632,22 @@ private final class UITestFoundationRepository: TrainingRepository {
     private let todayInitialOutcome: InitialOutcome?
     private var foundationLoadAttempt = 0
     private var todayLoadAttempt = 0
+    private var failsNextCurrentOHPSymptomWrite: Bool
+    private var failsNextSessionDeletion: Bool
+    private var currentSessionID: UUID?
 
     init(
         repository: any TrainingRepository,
         foundationInitialOutcome: InitialOutcome? = nil,
-        todayInitialOutcome: InitialOutcome? = nil
+        todayInitialOutcome: InitialOutcome? = nil,
+        failsFirstCurrentOHPSymptomWrite: Bool = false,
+        failsFirstSessionDeletion: Bool = false
     ) {
         self.repository = repository
         self.foundationInitialOutcome = foundationInitialOutcome
         self.todayInitialOutcome = todayInitialOutcome
+        failsNextCurrentOHPSymptomWrite = failsFirstCurrentOHPSymptomWrite
+        failsNextSessionDeletion = failsFirstSessionDeletion
     }
 
     func fetchTodaySnapshot() async throws -> TodayRepositorySnapshot? {
@@ -1466,10 +1707,6 @@ private final class UITestFoundationRepository: TrainingRepository {
         try await repository.fetchCooldownItems(workoutDayID: workoutDayID)
     }
 
-    func fetchHealthCheckReminders() async throws -> [HealthCheckReminder] {
-        try await repository.fetchHealthCheckReminders()
-    }
-
     func fetchProgramState(programID: UUID) async throws -> ProgramState? {
         try await repository.fetchProgramState(programID: programID)
     }
@@ -1485,7 +1722,9 @@ private final class UITestFoundationRepository: TrainingRepository {
     }
 
     func fetchInProgressWorkoutSession() async throws -> WorkoutSessionSnapshot? {
-        try await repository.fetchInProgressWorkoutSession()
+        let session = try await repository.fetchInProgressWorkoutSession()
+        currentSessionID = session?.id
+        return session
     }
 
     func transitionWorkoutSession(
@@ -1493,7 +1732,17 @@ private final class UITestFoundationRepository: TrainingRepository {
         to status: WorkoutSessionStatus,
         at date: Date
     ) async throws -> WorkoutSessionSnapshot {
-        try await repository.transitionWorkoutSession(id: id, to: status, at: date)
+        let session = try await repository.transitionWorkoutSession(
+            id: id,
+            to: status,
+            at: date
+        )
+        if status == .inProgress {
+            currentSessionID = session.id
+        } else if currentSessionID == id {
+            currentSessionID = nil
+        }
+        return session
     }
 
     func fetchWorkoutSessionProgress(
@@ -1545,7 +1794,13 @@ private final class UITestFoundationRepository: TrainingRepository {
         response: OHPSymptomResponse,
         at date: Date
     ) async throws -> WorkoutSessionSnapshot {
-        try await repository.updateWorkoutSessionOHPSymptomResponse(
+        if failsNextCurrentOHPSymptomWrite,
+           response == .symptomsPresent,
+           id == currentSessionID {
+            failsNextCurrentOHPSymptomWrite = false
+            throw UITestFoundationRepositoryError.ohpSymptomWrite
+        }
+        return try await repository.updateWorkoutSessionOHPSymptomResponse(
             id: id,
             response: response,
             at: date
@@ -1567,11 +1822,20 @@ private final class UITestFoundationRepository: TrainingRepository {
     }
 
     func deleteWorkoutSession(id: UUID) async throws {
+        if failsNextSessionDeletion, id == currentSessionID {
+            failsNextSessionDeletion = false
+            throw UITestFoundationRepositoryError.sessionDeletion
+        }
         try await repository.deleteWorkoutSession(id: id)
+        if currentSessionID == id {
+            currentSessionID = nil
+        }
     }
 }
 
 private enum UITestFoundationRepositoryError: Error {
     case initialLoad
+    case ohpSymptomWrite
+    case sessionDeletion
 }
 #endif
