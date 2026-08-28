@@ -5846,6 +5846,12 @@ def yaml_scalar(value: str) -> str:
     return scalar
 
 
+M4_SAFE_FULL_JOB_GUARD = (
+    "${{ github.event_name != 'push' || !startsWith(github.ref_name, "
+    "'test/m4.') || startsWith(github.ref_name, 'test/m4.9-') }}"
+)
+
+
 def canonical_test_job_steps(source: str) -> list[dict[str, object]]:
     lines = source.splitlines()
     active_lines = [yaml_without_inline_comment(line).rstrip() for line in lines]
@@ -5946,19 +5952,20 @@ def canonical_test_job_steps(source: str) -> list[dict[str, object]]:
         match = re.fullmatch(r"    ([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*", line)
         if match is None:
             raise SystemExit(
-                "M3.11 test workflow job must remain unconditional and canonical"
+                "M3.11 test workflow job must use the exact M4-safe full-job guard"
             )
         job_keys.setdefault(match.group(1), []).append(
             (yaml_scalar(match.group(2)), index)
         )
     if (
-        set(job_keys) != {"runs-on", "timeout-minutes", "steps"}
+        set(job_keys) != {"if", "runs-on", "timeout-minutes", "steps"}
+        or [value for value, _ in job_keys["if"]] != [M4_SAFE_FULL_JOB_GUARD]
         or [value for value, _ in job_keys["runs-on"]] != ["macos-15"]
         or [value for value, _ in job_keys["timeout-minutes"]] != ["300"]
         or [value for value, _ in job_keys["steps"]] != [""]
     ):
         raise SystemExit(
-            "M3.11 test workflow job must remain unconditional and canonical"
+            "M3.11 test workflow job must use the exact M4-safe full-job guard"
         )
 
     steps_start = job_keys["steps"][0][1]
@@ -6878,6 +6885,10 @@ from pathlib import Path
 
 repo = Path(sys.argv[1])
 script = repo / "scripts/verify-trackers.sh"
+M4_SAFE_FULL_JOB_GUARD = (
+    "${{ github.event_name != 'push' || !startsWith(github.ref_name, "
+    "'test/m4.') || startsWith(github.ref_name, 'test/m4.9-') }}"
+)
 
 
 def braced_declaration(source: str, pattern: str) -> tuple[int, int] | None:
@@ -10743,13 +10754,24 @@ with tempfile.TemporaryDirectory() as temporary:
     original_m311_workflow = m311_workflow.read_text(encoding="utf-8")
     m311_workflow.write_text(
         original_m311_workflow.replace(
+            f"    if: {M4_SAFE_FULL_JOB_GUARD}",
+            "    if: false",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.11 test workflow job must use the exact M4-safe full-job guard")
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    m311_workflow.write_text(
+        original_m311_workflow.replace(
             "    timeout-minutes: 300\n",
             "    timeout-minutes: 180\n",
             1,
         ),
         encoding="utf-8",
     )
-    run(root, "M3.11 test workflow job must remain unconditional and canonical")
+    run(root, "M3.11 test workflow job must use the exact M4-safe full-job guard")
     m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
 
     m311_workflow.write_text(
@@ -10863,13 +10885,13 @@ with tempfile.TemporaryDirectory() as temporary:
 
     m311_workflow.write_text(
         original_m311_workflow.replace(
-            "  test:\n",
-            "  test:\n    if: false\n",
+            f"    if: {M4_SAFE_FULL_JOB_GUARD}",
+            "    if: false",
             1,
         ),
         encoding="utf-8",
     )
-    run(root, "test workflow job must remain unconditional and canonical")
+    run(root, "test workflow job must use the exact M4-safe full-job guard")
     m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
 
     for missing_trigger in (

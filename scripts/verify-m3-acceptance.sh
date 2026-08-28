@@ -1255,7 +1255,17 @@ def require_exact_workflow_step_keys(
         )
 
 
-def require_unconditional_workflow_job(text: str, name: str) -> str:
+M4_SAFE_FULL_JOB_GUARD = (
+    "${{ github.event_name != 'push' || !startsWith(github.ref_name, "
+    "'test/m4.') || startsWith(github.ref_name, 'test/m4.9-') }}"
+)
+
+
+def require_unconditional_workflow_job(
+    text: str,
+    name: str,
+    expected_if: str | None = None,
+) -> str:
     active = active_source(text, comment_style="hash")
     job_matches = list(
         re.finditer(rf"^  {re.escape(name)}:\s*$", active, flags=re.MULTILINE)
@@ -1268,8 +1278,17 @@ def require_unconditional_workflow_job(text: str, name: str) -> str:
     job = yaml_mapping_entry(text, name, indent=2)
     if_key = yaml_key_pattern("if")
     continue_key = yaml_key_pattern("continue-on-error")
-    if re.search(rf"^ {{4}}{if_key}[ ]*:", job, flags=re.MULTILINE):
-        raise ValueError(f"M3 required workflow job {name} must run unconditionally")
+    if expected_if is None:
+        if re.search(rf"^ {{4}}{if_key}[ ]*:", job, flags=re.MULTILINE):
+            raise ValueError(f"M3 required workflow job {name} must run unconditionally")
+    elif re.findall(
+        rf"^ {{4}}{if_key}[ ]*:[ ]*(.*?)[ ]*$",
+        job,
+        flags=re.MULTILINE,
+    ) != [expected_if]:
+        raise ValueError(
+            f"M3 required workflow job {name} must use the exact M4-safe full-job guard"
+        )
     defaults_key = yaml_key_pattern("defaults")
     if re.search(rf"^ {{4}}{defaults_key}[ ]*:", job, flags=re.MULTILINE):
         raise ValueError(
@@ -2025,7 +2044,11 @@ def verify_red_structure(target_root: Path) -> None:
         )
 
     workflow = (target_root / ".github/workflows/ios.yml").read_text(encoding="utf-8")
-    test_job = require_unconditional_workflow_job(workflow, "test")
+    test_job = require_unconditional_workflow_job(
+        workflow,
+        "test",
+        expected_if=M4_SAFE_FULL_JOB_GUARD,
+    )
     small_phone_job = require_unconditional_workflow_job(workflow, "test-small-phone")
     qualifying = workflow_step(test_job, "Qualifying M3.12 integration RED")
     require_unconditional_workflow_step(
@@ -3819,6 +3842,18 @@ def self_test(source_root: Path) -> None:
         workflow_path = fixture / ".github/workflows/ios.yml"
         original = mutate_once(
             workflow_path,
+            f"    if: {M4_SAFE_FULL_JOB_GUARD}",
+            "    if: false",
+        )
+        expect_failure(
+            fixture,
+            "red",
+            "must use the exact M4-safe full-job guard",
+        )
+        workflow_path.write_text(original, encoding="utf-8")
+
+        original = mutate_once(
+            workflow_path,
             "        run: scripts/test-ios.sh --m312-red-only",
             "        # run: scripts/test-ios.sh --m312-red-only",
         )
@@ -3913,9 +3948,14 @@ def self_test(source_root: Path) -> None:
 
         original = mutate_once(
             workflow_path,
-            "  test:\n    runs-on: macos-15\n",
             (
                 "  test:\n"
+                f"    if: {M4_SAFE_FULL_JOB_GUARD}\n"
+                "    runs-on: macos-15\n"
+            ),
+            (
+                "  test:\n"
+                f"    if: {M4_SAFE_FULL_JOB_GUARD}\n"
                 "    runs-on: macos-15\n"
                 "    defaults:\n"
                 "      run:\n"

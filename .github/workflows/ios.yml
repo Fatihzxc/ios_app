@@ -7,6 +7,7 @@ on:
 
 jobs:
   test:
+    if: ${{ github.event_name != 'push' || !startsWith(github.ref_name, 'test/m4.') || startsWith(github.ref_name, 'test/m4.9-') }}
     runs-on: macos-15
     timeout-minutes: 300
     steps:
@@ -563,6 +564,96 @@ jobs:
             .build/gallery-screenshots/**
           include-hidden-files: true
           if-no-files-found: warn
+
+  test-m4-focused:
+    if: ${{ github.event_name == 'push' && startsWith(github.ref_name, 'test/m4.') && !startsWith(github.ref_name, 'test/m4.9-') }}
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install compatible XcodeGen
+        run: |
+          required_version="2.46.0"
+          version_at_least() {
+            local actual="$1"
+            local required="$2"
+            local actual_major actual_minor actual_patch required_major required_minor required_patch
+            IFS=. read -r actual_major actual_minor actual_patch <<< "$actual"
+            IFS=. read -r required_major required_minor required_patch <<< "$required"
+            actual_minor="${actual_minor:-0}"
+            actual_patch="${actual_patch:-0}"
+            required_minor="${required_minor:-0}"
+            required_patch="${required_patch:-0}"
+            (( actual_major > required_major )) ||
+              (( actual_major == required_major && actual_minor > required_minor )) ||
+              (( actual_major == required_major && actual_minor == required_minor && actual_patch >= required_patch ))
+          }
+
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          else
+            version_output="$(xcodegen --version)"
+            version="$(printf '%s\n' "$version_output" | grep -Eo '[0-9]+(\.[0-9]+){1,2}' | head -n 1)"
+            if [[ -z "$version" ]] || ! version_at_least "$version" "$required_version"; then
+              brew upgrade xcodegen
+            fi
+          fi
+
+          version_output="$(xcodegen --version)"
+          version="$(printf '%s\n' "$version_output" | grep -Eo '[0-9]+(\.[0-9]+){1,2}' | head -n 1)"
+          if [[ -z "$version" ]] || ! version_at_least "$version" "$required_version"; then
+            echo "xcodegen ${required_version} or newer is required; found: ${version_output}" >&2
+            exit 1
+          fi
+          printf '%s\n' "$version_output"
+
+      - name: Focused M4 routed static gates and tests
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF_NAME" in
+            test/m4.0-*)
+              scripts/test-ios.sh --focused-testing HealthTrackingAppTests
+              ;;
+            test/m4.1-*)
+              scripts/test-ios.sh --focused-testing ReportsKitTests
+              ;;
+            test/m4.2-*)
+              scripts/test-ios.sh --focused-testing ReportsKitTests/BodyStrengthDatasetBuilderTests
+              scripts/test-ios.sh --focused-testing PersistenceKitTests/ReportsRepositoryTests
+              ;;
+            test/m4.3-*)
+              scripts/test-ios.sh --focused-testing ReportsKitTests/ProteinAdherenceBuilderTests
+              scripts/test-ios.sh --focused-testing PersistenceKitTests/ReportsRepositoryTests
+              ;;
+            test/m4.4-*)
+              scripts/test-ios.sh --focused-testing CoreModelsTests/PhaseTransitionLedgerTests
+              scripts/test-ios.sh --focused-testing ReportsKitTests/LifestylePhaseDatasetBuilderTests
+              scripts/test-ios.sh --focused-testing PersistenceKitTests/PhaseTransitionLedgerRepositoryTests
+              ;;
+            test/m4.5-*)
+              scripts/test-ios.sh --focused-testing ProgressPhotosKitTests/ProgressPhotoComparisonShareTests
+              scripts/test-ios.sh --focused-testing HealthTrackingAppUITests/ProgressPhotoGalleryUITests
+              ;;
+            test/m4.6-*)
+              scripts/test-ios.sh --focused-testing ReportsKitTests/ExportSchemaInventoryTests
+              scripts/test-ios.sh --focused-testing ReportsKitTests/RFC4180CSVEncoderTests
+              scripts/test-ios.sh --focused-testing PersistenceKitTests/ReportsExportRepositoryTests
+              ;;
+            test/m4.7-*)
+              scripts/test-ios.sh --focused-testing ReportsKitTests/JSONExportEncoderTests
+              scripts/test-ios.sh --focused-testing ReportsKitTests/StoredZIPWriterTests
+              scripts/test-ios.sh --focused-testing ReportsKitTests/ReportExportCoordinatorTests
+              ;;
+            test/m4.8-*)
+              scripts/test-ios.sh --focused-testing ReportsKitTests
+              scripts/test-ios.sh --focused-testing HealthTrackingAppTests/ReportsCompositionTests
+              ;;
+            *)
+              echo "Unknown focused M4 branch: $GITHUB_REF_NAME" >&2
+              exit 1
+              ;;
+          esac
 
   test-cold-launch:
     runs-on: macos-15
