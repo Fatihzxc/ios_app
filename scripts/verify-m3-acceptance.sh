@@ -16,7 +16,16 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 mode = sys.argv[2]
-EVIDENCE_REQUIRED = False
+EVIDENCE_REQUIRED = True
+ACCEPTED_M312_SHA = "88ceee1a58db6f8447155996ae62194fa837a8fe"
+ACCEPTED_M312_RUN = "33167202851"
+EVIDENCE_RELATIVE = "docs/evidence/M3/acceptance.md"
+EVIDENCE_TASKS = tuple(f"M3.{index}" for index in range(1, 13))
+EVIDENCE_ARTIFACTS = (
+    "9689212849",
+    "9684192968",
+    "9684190776",
+)
 
 RED_REQUIRED = {
     "docs/superpowers/plans/2026-08-27-m3.12-integration-acceptance.md": {
@@ -3113,22 +3122,64 @@ def verify_privacy(target_root: Path) -> None:
 def verify_evidence(target_root: Path) -> None:
     if not EVIDENCE_REQUIRED:
         return
-    relative = "docs/evidence/M3/acceptance.md"
-    path = target_root / relative
+    path = target_root / EVIDENCE_RELATIVE
     if not path.is_file():
-        raise ValueError(f"Missing M3 acceptance evidence: {relative}")
+        raise ValueError(f"Missing M3 acceptance evidence: {EVIDENCE_RELATIVE}")
     text = path.read_text(encoding="utf-8")
+    accepted_line = (
+        f"Accepted M3.12 implementation SHA: `{ACCEPTED_M312_SHA}`"
+    )
+    if accepted_line not in text:
+        raise ValueError(
+            f"{EVIDENCE_RELATIVE} must name the exact accepted M3.12 "
+            f"implementation SHA {ACCEPTED_M312_SHA}"
+        )
+
+    run_url = (
+        "https://github.com/Fatihzxc/ios_app/actions/runs/"
+        f"{ACCEPTED_M312_RUN}"
+    )
     required = {
-        "Accepted M3.12 implementation SHA",
-        "M3.1",
-        "M3.12",
+        "# M3 acceptance evidence",
+        "## RED/GREEN task history",
+        "## Final GitHub Actions run",
+        "## Screenshot and artifact evidence",
+        "## Privacy scan",
+        "## Review record",
+        "## Remote record",
+        run_url,
         "Privacy scan: PASS",
-        "CloudKit signed two-device transfer: NOT RUN",
-        "Real notification delivery: NOT RUN",
+        "Critical: 0; Important: 0; Minor: 0; verdict: READY",
+        "Fable review: NOT RUN",
     }
+    required.update(EVIDENCE_ARTIFACTS)
     missing = sorted(token for token in required if token not in text)
     if missing:
-        raise ValueError(f"{relative} is missing evidence contracts: {missing}")
+        raise ValueError(
+            f"{EVIDENCE_RELATIVE} is missing evidence contracts: {missing}"
+        )
+
+    for task in EVIDENCE_TASKS:
+        if re.search(
+            rf"^\|\s*{re.escape(task)}\s*\|",
+            text,
+            flags=re.MULTILINE,
+        ) is None:
+            raise ValueError(
+                f"{EVIDENCE_RELATIVE} is missing the exact {task} evidence row"
+            )
+
+    for label in (
+        "CloudKit signed two-device transfer",
+        "Real notification delivery",
+    ):
+        expected = f"- {label}: NOT RUN"
+        matching = [line.strip() for line in text.splitlines() if label in line]
+        if matching != [expected]:
+            raise ValueError(
+                f"{EVIDENCE_RELATIVE} must record only the honest device/service "
+                f"claim {expected!r}; found {matching}"
+            )
 
 
 def verify(target_root: Path, verification_mode: str) -> None:
@@ -3187,6 +3238,64 @@ def materialize_production_self_test_fixture(fixture: Path) -> None:
         path = fixture / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content.strip() + "\n", encoding="utf-8")
+
+
+def write_evidence_self_test_fixture(fixture: Path) -> None:
+    evidence = fixture / EVIDENCE_RELATIVE
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    task_rows = "\n".join(
+        f"| {task} | RED SHA/run | accepted SHA/run |" for task in EVIDENCE_TASKS
+    )
+    artifact_rows = "\n".join(
+        f"- Artifact `{artifact}`" for artifact in EVIDENCE_ARTIFACTS
+    )
+    evidence.write_text(
+        "\n".join(
+            (
+                "# M3 acceptance evidence",
+                "",
+                f"Accepted M3.12 implementation SHA: `{ACCEPTED_M312_SHA}`",
+                "",
+                "## RED/GREEN task history",
+                "",
+                "| Task | RED | Accepted implementation |",
+                "| --- | --- | --- |",
+                task_rows,
+                "",
+                "## Final GitHub Actions run",
+                "",
+                (
+                    "https://github.com/Fatihzxc/ios_app/actions/runs/"
+                    f"{ACCEPTED_M312_RUN}"
+                ),
+                "",
+                "## Screenshot and artifact evidence",
+                "",
+                artifact_rows,
+                "",
+                "## Privacy scan",
+                "",
+                "- Privacy scan: PASS",
+                "",
+                "## Review record",
+                "",
+                "- Critical: 0; Important: 0; Minor: 0; verdict: READY",
+                "- Fable review: NOT RUN",
+                "",
+                "## Remote record",
+                "",
+                f"- GitHub implementation tip: `{ACCEPTED_M312_SHA}`",
+                "- Gitea reconciliation: bounded and non-blocking",
+                "",
+                "## Device and external-service limits",
+                "",
+                "- CloudKit signed two-device transfer: NOT RUN",
+                "- Real notification delivery: NOT RUN",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def mutate_once(path: Path, before: str, after: str) -> str:
@@ -4290,7 +4399,60 @@ def self_test(source_root: Path) -> None:
         production_fixture = fixture / "production-contracts"
         copy_real_fixture(source_root, production_fixture)
         materialize_production_self_test_fixture(production_fixture)
+        write_evidence_self_test_fixture(production_fixture)
         verify(production_fixture, "production")
+
+        evidence = production_fixture / EVIDENCE_RELATIVE
+        valid_evidence = evidence.read_text(encoding="utf-8")
+
+        evidence.unlink()
+        expect_failure(
+            production_fixture,
+            "production",
+            "Missing M3 acceptance evidence",
+        )
+        evidence.write_text(valid_evidence, encoding="utf-8")
+
+        evidence.write_text(
+            valid_evidence.replace(ACCEPTED_M312_SHA, "0" * 40),
+            encoding="utf-8",
+        )
+        expect_failure(
+            production_fixture,
+            "production",
+            "must name the exact accepted M3.12 implementation SHA",
+        )
+        evidence.write_text(valid_evidence, encoding="utf-8")
+
+        for task in EVIDENCE_TASKS:
+            evidence.write_text(
+                valid_evidence.replace(f"| {task} |", "| removed task |", 1),
+                encoding="utf-8",
+            )
+            expect_failure(
+                production_fixture,
+                "production",
+                f"missing the exact {task} evidence row",
+            )
+        evidence.write_text(valid_evidence, encoding="utf-8")
+
+        evidence.write_text(
+            valid_evidence.replace("Privacy scan: PASS", "Privacy scan: pending", 1),
+            encoding="utf-8",
+        )
+        expect_failure(production_fixture, "production", "Privacy scan: PASS")
+        evidence.write_text(valid_evidence, encoding="utf-8")
+
+        evidence.write_text(
+            valid_evidence + "- Real notification delivery: PASS\n",
+            encoding="utf-8",
+        )
+        expect_failure(
+            production_fixture,
+            "production",
+            "honest device/service claim",
+        )
+        evidence.write_text(valid_evidence, encoding="utf-8")
 
         def exercise_production_contract_mutations() -> None:
             fixture = production_fixture
