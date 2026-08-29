@@ -7,18 +7,23 @@ import SwiftUI
 public struct ProgressPhotoGalleryView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable private var viewModel: ProgressPhotoGalleryViewModel
+    @State private var shareCoordinator: ProgressPhotoComparisonShareCoordinator
+    @State private var shareTask: Task<Void, Never>?
     private let deleteFailureID: UUID?
     private let accessibilityAnnouncer: any ProgressPhotoAccessibilityAnnouncing
     private let onRequestDelete: @MainActor (ProgressPhotoSnapshot) -> Void
 
     public init(
         viewModel: ProgressPhotoGalleryViewModel,
+        shareCoordinator: ProgressPhotoComparisonShareCoordinator =
+            ProgressPhotoComparisonShareCoordinator(),
         deleteFailureID: UUID? = nil,
         accessibilityAnnouncer: any ProgressPhotoAccessibilityAnnouncing =
             SystemProgressPhotoAccessibilityAnnouncer(),
         onRequestDelete: @escaping @MainActor (ProgressPhotoSnapshot) -> Void
     ) {
         self.viewModel = viewModel
+        _shareCoordinator = State(initialValue: shareCoordinator)
         self.deleteFailureID = deleteFailureID
         self.accessibilityAnnouncer = accessibilityAnnouncer
         self.onRequestDelete = onRequestDelete
@@ -68,6 +73,28 @@ public struct ProgressPhotoGalleryView: View {
         }
         .task(id: viewModel.comparisonLoadID) {
             await viewModel.loadComparisonImages()
+        }
+        .sheet(item: shareArtifactBinding) { artifact in
+            SystemActivityView(
+                activityItemURL: artifact.fileURL,
+                artifactID: artifact.id,
+                accessibilityIdentifier: "photos.compare.share.sheet"
+            ) { artifactID, completed, error in
+                shareCoordinator.activityDidFinish(
+                    artifactID: artifactID,
+                    completed: completed,
+                    error: error
+                )
+            } onPresentationFailure: { artifactID in
+                shareCoordinator.presentationDidFail(artifactID: artifactID)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("photos.compare.share.sheet")
+        }
+        .onDisappear {
+            shareTask?.cancel()
+            shareTask = nil
+            shareCoordinator.dismiss()
         }
     }
 
@@ -239,6 +266,36 @@ public struct ProgressPhotoGalleryView: View {
                     )
                 }
             }
+            if viewModel.canShareComparison {
+                Button {
+                    shareTask?.cancel()
+                    shareTask = Task { @MainActor in
+                        await shareCoordinator.share {
+                            try viewModel.makeComparisonShareDescriptor()
+                        }
+                    }
+                } label: {
+                    Label(
+                        localized("photos.compare.share"),
+                        systemImage: "square.and.arrow.up"
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(shareCoordinator.phase == .preparing)
+                .accessibilityIdentifier("photos.compare.share")
+                .accessibilityLabel(localized("photos.compare.share.label"))
+                .accessibilityHint(localized("photos.compare.share.hint"))
+            }
+            if shareCoordinator.hasRetryableError {
+                Text(localized("photos.compare.share.error"))
+                    .font(AppTypography.caption)
+                    .foregroundStyle(
+                        AppColors.color(.stateDanger, scheme: colorScheme)
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("photos.compare.share.error")
+            }
         }
     }
 
@@ -289,6 +346,19 @@ public struct ProgressPhotoGalleryView: View {
         guard let notice = viewModel.selectionNotice else { return false }
         if case .replacedOldest = notice { return true }
         return false
+    }
+
+    private var shareArtifactBinding: Binding<ProgressPhotoOneUseArtifact?> {
+        Binding(
+            get: { shareCoordinator.artifact },
+            set: { artifact in
+                if artifact == nil {
+                    shareTask?.cancel()
+                    shareTask = nil
+                    shareCoordinator.dismiss()
+                }
+            }
+        )
     }
 
     private func localized(_ key: String.LocalizationValue) -> String {

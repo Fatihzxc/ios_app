@@ -1,6 +1,7 @@
 import CoreModels
 import Foundation
 import ProgressPhotosKit
+import UIKit
 import XCTest
 
 @MainActor
@@ -255,6 +256,8 @@ final class ProgressPhotoGalleryViewModelTests: XCTestCase {
                 )
             )
         }
+        let firstFullJPEG = galleryJPEG(color: .red)
+        let secondFullJPEG = galleryJPEG(color: .blue)
         let repository = ProgressPhotoGalleryRepositoryFake(
             photos: [first, second] + filler,
             thumbnails: [
@@ -262,8 +265,8 @@ final class ProgressPhotoGalleryViewModelTests: XCTestCase {
                 second.imageRef: .available(Data([2])),
             ],
             fullImages: [
-                first.imageRef: .available(Data([11])),
-                second.imageRef: .available(Data([22])),
+                first.imageRef: .available(firstFullJPEG),
+                second.imageRef: .available(secondFullJPEG),
             ]
         )
         let viewModel = ProgressPhotoGalleryViewModel(repository: repository)
@@ -286,8 +289,8 @@ final class ProgressPhotoGalleryViewModelTests: XCTestCase {
         await viewModel.loadComparisonImages()
 
         XCTAssertEqual(repository.fullImageRequests, [second.imageRef, first.imageRef])
-        XCTAssertEqual(viewModel.comparison?.before.assetState, .available(Data([11])))
-        XCTAssertEqual(viewModel.comparison?.after.assetState, .available(Data([22])))
+        XCTAssertEqual(viewModel.comparison?.before.assetState, .available(firstFullJPEG))
+        XCTAssertEqual(viewModel.comparison?.after.assetState, .available(secondFullJPEG))
     }
 
     func testProtectedDataFallbackRetriesAfterUnlockWithoutReloadingMetadata() async {
@@ -336,6 +339,7 @@ final class ProgressPhotoGalleryViewModelTests: XCTestCase {
             pose: .back,
             assetID: "00000000-0000-0000-0000-000000000164"
         )
+        let thirdFullJPEG = galleryJPEG(color: .green)
         let repository = ProgressPhotoGalleryRepositoryFake(
             photos: [first, second, third],
             thumbnails: [
@@ -346,7 +350,7 @@ final class ProgressPhotoGalleryViewModelTests: XCTestCase {
             fullImages: [
                 first.imageRef: .missing,
                 second.imageRef: .corrupt,
-                third.imageRef: .available(Data([33])),
+                third.imageRef: .available(thirdFullJPEG),
             ],
             fullImageErrors: [
                 third.imageRef: FixtureGalleryError.protectedData,
@@ -375,7 +379,8 @@ final class ProgressPhotoGalleryViewModelTests: XCTestCase {
         repository.fullImageErrors.removeValue(forKey: third.imageRef)
         await viewModel.retryUnavailableAssets()
         XCTAssertEqual(viewModel.comparison?.before.assetState, .missing)
-        XCTAssertEqual(viewModel.comparison?.after.assetState, .available(Data([33])))
+        XCTAssertEqual(viewModel.comparison?.after.assetState, .available(thirdFullJPEG))
+        XCTAssertTrue(repository.fullImageRequests.contains(third.imageRef))
     }
 
     func testSuccessfulSyncReloadsExactMissingAndCorruptGalleryStatesInOpenLifecycle() async throws {
@@ -409,6 +414,8 @@ final class ProgressPhotoGalleryViewModelTests: XCTestCase {
             pose: .side,
             assetID: "00000000-0000-0000-0000-000000000169"
         )
+        let missingFullJPEG = galleryJPEG(color: .orange)
+        let corruptFullJPEG = galleryJPEG(color: .purple)
         let repository = ProgressPhotoGalleryRepositoryFake(
             photos: [
                 thumbnailMissing,
@@ -453,8 +460,8 @@ final class ProgressPhotoGalleryViewModelTests: XCTestCase {
 
         repository.thumbnails[thumbnailMissing.imageRef] = .available(Data([5]))
         repository.thumbnails[thumbnailCorrupt.imageRef] = .available(Data([6]))
-        repository.fullImages[comparisonMissing.imageRef] = .available(Data([18]))
-        repository.fullImages[comparisonCorrupt.imageRef] = .available(Data([19]))
+        repository.fullImages[comparisonMissing.imageRef] = .available(missingFullJPEG)
+        repository.fullImages[comparisonCorrupt.imageRef] = .available(corruptFullJPEG)
         let synchronizer = CloudPhotoAssetSynchronizerFake(outcome: .synchronized)
         let lifecycle = ProgressPhotoAssetSyncLifecycle(
             synchronizer: synchronizer,
@@ -475,8 +482,9 @@ final class ProgressPhotoGalleryViewModelTests: XCTestCase {
             viewModel.items.first { $0.id == thumbnailCorrupt.id }?.assetState,
             .available(Data([6]))
         )
-        XCTAssertEqual(viewModel.comparison?.before.assetState, .available(Data([18])))
-        XCTAssertEqual(viewModel.comparison?.after.assetState, .available(Data([19])))
+        XCTAssertEqual(viewModel.comparison?.before.assetState, .available(missingFullJPEG))
+        XCTAssertEqual(viewModel.comparison?.after.assetState, .available(corruptFullJPEG))
+        XCTAssertTrue(repository.fullImageRequests.contains(comparisonMissing.imageRef))
         XCTAssertEqual(
             repository.thumbnailRequests.filter { $0 == thumbnailMissing.imageRef }.count,
             2
@@ -621,4 +629,14 @@ private func fixtureSnapshot(
         pose: pose,
         note: nil
     )
+}
+
+@MainActor
+private func galleryJPEG(color: UIColor) -> Data {
+    UIGraphicsImageRenderer(size: CGSize(width: 12, height: 12)).jpegData(
+        withCompressionQuality: 0.9
+    ) { context in
+        color.setFill()
+        context.cgContext.fill(CGRect(x: 0, y: 0, width: 12, height: 12))
+    }
 }

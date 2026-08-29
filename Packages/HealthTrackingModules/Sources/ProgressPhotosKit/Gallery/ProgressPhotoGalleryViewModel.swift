@@ -160,6 +160,40 @@ public final class ProgressPhotoGalleryViewModel {
         )
     }
 
+    public var canShareComparison: Bool {
+        guard selectedPhotoIDs.count == 2,
+              Set(selectedPhotoIDs).count == 2,
+              let comparison,
+              case let .available(beforeData) = comparison.before.assetState,
+              case let .available(afterData) = comparison.after.assetState else {
+            return false
+        }
+        return !beforeData.isEmpty && !afterData.isEmpty
+    }
+
+    public func makeComparisonShareDescriptor() throws ->
+        ProgressPhotoComparisonShareDescriptor {
+        guard selectedPhotoIDs.count == 2,
+              Set(selectedPhotoIDs).count == 2,
+              let comparison,
+              case let .available(beforeData) = comparison.before.assetState,
+              case let .available(afterData) = comparison.after.assetState else {
+            throw ProgressPhotoComparisonShareError.unavailableImages
+        }
+        return try ProgressPhotoComparisonShareDescriptor(
+            first: ProgressPhotoShareItem(
+                imageData: beforeData,
+                date: comparison.before.snapshot.date,
+                pose: comparison.before.snapshot.pose
+            ),
+            second: ProgressPhotoShareItem(
+                imageData: afterData,
+                date: comparison.after.snapshot.date,
+                pose: comparison.after.snapshot.pose
+            )
+        )
+    }
+
     public func load() async {
         loadGeneration &+= 1
         let generation = loadGeneration
@@ -257,7 +291,7 @@ public final class ProgressPhotoGalleryViewModel {
                     comparisonLoadGeneration &+= 1
                     return
                 }
-                comparisonAssetStates[id] = galleryState(from: result)
+                comparisonAssetStates[id] = comparisonGalleryState(from: result)
             } catch {
                 guard generation == selectionGeneration,
                       selectedIDs == selectedPhotoIDs else { return }
@@ -387,6 +421,24 @@ public final class ProgressPhotoGalleryViewModel {
         case let .available(bytes): return .available(bytes)
         case .missing: return .missing
         case .corrupt: return .corrupt
+        }
+    }
+
+    private func comparisonGalleryState(
+        from result: PhotoAssetLoadResult
+    ) -> ProgressPhotoGalleryAssetState {
+        switch result {
+        case let .available(bytes):
+            do {
+                try ProgressPhotoComparisonImageValidation.validate(bytes)
+                return .available(bytes)
+            } catch {
+                return .corrupt
+            }
+        case .missing:
+            return .missing
+        case .corrupt:
+            return .corrupt
         }
     }
 

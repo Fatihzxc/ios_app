@@ -8,6 +8,7 @@ python3 - "$repo_root" "${1:-}" <<'PY'
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import shutil
 import sys
@@ -21,7 +22,11 @@ ROUTES = {
     "m4.2": ("ReportsKitTests/BodyStrengthDatasetBuilderTests", "PersistenceKitTests/ReportsRepositoryTests"),
     "m4.3": ("ReportsKitTests/ProteinAdherenceBuilderTests", "PersistenceKitTests/ReportsRepositoryTests"),
     "m4.4": ("CoreModelsTests/PhaseTransitionLedgerTests", "ReportsKitTests/LifestylePhaseDatasetBuilderTests", "PersistenceKitTests/PhaseTransitionLedgerRepositoryTests", "TrainingKitTests/PhaseTransitionViewModelTests"),
-    "m4.5": ("ProgressPhotosKitTests/ProgressPhotoComparisonShareTests", "HealthTrackingAppUITests/ProgressPhotoGalleryUITests"),
+    "m4.5": (
+        "ProgressPhotosKitTests/ProgressPhotoComparisonShareTests",
+        "ProgressPhotosKitTests/ProgressPhotoGalleryViewModelTests",
+        "HealthTrackingAppUITests/ProgressPhotoGalleryUITests",
+    ),
     "m4.6": ("ReportsKitTests/ExportSchemaInventoryTests", "ReportsKitTests/RFC4180CSVEncoderTests", "PersistenceKitTests/ReportsExportRepositoryTests"),
     "m4.7": ("ReportsKitTests/JSONExportEncoderTests", "ReportsKitTests/StoredZIPWriterTests", "ReportsKitTests/ReportExportCoordinatorTests"),
     "m4.8": ("ReportsKitTests", "HealthTrackingAppTests/ReportsCompositionTests"),
@@ -396,6 +401,7 @@ def swift_xctest_suite_methods(
     source: str,
     suite_name: str,
     require_main_actor: bool,
+    return_source: bool = False,
 ) -> dict[str, str]:
     code = swift_code_without_comments_and_literals(source)
     identifier = r"[A-Za-z_][A-Za-z0-9_]*"
@@ -420,6 +426,7 @@ def swift_xctest_suite_methods(
     opening = suite.end() - 1
     closing = balanced_brace_end(code, opening, f"Task 3 suite {suite_name}")
     suite_body = code[opening + 1 : closing]
+    raw_suite_body = source[opening + 1 : closing]
 
     depths: list[int] = []
     depth = 0
@@ -448,7 +455,11 @@ def swift_xctest_suite_methods(
             opening,
             f"Task 3 test method {name}",
         )
-        methods[name] = suite_body[opening + 1 : closing]
+        methods[name] = (
+            raw_suite_body[opening + 1 : closing]
+            if return_source
+            else suite_body[opening + 1 : closing]
+        )
     return methods
 
 
@@ -781,9 +792,343 @@ TASK4_TRAINING_VIEW_MODEL_TEST_BEHAVIORS = {
     ),
 }
 
+TASK5_SHARE_TEST_BEHAVIORS = {
+    "testDescriptorOrdersChronologicallyAndUsesPoseThenImageBytesForEqualDates": (
+        "ProgressPhotoComparisonShareDescriptor(first: later, second: earlier)",
+        "XCTAssertEqual(chronological.before, earlier)",
+        "XCTAssertEqual(chronological.after, later)",
+        "XCTAssertEqual(poseForward, poseReverse)",
+        "XCTAssertEqual(poseForward.before, front)",
+        "XCTAssertEqual(byteForward, byteReverse)",
+    ),
+    "testDescriptorRejectsDuplicateItemsAndExposesOnlyImageDateAndPose": (
+        ".duplicateItems",
+        "Mirror(reflecting: descriptor)",
+        'Set(["before", "after"])',
+        "Mirror(reflecting: shareItem)",
+        'Set(["imageData", "date", "pose"])',
+    ),
+    "testGalleryFailsClosedUntilTwoDistinctDecodableFullImagesAreReady": (
+        "XCTAssertFalse(viewModel.canShareComparison)",
+        "XCTAssertThrowsError(try viewModel.makeComparisonShareDescriptor())",
+        "second.imageRef: .corrupt",
+        ".available(Data([0x00, 0x01]))",
+        "XCTAssertEqual(viewModel.selectedPhotoIDs, [first.id, second.id])",
+        "XCTAssertTrue(viewModel.canShareComparison)",
+        "XCTAssertEqual(descriptor.before.imageData, firstJPEG)",
+        "XCTAssertEqual(descriptor.after.imageData, secondJPEG)",
+    ),
+    "testSelectionAndLoadingNeverRenderWriteOrPresentBeforeExplicitShare": (
+        "XCTAssertEqual(renderer.renderCount, 0)",
+        "XCTAssertEqual(store.writeCount, 0)",
+        "XCTAssertNil(coordinator.artifact)",
+        "await coordinator.share",
+        "try fixture.viewModel.makeComparisonShareDescriptor()",
+        "XCTAssertEqual(renderer.renderCount, 1)",
+        "XCTAssertEqual(store.writeCount, 1)",
+        "XCTAssertEqual(coordinator.phase, .ready)",
+    ),
+    "testUIKitRendererRejectsEitherCorruptInput": (
+        "first: corrupt, second: valid",
+        "first: valid, second: corrupt",
+        "renderer.render(descriptor)",
+        ".corruptImage",
+    ),
+    "testUIKitRendererCreatesMetadataFreeJPEGWithoutPrivateSourceBytes": (
+        "jpegWithTrailingTokens(",
+        "for signature in forbiddenPrivacyMetadataSignatures",
+        "for token in privateTokens",
+        "UIKitProgressPhotoComparisonRenderer().render(descriptor)",
+        "CGImageSourceGetType(source)",
+        "UTType.jpeg.identifier",
+        "kCGImagePropertyExifDictionary",
+        "allowedIntrinsicExifKeys",
+        "forbiddenPrivacyMetadataSignatures",
+        'Data([0x45, 0x78, 0x69, 0x66, 0x00, 0x00])',
+        "kCGImagePropertyGPSDictionary",
+        "kCGImagePropertyIPTCDictionary",
+        "kCGImagePropertyTIFFDictionary",
+        "XCTAssertNil(output.range(of: Data(token.utf8)), token)",
+    ),
+    "testJPEGSanitizerRemovesPrivacySegmentsAndPreservesScanTail": (
+        "JPEGPrivacySegmentSanitizer.sanitize(input)",
+        "jpegSegment(marker: 0xe1",
+        "jpegSegment(marker: 0xed",
+        "jpegSegment(marker: 0xfe",
+        "XCTAssertEqual(output.suffix(scanTail.count), scanTail)",
+        "XCTAssertNil(output.range(of: payload))",
+    ),
+    "testJPEGSanitizerFailsClosedForMalformedOrTruncatedStreams": (
+        "malformedStreams",
+        "JPEGPrivacySegmentSanitizer.sanitize(stream)",
+        "XCTAssertThrowsError",
+        ".renderingFailed",
+    ),
+    "testTemporaryStoreUsesIsolatedCompleteProtectedDirectoryAndOwnedCleanup": (
+        "ProgressPhotoComparisonTemporaryStore(",
+        "XCTAssertEqual(fileSystem.createdDirectories, [root, ownedDirectory])",
+        "XCTAssertEqual(fileSystem.protectedURLs, [root, ownedDirectory])",
+        'ownedDirectory.appendingPathComponent("comparison.jpg")',
+        "artifact.cleanup()",
+        "XCTAssertEqual(fileSystem.removedURLs, [ownedDirectory])",
+        "XCTAssertFalse(fileSystem.removedURLs.contains(",
+    ),
+    "testTemporaryStoreCleansAllocatedDirectoryAfterPartialWriteFailure": (
+        "fileSystem.writeError = ShareFixtureError.writeFailed",
+        "XCTAssertThrowsError(try store.writeOneUseJPEG",
+        "XCTAssertEqual(fileSystem.removedURLs",
+    ),
+    "testCoordinatorCleansAfterCompletedCancelledFailedAndPresentationFailure": (
+        "artifactID: try XCTUnwrap(coordinator.artifact?.id)",
+        "activityDidFinish(",
+        "error: ShareFixtureError.activityFailed",
+        "coordinator.presentationDidFail(",
+        "XCTAssertEqual(store.cleanupCount, 4)",
+        "XCTAssertTrue(coordinator.hasRetryableError)",
+    ),
+    "testCoordinatorCleansOnDismissalReplacementAndRepeatedTerminalCallbacks": (
+        "await coordinator.share { descriptor }",
+        "XCTAssertEqual(store.cleanupCount, 1)",
+        "coordinator.dismiss()",
+        "artifactID: dismissedArtifactID",
+        "XCTAssertEqual(store.cleanupCount, 2)",
+        "XCTAssertNil(coordinator.artifact)",
+    ),
+    "testCoordinatorPreservesSelectionAndOffersRetryAfterRenderOrWriteFailure": (
+        "let selectedIDs = fixture.viewModel.selectedPhotoIDs",
+        "ShareFixtureError.renderFailed",
+        "store.writeError = ShareFixtureError.writeFailed",
+        "XCTAssertTrue(coordinator.hasRetryableError)",
+        "XCTAssertEqual(fixture.viewModel.selectedPhotoIDs, selectedIDs)",
+        "XCTAssertEqual(coordinator.phase, .ready)",
+    ),
+    "testDismissDuringSuspendedRenderInvalidatesOperationWithoutWritingOrPublishing": (
+        "ShareSuspendingRenderer(",
+        "await renderer.waitUntilSuspended(call: 1)",
+        "coordinator.dismiss()",
+        "renderer.resume(call: 1)",
+        "await operation.value",
+        "XCTAssertEqual(store.writeCount, 0)",
+        "XCTAssertNil(coordinator.artifact)",
+        "XCTAssertEqual(coordinator.phase, .idle)",
+    ),
+    "testNewerShareWinsWhenOlderSuspendedRenderResumes": (
+        "await renderer.waitUntilSuspended(call: 1)",
+        "await coordinator.share { descriptor }",
+        "let newerArtifactID = try XCTUnwrap(coordinator.artifact?.id)",
+        "renderer.resume(call: 1)",
+        "XCTAssertEqual(store.writtenData, [newerJPEG])",
+        "XCTAssertEqual(store.writeCount, 1)",
+        "XCTAssertEqual(store.cleanupCount, 0)",
+        "XCTAssertEqual(coordinator.artifact?.id, newerArtifactID)",
+    ),
+    "testExternalTaskCancellationDuringSuspendedRenderNeverWritesArtifact": (
+        "await renderer.waitUntilSuspended(call: 1)",
+        "operation.cancel()",
+        "renderer.resume(call: 1)",
+        "XCTAssertEqual(store.writeCount, 0)",
+        "XCTAssertNil(coordinator.artifact)",
+    ),
+    "testQueuedCancelledShareCannotEnterAfterDismissalOrCallDescriptor": (
+        "let gate = ShareEntryGate()",
+        "await gate.waitUntilEntered()",
+        "queuedShare.cancel()",
+        "coordinator.dismiss()",
+        "gate.open()",
+        "XCTAssertEqual(descriptorCallCount, 0)",
+        "XCTAssertEqual(renderer.renderCount, 1)",
+        "XCTAssertEqual(store.writeCount, 1)",
+        "XCTAssertEqual(store.cleanupCount, 1)",
+        "XCTAssertNil(coordinator.artifact)",
+    ),
+    "testStaleActivityAndPresentationCallbacksCannotCleanNewerArtifact": (
+        "let activityArtifactA = try XCTUnwrap(activityCoordinator.artifact)",
+        "let activityArtifactB = try XCTUnwrap(activityCoordinator.artifact)",
+        "activityCoordinator.activityDidFinish(",
+        "artifactID: activityArtifactA.id",
+        "XCTAssertEqual(activityCoordinator.artifact?.id, activityArtifactB.id)",
+        "let presentationArtifactA = try XCTUnwrap(presentationCoordinator.artifact)",
+        "let presentationArtifactB = try XCTUnwrap(presentationCoordinator.artifact)",
+        "presentationCoordinator.presentationDidFail(",
+        "artifactID: presentationArtifactA.id",
+        "XCTAssertEqual(presentationCoordinator.artifact?.id, presentationArtifactB.id)",
+    ),
+    "testArtifactCleanupRetriesAfterTransientRemovalFailure": (
+        "fileSystem.removeError = ShareFixtureError.cleanupFailed",
+        "artifact.cleanup()",
+        "XCTAssertEqual(fileSystem.removalAttempts, [ownedDirectory, ownedDirectory])",
+        "XCTAssertEqual(fileSystem.removedURLs, [ownedDirectory])",
+    ),
+    "testCoordinatorRetainsFailedCleanupAndRetriesWithoutRepublishingArtifact": (
+        "fileSystem.removeError = ShareFixtureError.cleanupFailed",
+        "coordinator.dismiss()",
+        "XCTAssertNil(coordinator.artifact)",
+        "XCTAssertEqual(coordinator.phase, .failed)",
+        "XCTAssertEqual(fileSystem.removalAttempts, [ownedDirectory, ownedDirectory])",
+        "XCTAssertEqual(fileSystem.writes.count, 1)",
+    ),
+    "testPartialWriteCleanupFailureIsRetriedBeforeNextAllocation": (
+        "fileSystem.writeError = ShareFixtureError.writeFailed",
+        "fileSystem.removeError = ShareFixtureError.cleanupFailed",
+        "XCTAssertThrowsError(try store.writeOneUseJPEG",
+        "let artifact = try store.writeOneUseJPEG",
+        "XCTAssertEqual(fileSystem.removalAttempts, [firstDirectory, firstDirectory])",
+        "XCTAssertLessThan(retryIndex, allocationIndex)",
+    ),
+    "testPartialWriteCleanupOutlivesReleasedStoreWithoutAnotherWrite": (
+        "fileSystem.writeError = ShareFixtureError.writeFailed",
+        "fileSystem.removeError = ShareFixtureError.cleanupFailed",
+        "weak var releasedStore = store",
+        "XCTAssertThrowsError(",
+        "store = nil",
+        "XCTAssertNil(releasedStore)",
+        "let didCleanUp = await waitUntil",
+        "XCTAssertTrue(didCleanUp)",
+        "XCTAssertEqual(fileSystem.removalAttempts, [ownedDirectory, ownedDirectory])",
+        "XCTAssertEqual(fileSystem.writes.count, 1)",
+    ),
+    "testTerminalCleanupOutlivesReleasedCoordinatorAndStore": (
+        "weak var releasedStore = store",
+        "weak var releasedCoordinator = coordinator",
+        "fileSystem.removeError = ShareFixtureError.cleanupFailed",
+        "coordinator?.dismiss()",
+        "coordinator = nil",
+        "store = nil",
+        "XCTAssertNil(releasedCoordinator)",
+        "XCTAssertNil(releasedStore)",
+        "let didCleanUp = await waitUntil",
+        "XCTAssertTrue(didCleanUp)",
+        "XCTAssertEqual(fileSystem.removalAttempts, [ownedDirectory, ownedDirectory])",
+    ),
+    "testStaleLifetimeRetryCannotDeleteNewArtifactAtReusedOwnedURL": (
+        "let scheduler = ShareCleanupSchedulerFake()",
+        "ProgressPhotoComparisonLifetimeCleanupRegistry(",
+        'root.appendingPathComponent("not-an-owned-uuid"',
+        "XCTAssertFalse(scheduler.hasScheduledOperation)",
+        "registry.retainOwnedDirectory(ownedDirectory, under: root)",
+        "registry.didCleanOwnedDirectory(ownedDirectory, under: root)",
+        "XCTAssertEqual(scheduler.pendingOperationCount, 2)",
+        "scheduler.runNext()",
+        "XCTAssertEqual(nonOwnedCleanupCount, 0)",
+        "XCTAssertEqual(newArtifactCleanupCount, 0)",
+        "XCTAssertEqual(scheduler.pendingOperationCount, 1)",
+        "XCTAssertEqual(newArtifactCleanupCount, 1)",
+        "XCTAssertFalse(scheduler.hasScheduledOperation)",
+    ),
+    "testStoreSkipsCollidingDirectoryWithoutTouchingPreexistingContent": (
+        "fileSystem.collisionDirectories = [collisionDirectory]",
+        "fileSystem.sentinelContents[collisionDirectory] = sentinel",
+        "let artifact = try store.writeOneUseJPEG",
+        "XCTAssertEqual(fileSystem.sentinelContents[collisionDirectory], sentinel)",
+        "XCTAssertFalse(fileSystem.protectedURLs.contains(collisionDirectory))",
+        "XCTAssertFalse(fileSystem.removalAttempts.contains(collisionDirectory))",
+    ),
+    "testStoreFailsClosedAfterBoundedDirectoryCollisionsWithoutDeletingAny": (
+        "fileSystem.collisionDirectories = Set(collisionDirectories)",
+        "XCTAssertThrowsError(try store.writeOneUseJPEG",
+        "XCTAssertEqual(fileSystem.createdDirectories.filter",
+        "collisionDirectories",
+        "XCTAssertTrue(fileSystem.writes.isEmpty)",
+        "XCTAssertTrue(fileSystem.removalAttempts.isEmpty)",
+    ),
+    "testRendererUsesFixedDarkInkAndWrapsSupportedCaptionsOnWhiteInDarkAppearance": (
+        "preferredContentSizeCategory: .large",
+        "let baselineRaster = try rgbaRaster(baselineOutput)",
+        "UITraitCollection(userInterfaceStyle: .dark)",
+        "preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge",
+        "UIKitProgressPhotoComparisonRenderer(",
+        "let raster = try rgbaRaster(output)",
+        "XCTAssertGreaterThan(raster.height, baselineRaster.height + 80)",
+        "XCTAssertTrue(raster.isNearlyWhite(x: 8, y: 8))",
+        "let ink = raster.darkPixels(",
+        "XCTAssertGreaterThan(ink.count, 250)",
+        "XCTAssertGreaterThanOrEqual(Set(ink.map(\\.y)).count, 56)",
+    ),
+}
+
+TASK5_GALLERY_TEST_BEHAVIORS = {
+    "testLargeGalleryDefersEveryThumbnailAndLoadsFullImagesOnlyForCompare": (
+        "let firstFullJPEG = galleryJPEG(color: .red)",
+        "let secondFullJPEG = galleryJPEG(color: .blue)",
+        "first.imageRef: .available(firstFullJPEG)",
+        "second.imageRef: .available(secondFullJPEG)",
+        "XCTAssertEqual(repository.fullImageRequests, [second.imageRef, first.imageRef])",
+        "XCTAssertEqual(viewModel.comparison?.before.assetState, .available(firstFullJPEG))",
+        "XCTAssertEqual(viewModel.comparison?.after.assetState, .available(secondFullJPEG))",
+    ),
+    "testCompareFullImageFallbacksRetryProtectedDataWithoutThumbnailReuse": (
+        "second.imageRef: .corrupt",
+        "let thirdFullJPEG = galleryJPEG(color: .green)",
+        "third.imageRef: .available(thirdFullJPEG)",
+        "XCTAssertEqual(viewModel.comparison?.after.assetState, .available(thirdFullJPEG))",
+    ),
+    "testSuccessfulSyncReloadsExactMissingAndCorruptGalleryStatesInOpenLifecycle": (
+        "let missingFullJPEG = galleryJPEG(color: .orange)",
+        "let corruptFullJPEG = galleryJPEG(color: .purple)",
+        "comparisonMissing.imageRef: .missing",
+        "comparisonCorrupt.imageRef: .corrupt",
+        "repository.fullImages[comparisonMissing.imageRef] = .available(missingFullJPEG)",
+        "repository.fullImages[comparisonCorrupt.imageRef] = .available(corruptFullJPEG)",
+    ),
+}
+
+TASK5_UI_TEST_BEHAVIORS = {
+    "testShareAppearsForTwoReadyPhotosAndPresentsOnlyAfterExplicitTap": (
+        "let share = app.buttons[",
+        "XCTAssertFalse(share.exists)",
+        "first.tap()",
+        "second.tap()",
+        "require(share,",
+        "XCTAssertGreaterThanOrEqual(share.frame.height, 52)",
+        "XCTAssertTrue(share.label.localizedCaseInsensitiveContains(\"paylaş\"))",
+        "let activitySheet = app.descendants(matching: .any)[",
+        "share.tap()",
+        "app.descendants(matching: .any)[",
+        "activitySheet.waitForExistence(timeout: 15)",
+    ),
+}
+
+TASK5_TEST_ASSET_SHA256 = {
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/ProgressPhotoComparisonShareTests.swift": (
+        "5de8d3f1574f144fd5926684d296cceaccc548885d1ea3bb96eb9ae9bd4b7340"
+    ),
+    "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/ProgressPhotoGalleryViewModelTests.swift": (
+        "23d0089117316bdc439cf7cf8507745e92852b64feb7319ce0b241af6962cc11"
+    ),
+    "HealthTrackingAppUITests/ProgressPhotoGalleryUITests.swift": (
+        "228e1c489759f93d5284975efefddc0171294cb7c38bc0e689fa9dd5fb67aae5"
+    ),
+}
+
 
 def compact_swift_tokens(source: str) -> str:
     return re.sub(r"[ \t\f\v\r\n]+", "", source)
+
+
+def compact_task5_swift(source: str) -> str:
+    return compact_swift_tokens(swift_code_without_comments_and_literals(source))
+
+
+def task5_call_uses_exact_literal(
+    source: str,
+    code: str,
+    callee: str,
+    literal: str,
+) -> bool:
+    target = json.dumps(literal)
+    for match in re.finditer(rf"{re.escape(callee)}[ \t\f\v\r\n]*\(", code):
+        opening = code.find("(", match.start())
+        depth = 1
+        cursor = opening + 1
+        while cursor < len(code) and depth:
+            if code[cursor] == "(":
+                depth += 1
+            elif code[cursor] == ")":
+                depth -= 1
+            cursor += 1
+        if depth == 0 and target in source[match.start():cursor]:
+            return True
+    return False
 
 
 def verify_meaningful_task3_tests(
@@ -856,6 +1201,715 @@ def verify_meaningful_task4_tests(
                 f"{path.name} must retain behavioral Task 4 test contracts in {name}: "
                 f"{missing}"
             )
+
+
+def verify_meaningful_task5_tests(
+    path: Path,
+    suite_name: str,
+    require_main_actor: bool,
+    behavior_contracts: dict[str, tuple[str, ...]],
+    require_exact_test_names: bool = False,
+) -> None:
+    methods = swift_xctest_suite_methods(
+        path.read_text(encoding="utf-8"),
+        suite_name,
+        require_main_actor,
+    )
+    required_names = set(behavior_contracts)
+    if (
+        (require_exact_test_names and set(methods) != required_names)
+        or (not require_exact_test_names and not required_names.issubset(methods))
+    ):
+        raise ValueError(
+            f"{path.name} must retain a nonzero suite of meaningful Task 5 tests"
+        )
+    assertion_family = re.compile(
+        r"\b(XCT(?:Assert[A-Z][A-Za-z0-9_]*|Fail))\s*\("
+    )
+    reachable_methods = {
+        name: task5_reachable_direct_method_body(methods[name], path, name)
+        for name in required_names
+    }
+    weak_assertions = sorted(
+        name
+        for name in required_names
+        if len(set(assertion_family.findall(reachable_methods[name]))) < 2
+    )
+    if weak_assertions:
+        raise ValueError(
+            f"{path.name} must retain reachable direct behavior and independent "
+            f"assertion families for Task 5: {weak_assertions}"
+        )
+    for name, required_fragments in behavior_contracts.items():
+        body = compact_swift_tokens(reachable_methods[name])
+        missing = [
+            fragment
+            for fragment in required_fragments
+            if compact_swift_tokens(
+                swift_code_without_comments_and_literals(fragment)
+            ) not in body
+        ]
+        if missing:
+            raise ValueError(
+                f"{path.name} must retain behavioral Task 5 test contracts with "
+                f"reachable direct behavior in "
+                f"{name}: {missing}"
+            )
+
+
+def task5_skip_swift_space(code: str, cursor: int) -> int:
+    while cursor < len(code) and code[cursor].isspace():
+        cursor += 1
+    return cursor
+
+
+def task5_swift_keyword_at(code: str, cursor: int, keyword: str) -> bool:
+    end = cursor + len(keyword)
+    return (
+        code[cursor:end] == keyword
+        and (cursor == 0 or not (code[cursor - 1].isalnum() or code[cursor - 1] == "_"))
+        and (end == len(code) or not (code[end].isalnum() or code[end] == "_"))
+    )
+
+
+def task5_control_body_opening(
+    code: str,
+    statement_start: int,
+    keyword: str,
+    name: str,
+) -> int:
+    cursor = statement_start + len(keyword)
+    parentheses = 0
+    brackets = 0
+    while cursor < len(code):
+        character = code[cursor]
+        if character == "(":
+            parentheses += 1
+        elif character == ")":
+            parentheses -= 1
+        elif character == "[":
+            brackets += 1
+        elif character == "]":
+            brackets -= 1
+        elif character == "{" and parentheses == 0 and brackets == 0:
+            return cursor
+        elif character == "}" and parentheses == 0 and brackets == 0:
+            break
+        cursor += 1
+    raise ValueError(f"Task 5 control statement in {name} must have a complete body")
+
+
+def task5_if_statement_extent(
+    code: str,
+    if_start: int,
+    name: str,
+) -> tuple[int, int, int | None, int]:
+    opening = task5_control_body_opening(code, if_start, "if", name)
+    closing = balanced_brace_end(code, opening, f"Task 5 if statement in {name}")
+    cursor = task5_skip_swift_space(code, closing + 1)
+    if not task5_swift_keyword_at(code, cursor, "else"):
+        return opening, closing, None, closing + 1
+
+    else_start = cursor
+    cursor = task5_skip_swift_space(code, cursor + len("else"))
+    if task5_swift_keyword_at(code, cursor, "if"):
+        _, _, _, statement_end = task5_if_statement_extent(code, cursor, name)
+    elif cursor < len(code) and code[cursor] == "{":
+        statement_end = balanced_brace_end(
+            code,
+            cursor,
+            f"Task 5 else statement in {name}",
+        ) + 1
+    else:
+        raise ValueError(f"Task 5 else statement in {name} must have a complete body")
+    return opening, closing, else_start, statement_end
+
+
+def task5_constant_boolean(condition: str) -> bool | None:
+    compact = re.sub(r"[\s()]", "", condition)
+    if compact in {"true", "!false"}:
+        return True
+    if compact in {"false", "!true"}:
+        return False
+    return None
+
+
+def task5_blank_range(characters: list[str], start: int, end: int) -> None:
+    for index in range(start, end):
+        if characters[index] not in {"\r", "\n"}:
+            characters[index] = " "
+
+
+def task5_code_with_unreachable_constant_branches_removed(
+    method: str,
+    name: str,
+) -> str:
+    reachable = list(method)
+    constant_condition = r"[ \t\f\v\r\n()!]*(?:true|false)[ \t\f\v\r\n()]*"
+    constant_if = re.compile(rf"\bif\b(?P<condition>{constant_condition})\{{")
+    for match in constant_if.finditer(method):
+        selected_then = task5_constant_boolean(match.group("condition"))
+        if selected_then is None:
+            continue
+        opening, closing, else_start, statement_end = task5_if_statement_extent(
+            method,
+            match.start(),
+            name,
+        )
+        if selected_then:
+            if else_start is not None:
+                task5_blank_range(reachable, else_start, statement_end)
+        else:
+            task5_blank_range(
+                reachable,
+                opening if else_start is not None else match.start(),
+                closing + 1,
+            )
+
+    constant_while = re.compile(rf"\bwhile\b(?P<condition>{constant_condition})\{{")
+    for match in constant_while.finditer(method):
+        if task5_constant_boolean(match.group("condition")) is not False:
+            continue
+        opening = method.find("{", match.start(), match.end())
+        closing = balanced_brace_end(
+            method,
+            opening,
+            f"Task 5 constant-unreachable while block in {name}",
+        )
+        task5_blank_range(reachable, match.start(), closing + 1)
+
+    constant_guard = re.compile(
+        rf"\bguard\b(?P<condition>{constant_condition})else\s*\{{"
+    )
+    for match in constant_guard.finditer(method):
+        if task5_constant_boolean(match.group("condition")) is not True:
+            continue
+        opening = method.find("{", match.start(), match.end())
+        closing = balanced_brace_end(
+            method,
+            opening,
+            f"Task 5 constant-unreachable guard else block in {name}",
+        )
+        task5_blank_range(reachable, match.start(), closing + 1)
+    return "".join(reachable)
+
+
+def task5_code_without_escaped_identifiers(code: str, name: str) -> str:
+    lexical = list(code)
+    cursor = 0
+    while cursor < len(code):
+        if code[cursor] != "`":
+            cursor += 1
+            continue
+        closing = code.find("`", cursor + 1)
+        if closing == -1:
+            raise ValueError(
+                f"Task 5 test {name} must use complete escaped identifiers"
+            )
+        task5_blank_range(lexical, cursor, closing + 1)
+        cursor = closing + 1
+    return "".join(lexical)
+
+
+def task5_reachable_direct_method_body(method: str, path: Path, name: str) -> str:
+    lexical_method = task5_code_without_escaped_identifiers(method, name)
+    if re.search(r"\bXCTSkip(?:If|Unless)?\s*\(", lexical_method):
+        raise ValueError(
+            f"{path.name} Task 5 test {name} must retain reachable direct behavior "
+            "without XCTest skips"
+        )
+    if re.search(r"\b(?:return|throw)\b", lexical_method):
+        raise ValueError(
+            f"{path.name} Task 5 test {name} must retain reachable direct behavior "
+            "without terminal statements in the bound method body"
+        )
+
+    reachable_code = task5_code_with_unreachable_constant_branches_removed(
+        lexical_method,
+        name,
+    )
+    return reachable_code
+
+
+def swift_named_type_body(code: str, type_name: str) -> str:
+    declaration = re.search(
+        rf"\b(?:struct|class|enum|protocol)\s+{re.escape(type_name)}\b[^{{}}]*\{{",
+        code,
+    )
+    if declaration is None:
+        raise ValueError(f"Task 5 type {type_name} must exist")
+    opening = declaration.end() - 1
+    closing = balanced_brace_end(code, opening, f"Task 5 type {type_name}")
+    return code[opening + 1 : closing]
+
+
+def task5_stored_let_names(code: str, type_name: str) -> set[str]:
+    body = swift_named_type_body(code, type_name)
+    return set(
+        re.findall(
+            r"\b(?:public\s+)?let\s+([A-Za-z_][A-Za-z0-9_]*)\s*:",
+            body,
+        )
+    )
+
+
+def verify_task5_assets(
+    root: Path,
+    enforce_test_asset_digests: bool = True,
+) -> None:
+    module = root / "Packages/HealthTrackingModules"
+    share_test = module / "Tests/ProgressPhotosKitTests/ProgressPhotoComparisonShareTests.swift"
+    gallery_test = module / "Tests/ProgressPhotosKitTests/ProgressPhotoGalleryViewModelTests.swift"
+    ui_test = root / "HealthTrackingAppUITests/ProgressPhotoGalleryUITests.swift"
+    missing_tests = [
+        str(path.relative_to(root))
+        for path in (share_test, gallery_test, ui_test)
+        if not path.is_file()
+    ]
+    if missing_tests:
+        raise ValueError(f"Task 5 test contracts are missing: {missing_tests}")
+    verify_meaningful_task5_tests(
+        share_test,
+        "ProgressPhotoComparisonShareTests",
+        True,
+        TASK5_SHARE_TEST_BEHAVIORS,
+        require_exact_test_names=True,
+    )
+    verify_meaningful_task5_tests(
+        gallery_test,
+        "ProgressPhotoGalleryViewModelTests",
+        True,
+        TASK5_GALLERY_TEST_BEHAVIORS,
+    )
+    verify_meaningful_task5_tests(
+        ui_test,
+        "ProgressPhotoGalleryUITests",
+        False,
+        TASK5_UI_TEST_BEHAVIORS,
+    )
+    if enforce_test_asset_digests:
+        for path in (share_test, gallery_test, ui_test):
+            relative = str(path.relative_to(root))
+            actual_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if TASK5_TEST_ASSET_SHA256.get(relative) != actual_digest:
+                raise ValueError(
+                    f"Task 5 test asset digest mismatch: {relative}"
+                )
+
+    progress_root = module / "Sources/ProgressPhotosKit"
+    required_sources = (
+        progress_root / "Share/ProgressPhotoComparisonShareDomain.swift",
+        progress_root / "Share/UIKitProgressPhotoComparisonRenderer.swift",
+        progress_root / "Share/ProgressPhotoComparisonShareCoordinator.swift",
+        progress_root / "Gallery/ProgressPhotoGalleryViewModel.swift",
+        progress_root / "Gallery/ProgressPhotoGalleryView.swift",
+        progress_root / "Resources/Localizable.xcstrings",
+        module / "Sources/DesignSystem/Platform/SystemActivityView.swift",
+    )
+    missing_sources = [
+        str(path.relative_to(root)) for path in required_sources if not path.is_file()
+    ]
+    if missing_sources:
+        raise ValueError(f"Task 5 production contracts are missing: {missing_sources}")
+
+    tracker_verifier = root / "scripts/verify-trackers.sh"
+    renderer_allowlist_entry = (
+        '"Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Share/'
+        'UIKitProgressPhotoComparisonRenderer.swift",'
+    )
+    if (
+        not tracker_verifier.is_file()
+        or tracker_verifier.read_text(encoding="utf-8").count(
+            renderer_allowlist_entry
+        ) != 1
+    ):
+        raise ValueError(
+            "Task 5 UIKit renderer must be the one exact added M3 named-adapter allowlist path"
+        )
+
+    domain_source = required_sources[0].read_text(encoding="utf-8")
+    domain_code = swift_code_without_comments_and_literals(domain_source)
+    if task5_stored_let_names(domain_code, "ProgressPhotoShareItem") != {
+        "imageData",
+        "date",
+        "pose",
+    }:
+        raise ValueError("Task 5 share item boundary must contain only imageData, date, and pose")
+    if task5_stored_let_names(
+        domain_code,
+        "ProgressPhotoComparisonShareDescriptor",
+    ) != {"before", "after"}:
+        raise ValueError("Task 5 descriptor boundary must contain only before and after share items")
+    item_body = swift_named_type_body(domain_code, "ProgressPhotoShareItem")
+    descriptor_body = swift_named_type_body(
+        domain_code,
+        "ProgressPhotoComparisonShareDescriptor",
+    )
+    forbidden_boundary = re.compile(
+        r"\b(?:note|assetID|imageRef|sourceURL|fileURL|path|"
+        r"ProgressPhotoSnapshot|ProgressPhotoGalleryItem)\b",
+        re.IGNORECASE,
+    )
+    if forbidden_boundary.search(item_body) or forbidden_boundary.search(descriptor_body):
+        raise ValueError("Task 5 share boundary must never contain notes, IDs, paths, URLs, or models")
+    domain_compact = compact_swift_tokens(domain_code)
+    for fragment in (
+        "case duplicateItems",
+        "if lhs.date != rhs.date",
+        "poseRank(lhs.pose)",
+        "lhs.imageData.lexicographicallyPrecedes(rhs.imageData)",
+        "guard first != second else",
+    ):
+        if compact_task5_swift(fragment) not in domain_compact:
+            raise ValueError(
+                "Task 5 descriptor must reject duplicates and deterministically order "
+                "date, pose, then image bytes without opaque IDs"
+            )
+
+    view_model_code = swift_code_without_comments_and_literals(
+        required_sources[3].read_text(encoding="utf-8")
+    )
+    view_model_compact = compact_swift_tokens(view_model_code)
+    for fragment in (
+        "public var canShareComparison: Bool",
+        "public func makeComparisonShareDescriptor() throws",
+        "guard selectedPhotoIDs.count == 2",
+        "Set(selectedPhotoIDs).count == 2",
+        "case let .available(beforeData)",
+        "case let .available(afterData)",
+        "return !beforeData.isEmpty && !afterData.isEmpty",
+        "ProgressPhotoShareItem(imageData: beforeData, date: comparison.before.snapshot.date, pose: comparison.before.snapshot.pose)",
+        "ProgressPhotoShareItem(imageData: afterData, date: comparison.after.snapshot.date, pose: comparison.after.snapshot.pose)",
+        "comparisonAssetStates[id] = comparisonGalleryState(from: result)",
+        "try ProgressPhotoComparisonImageValidation.validate(bytes)",
+    ):
+        if compact_task5_swift(fragment) not in view_model_compact:
+            raise ValueError(
+                "Task 5 gallery must fail closed until exactly two selected full images "
+                "are independently decodable"
+            )
+    if "ProgressPhotoComparisonImageValidation.validate(descriptor)" in view_model_compact:
+        raise ValueError(
+            "Task 5 gallery must use load-time validation instead of repeatedly decoding "
+            "immutable full images during share availability evaluation"
+        )
+
+    renderer_source = required_sources[1].read_text(encoding="utf-8")
+    renderer_code = swift_code_without_comments_and_literals(renderer_source)
+    renderer_compact = compact_swift_tokens(renderer_code)
+    for fragment in (
+        "decode(descriptor.before.imageData)",
+        "decode(descriptor.after.imageData)",
+        "CGImageDestinationCreateWithData",
+        "UTType.jpeg.identifier",
+        "CGImageDestinationAddImage(destination, image, properties as CFDictionary)",
+        "CGImageDestinationFinalize(destination)",
+    ):
+        if compact_task5_swift(fragment) not in renderer_compact:
+            raise ValueError(
+                "Task 5 renderer must independently decode both images and emit one "
+                "fresh metadata-free JPEG"
+            )
+    if re.search(r"\b(?:note|assetID|imageRef|ProgressPhotoSnapshot)\b", renderer_code):
+        raise ValueError("Task 5 renderer must never read model notes or opaque identifiers")
+    if any(
+        key in renderer_code
+        for key in (
+            "kCGImagePropertyExifDictionary",
+            "kCGImagePropertyGPSDictionary",
+            "kCGImagePropertyIPTCDictionary",
+            "kCGImagePropertyTIFFDictionary",
+        )
+    ):
+        raise ValueError("Task 5 renderer must not copy private metadata dictionaries")
+    for fragment in (
+        "UIColor.white.setFill()",
+        "UIColor(red: 0.07, green: 0.08, blue: 0.10, alpha: 1)",
+        "UIColor(red: 0.18, green: 0.20, blue: 0.23, alpha: 1)",
+        "paragraph.lineBreakMode = .byWordWrapping",
+        "private let captionHorizontalInset: CGFloat = 20",
+        "paneWidth: paneWidth - captionHorizontalInset * 2",
+        "x: originX + captionHorizontalInset",
+        "width: paneWidth - captionHorizontalInset * 2",
+        "text.boundingRect(",
+        "options: [.usesLineFragmentOrigin, .usesFontLeading]",
+        "let captionHeight = max(beforeCaption.height, afterCaption.height)",
+        "imageOriginY: outerPadding + captionHeight + imageSpacing",
+        "private let traitCollection: UITraitCollection",
+        "traitCollection ?? UITraitCollection.current",
+        "UIFontMetrics(forTextStyle: .title2).scaledFont(",
+        "UIFontMetrics(forTextStyle: .body).scaledFont(",
+        "compatibleWith: traitCollection",
+        ".font: titleFont",
+        ".font: detailFont",
+    ):
+        if compact_task5_swift(fragment) not in renderer_compact:
+            raise ValueError(
+                "Task 5 renderer must measure wrapped localized captions and retain "
+                "fixed dark ink on its fixed white background"
+            )
+    if any(
+        compact_task5_swift(fragment) in renderer_compact
+        for fragment in ("UIColor.label", "UIColor.secondaryLabel", ".byTruncatingTail")
+    ):
+        raise ValueError(
+            "Task 5 renderer must not use dynamic semantic ink or truncate supported captions"
+        )
+    if (
+        renderer_compact.count(compact_task5_swift("scaledFont(")) != 2
+        or renderer_compact.count(
+            compact_task5_swift("compatibleWith: traitCollection")
+        ) != 2
+    ):
+        raise ValueError(
+            "Task 5 renderer must measure and draw exact accessibility-scaled "
+            "caption fonts for its explicit trait collection"
+        )
+    if renderer_compact.count(
+        compact_task5_swift("x: originX + captionHorizontalInset")
+    ) != 2:
+        raise ValueError(
+            "Task 5 renderer must measure wrapped localized captions with unclipped inset ink"
+        )
+    for fragment in (
+        "let encodedJPEG = try encodeMetadataFreeJPEG(composite)",
+        "let sanitizedJPEG = try JPEGPrivacySegmentSanitizer.sanitize(encodedJPEG)",
+        "try ProgressPhotoComparisonImageValidation.validate(sanitizedJPEG)",
+        "return sanitizedJPEG",
+        "guard bytes.count >= 4, bytes[0] == 0xff, bytes[1] == 0xd8",
+        "if (0xe1...0xef).contains(marker) || marker == 0xfe",
+        "guard segmentLength >= 2",
+        "guard segmentEnd <= bytes.count",
+        "output.append(contentsOf: bytes[markerStart..<segmentEnd])",
+        "guard scanEnd == bytes.count",
+    ):
+        if compact_task5_swift(fragment) not in renderer_compact:
+            raise ValueError(
+                "Task 5 JPEG sanitizer must remove APP1-APP15 and COM metadata, "
+                "preserve the scan tail, and fail closed on malformed streams"
+            )
+
+    coordinator_source = required_sources[2].read_text(encoding="utf-8")
+    coordinator_code = swift_code_without_comments_and_literals(coordinator_source)
+    coordinator_compact = compact_swift_tokens(coordinator_code)
+    for fragment in (
+        "func createExclusiveDirectory(at url: URL) throws",
+        "withIntermediateDirectories: false",
+        "private let maximumDirectoryAttempts = 8",
+        "for _ in 0..<maximumDirectoryAttempts",
+        "try fileSystem.createExclusiveDirectory(at: candidate)",
+        "catch where Self.isDirectoryCollision(error)",
+        "allocatedOwnedDirectory = ownedDirectory",
+        "try fileSystem.applyCompleteFileProtection(at: rootDirectory)",
+        "try fileSystem.applyCompleteFileProtection(at: ownedDirectory)",
+        'ownedDirectory.appendingPathComponent("comparison.jpg")',
+        "try fileSystem.writeAtomically(data, to: fileURL)",
+        "private var pendingOwnedDirectories: [URL] = []",
+        "guard retryPendingOwnedDirectoryCleanup() else",
+        "rememberPendingOwnedDirectory(allocatedOwnedDirectory)",
+        "final class ProgressPhotoComparisonLifetimeCleanupRegistry",
+        "static let shared = ProgressPhotoComparisonLifetimeCleanupRegistry()",
+        "private let retryDelaysNanoseconds: [UInt64]",
+        "30_000_000_000",
+        "scheduler.schedule(afterNanoseconds:",
+        "let token: UUID",
+        "scheduledTokens[directory] = entry.token",
+        "self?.retry(directory, token: entry.token)",
+        "guard scheduledTokens[directory] == token else { return }",
+        "entry.token == token",
+        "guard Self.isExactOwnedChild(directory, under: root) else { return }",
+        "directory.deletingLastPathComponent().standardizedFileURL == rootDirectory",
+        "let identifier = UUID(uuidString: directory.lastPathComponent)",
+        "retainLifetimeCleanup(for: allocatedOwnedDirectory)",
+        "cleanupRegistry.retainOwnedDirectory(",
+        "lifetimeCleanupRegistry.retainOwnedDirectory(",
+        "try cleanupAction()\ndidCleanUp = true",
+        "artifact.cleanup()",
+        "private var generation: UInt64 = 0",
+        "generation += 1",
+        "let operationGeneration = generation",
+        "let renderedData = try await renderer.render(descriptor)",
+        "try ensureCurrent(operationGeneration)",
+        "private var pendingCleanupArtifacts: [ProgressPhotoOneUseArtifact] = []",
+        "let pending = pendingCleanupArtifacts",
+        "for artifact in pending where !artifact.cleanup()",
+        "public func activityDidFinish(artifactID: UUID, completed: Bool, error: Error?)",
+        "public func presentationDidFail(artifactID: UUID)",
+        "guard artifact?.id == artifactID else { return }",
+        "public func dismiss()",
+        "cleanupCurrentAndPendingArtifacts()",
+        "try Task.checkCancellation()",
+        "guard !Task.isCancelled else { return }",
+    ):
+        if compact_task5_swift(fragment) not in coordinator_compact:
+            raise ValueError(
+                "Task 5 coordinator/store must retain isolated protection, one-use "
+                "ownership, generation cancellation, exclusive allocation, and retryable "
+                "idempotent cleanup"
+            )
+    if coordinator_compact.count(compact_task5_swift("try ensureCurrent(operationGeneration)")) < 3:
+        raise ValueError(
+            "Task 5 coordinator must guard every operation boundary with its current generation"
+        )
+    share_method_start = coordinator_compact.find(
+        compact_task5_swift("public func share(")
+    )
+    share_method_end = coordinator_compact.find(
+        compact_task5_swift("public func activityDidFinish("),
+        share_method_start,
+    )
+    share_method = coordinator_compact[share_method_start:share_method_end]
+    cancellation_preflight = share_method.find(
+        compact_task5_swift("guard !Task.isCancelled else { return }")
+    )
+    generation_mutation = share_method.find(
+        compact_task5_swift("generation += 1"),
+        cancellation_preflight + 1,
+    )
+    if (
+        share_method_start < 0
+        or share_method_end < 0
+        or cancellation_preflight < 0
+        or generation_mutation < 0
+        or cancellation_preflight > generation_mutation
+    ):
+        raise ValueError(
+            "Task 5 coordinator must reject already-cancelled queued shares before "
+            "mutating generation or cleanup state"
+        )
+    if coordinator_compact.count(
+        compact_task5_swift(
+            "guard Self.isExactOwnedChild(directory, under: root) else { return }"
+        )
+    ) != 2:
+        raise ValueError(
+            "Task 5 lifetime cleanup must accept only exact UUID child ownership"
+        )
+    if coordinator_compact.count(
+        compact_task5_swift("guard artifact?.id == artifactID else { return }")
+    ) != 2:
+        raise ValueError(
+            "Task 5 completion and presentation callbacks must each guard exact artifact identity"
+        )
+    if "try?" in coordinator_compact:
+        raise ValueError("Task 5 cleanup must never silently abandon an owned artifact")
+    if "removeItemIfExists(at:rootDirectory)" in coordinator_compact:
+        raise ValueError("Task 5 cleanup must never delete the shared root or non-owned paths")
+
+    activity_source = required_sources[6].read_text(encoding="utf-8")
+    activity_code = swift_code_without_comments_and_literals(activity_source)
+    activity_compact = compact_swift_tokens(activity_code)
+    if "activityItems:[activityItemURL]" not in activity_compact:
+        raise ValueError("Task 5 activity sheet must receive exactly the final JPEG URL")
+    if re.search(r"activityItems\s*:\s*\[[^\]]*,", activity_code):
+        raise ValueError("Task 5 activity sheet must never receive captions or extra items")
+    for fragment in (
+        "completionWithItemsHandler",
+        "private let artifactID: UUID",
+        "onCompletion(artifactID, completed, error)",
+        "onPresentationFailure(artifactID)",
+        'view.accessibilityIdentifier = accessibilityIdentifier',
+    ):
+        if compact_task5_swift(fragment) not in activity_compact:
+            raise ValueError("Task 5 system activity lifecycle must report completion and presentation failure")
+
+    gallery_source = required_sources[4].read_text(encoding="utf-8")
+    gallery_code = swift_code_without_comments_and_literals(gallery_source)
+    gallery_compact = compact_swift_tokens(gallery_code)
+    for fragment in (
+        "if viewModel.canShareComparison",
+        "await shareCoordinator.share",
+        "try viewModel.makeComparisonShareDescriptor()",
+        ".frame(maxWidth: .infinity, minHeight: 52)",
+        ".accessibilityIdentifier()",
+        ".accessibilityLabel(localized())",
+        ".accessibilityHint(localized())",
+        "SystemActivityView(",
+        "artifactID: artifact.id",
+        "accessibilityIdentifier:",
+        ".accessibilityElement(children: .contain)",
+        "shareCoordinator.activityDidFinish(artifactID: artifactID, completed: completed, error: error)",
+        "shareCoordinator.presentationDidFail(artifactID: artifactID)",
+        ".onDisappear",
+        "@State private var shareTask: Task<Void, Never>?",
+        "shareTask = Task { @MainActor in",
+        "shareTask?.cancel()",
+        "shareCoordinator.dismiss()",
+    ):
+        if compact_task5_swift(fragment) not in gallery_compact:
+            raise ValueError(
+                "Task 5 gallery must expose the explicit localized 52-point share "
+                "button and route every presentation lifecycle terminal"
+            )
+    if gallery_compact.count(compact_task5_swift("shareTask?.cancel()")) < 3:
+        raise ValueError(
+            "Task 5 gallery must own and cancel queued share work on replacement, "
+            "dismissal, and disappearance"
+        )
+    disappearance = gallery_compact.find(compact_task5_swift(".onDisappear"))
+    disappearance_cancel = gallery_compact.find(
+        compact_task5_swift("shareTask?.cancel()"),
+        disappearance,
+    )
+    disappearance_dismiss = gallery_compact.find(
+        compact_task5_swift("shareCoordinator.dismiss()"),
+        disappearance,
+    )
+    if (
+        disappearance < 0
+        or disappearance_cancel < 0
+        or disappearance_dismiss < 0
+        or disappearance_cancel > disappearance_dismiss
+    ):
+        raise ValueError(
+            "Task 5 gallery must cancel its owned queued share before disappearance cleanup"
+        )
+    for callee, literal in (
+        (".accessibilityIdentifier", "photos.compare.share"),
+        ("localized", "photos.compare.share.label"),
+        ("localized", "photos.compare.share.hint"),
+        (".accessibilityIdentifier", "photos.compare.share.sheet"),
+    ):
+        if not task5_call_uses_exact_literal(
+            gallery_source,
+            gallery_code,
+            callee,
+            literal,
+        ):
+            raise ValueError(
+                "Task 5 gallery must expose the explicit localized 52-point share "
+                "button and route every presentation lifecycle terminal"
+            )
+
+    localizations = json.loads(required_sources[5].read_text(encoding="utf-8"))
+    strings = localizations.get("strings", {})
+    for key in (
+        "photos.compare.share",
+        "photos.compare.share.label",
+        "photos.compare.share.hint",
+        "photos.compare.share.error",
+    ):
+        value = (
+            strings.get(key, {})
+            .get("localizations", {})
+            .get("tr", {})
+            .get("stringUnit", {})
+            .get("value")
+        )
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"Task 5 localization must define a nonempty Turkish value for {key}")
+
+    model_count = 0
+    for source_root in (root / "App", module / "Sources"):
+        if not source_root.exists():
+            continue
+        for source in source_root.rglob("*.swift"):
+            code = swift_code_without_comments_and_literals(
+                source.read_text(encoding="utf-8")
+            )
+            model_count += len(re.findall(r"@Model\b", code))
+    if model_count != 24:
+        raise ValueError(f"Task 5 must preserve exactly 24 @Model declarations; found {model_count}")
 
 
 def verify_reports_architecture(root: Path) -> None:
@@ -1618,6 +2672,32 @@ def replace_named_test_bodies(
     return mutated
 
 
+def wrap_named_test_body(
+    source: str,
+    name: str,
+    prefix: str,
+    suffix: str,
+) -> str:
+    code = swift_code_without_comments_and_literals(source)
+    declaration = re.compile(
+        rf"\bfunc[ \t\f\v\r\n]+{re.escape(name)}[ \t\f\v]*"
+        r"\([^)]*\)[^{]*\{",
+        re.MULTILINE,
+    )
+    matches = list(declaration.finditer(code))
+    if len(matches) != 1:
+        raise SystemExit(f"Task 5 mutation method must be unique: {name}")
+    opening = matches[0].end() - 1
+    closing = balanced_brace_end(code, opening, f"Task 5 mutation method {name}")
+    return (
+        source[: opening + 1]
+        + prefix
+        + source[opening + 1 : closing]
+        + suffix
+        + source[closing:]
+    )
+
+
 def task3_real_asset_self_test(source_root: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="m4-task3-real-assets-verifier-") as directory:
         fixture = Path(directory)
@@ -2172,6 +3252,821 @@ def task4_real_asset_self_test(source_root: Path) -> None:
         verify_reports_architecture(fixture)
 
 
+def expect_task5_failure(root: Path, expected: str) -> None:
+    try:
+        verify_task5_assets(root)
+    except ValueError as error:
+        if expected not in str(error):
+            raise SystemExit(
+                f"Task 5 real-asset mutation failed for the wrong reason; "
+                f"expected {expected!r}: {error}"
+            ) from error
+    else:
+        raise SystemExit(f"Task 5 real-asset mutation escaped: {expected}")
+
+
+def task5_real_asset_self_test(source_root: Path) -> None:
+    production_sources = (
+        source_root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Share/ProgressPhotoComparisonShareDomain.swift",
+        source_root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Share/UIKitProgressPhotoComparisonRenderer.swift",
+        source_root / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Share/ProgressPhotoComparisonShareCoordinator.swift",
+        source_root / "Packages/HealthTrackingModules/Sources/DesignSystem/Platform/SystemActivityView.swift",
+    )
+    # The test-only RED commit deliberately has no Task-5 production yet. The
+    # real verification below still checks the committed tests first and then
+    # fails decisively on the missing production contract. Once production is
+    # present, this self-test pressure-tests the actual checked-in assets.
+    if any(not path.is_file() for path in production_sources):
+        return
+
+    with tempfile.TemporaryDirectory(prefix="m4-task5-real-assets-verifier-") as directory:
+        fixture = Path(directory)
+        for relative in ("Packages", "App", "HealthTrackingAppUITests", "scripts"):
+            source = source_root / relative
+            if source.exists():
+                shutil.copytree(source, fixture / relative)
+        verify_task5_assets(fixture)
+
+        share_test = fixture / "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/ProgressPhotoComparisonShareTests.swift"
+        gallery_test = fixture / "Packages/HealthTrackingModules/Tests/ProgressPhotosKitTests/ProgressPhotoGalleryViewModelTests.swift"
+        ui_test = fixture / "HealthTrackingAppUITests/ProgressPhotoGalleryUITests.swift"
+        domain = fixture / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Share/ProgressPhotoComparisonShareDomain.swift"
+        renderer = fixture / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Share/UIKitProgressPhotoComparisonRenderer.swift"
+        coordinator = fixture / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Share/ProgressPhotoComparisonShareCoordinator.swift"
+        view_model = fixture / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Gallery/ProgressPhotoGalleryViewModel.swift"
+        gallery = fixture / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Gallery/ProgressPhotoGalleryView.swift"
+        activity = fixture / "Packages/HealthTrackingModules/Sources/DesignSystem/Platform/SystemActivityView.swift"
+        localization = fixture / "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Resources/Localizable.xcstrings"
+        tracker_verifier = fixture / "scripts/verify-trackers.sh"
+
+        original_share_test = share_test.read_text(encoding="utf-8")
+        share_test.unlink()
+        expect_task5_failure(fixture, "Task 5 test contracts are missing")
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        share_test.write_text("", encoding="utf-8")
+        expect_task5_failure(fixture, "expected concrete XCTestCase suite")
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        share_test.write_text(original_share_test + "\n", encoding="utf-8")
+        expect_task5_failure(fixture, "Task 5 test asset digest")
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        renamed_tests = original_share_test
+        for name in TASK5_SHARE_TEST_BEHAVIORS:
+            renamed_tests = renamed_tests.replace(f"func {name}", f"func renamed{name}", 1)
+        share_test.write_text(renamed_tests, encoding="utf-8")
+        expect_task5_failure(fixture, "nonzero suite of meaningful Task 5 tests")
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        share_test.write_text(
+            replace_named_test_bodies(
+                original_share_test,
+                set(TASK5_SHARE_TEST_BEHAVIORS),
+                "\n        XCTAssertTrue(true)\n    ",
+            ),
+            encoding="utf-8",
+        )
+        expect_task5_failure(fixture, "independent assertion families")
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        helper_decoys = "\n".join(
+            f"func {name}() {{ XCTAssertTrue(true) }}"
+            for name in sorted(TASK5_SHARE_TEST_BEHAVIORS)
+        )
+        share_test.write_text(renamed_tests + "\n" + helper_decoys + "\n", encoding="utf-8")
+        expect_task5_failure(fixture, "nonzero suite of meaningful Task 5 tests")
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        share_test.write_text(
+            original_share_test
+            + "\n@MainActor final class ProgressPhotoComparisonShareTests: XCTestCase {}\n",
+            encoding="utf-8",
+        )
+        expect_task5_failure(fixture, "one expected concrete XCTestCase suite")
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        duplicate_method = (
+            "    func testExternalTaskCancellationDuringSuspendedRenderNeverWritesArtifact() "
+            "async throws { XCTAssertTrue(true); XCTAssertNil(nil as Int?) }\n\n"
+        )
+        share_test.write_text(
+            original_share_test.replace(
+                "    private func readyGalleryFixture() async -> (",
+                duplicate_method + "    private func readyGalleryFixture() async -> (",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        expect_task5_failure(fixture, "must not duplicate test method")
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        for decoy in (
+            "// operation.cancel()",
+            '_ = "operation.cancel()"',
+        ):
+            share_test.write_text(
+                original_share_test.replace("operation.cancel()", decoy, 1),
+                encoding="utf-8",
+            )
+            expect_task5_failure(fixture, "behavioral Task 5 test contracts")
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        share_test.write_text(
+            original_share_test.replace(
+                (
+                    "    func testExternalTaskCancellationDuringSuspendedRenderNeverWritesArtifact() "
+                    "async throws {\n"
+                ),
+                (
+                    "    func testExternalTaskCancellationDuringSuspendedRenderNeverWritesArtifact() "
+                    "async throws {\n        return\n"
+                ),
+                1,
+            ),
+            encoding="utf-8",
+        )
+        expect_task5_failure(fixture, "reachable direct behavior")
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        share_test.write_text(
+            wrap_named_test_body(
+                original_share_test,
+                "testExternalTaskCancellationDuringSuspendedRenderNeverWritesArtifact",
+                "\n        if false {\n",
+                "\n        }\n",
+            ),
+            encoding="utf-8",
+        )
+        expect_task5_failure(fixture, "reachable direct behavior")
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        for dead_wrapper_prefix, dead_wrapper_suffix in (
+            ("\n        if 1 == 2 {\n", "\n        }\n"),
+            ("\n        if Bool(false) {\n", "\n        }\n"),
+            ("\n        for _ in 0..<0 {\n", "\n        }\n"),
+            ("\n        while 1 == 2 {\n", "\n        }\n"),
+            (
+                "\n        switch true {\n        case false:\n",
+                "\n        default:\n            break\n        }\n",
+            ),
+            (
+                "\n        let decoy = { () async throws -> Void in\n",
+                "\n        }\n        _ = decoy\n",
+            ),
+            (
+                "\n        func decoy() async throws {\n",
+                "\n        }\n        _ = decoy\n",
+            ),
+        ):
+            share_test.write_text(
+                wrap_named_test_body(
+                    original_share_test,
+                    "testExternalTaskCancellationDuringSuspendedRenderNeverWritesArtifact",
+                    dead_wrapper_prefix,
+                    dead_wrapper_suffix,
+                ),
+                encoding="utf-8",
+            )
+            expect_task5_failure(fixture, "Task 5 test asset digest")
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        for early_exit in (
+            "\n        guard false else { return }\n",
+            "\n        throw XCTSkip()\n",
+            "\n        try XCTSkipIf(true)\n",
+            "\n        try XCTSkipUnless(false)\n",
+        ):
+            share_test.write_text(
+                wrap_named_test_body(
+                    original_share_test,
+                    "testExternalTaskCancellationDuringSuspendedRenderNeverWritesArtifact",
+                    early_exit,
+                    "",
+                ),
+                encoding="utf-8",
+            )
+            expect_task5_failure(fixture, "reachable direct behavior")
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        round5_nested_expression_exits = (
+            "\n        if (if true { true } else { false }) { return }\n",
+            (
+                "\n        if (switch true { case true: true; "
+                "case false: false }) { return }\n"
+            ),
+            "\n        while (if true { true } else { false }) { return }\n",
+            (
+                "\n        for _ in (if true { [1] } else { [] }) { "
+                "return }\n"
+            ),
+            "\n        if if true { true } else { false } { return }\n",
+            (
+                "\n        if switch true { case true: true; case false: false } "
+                "{ return }\n"
+            ),
+            (
+                "\n        if true && (if true { true } else { false }) { "
+                "return }\n"
+            ),
+            "\n        if Bool(if true { true } else { false }) { return }\n",
+            (
+                "\n        while switch true { case true: true; "
+                "case false: false } { return }\n"
+            ),
+            (
+                "\n        for _ in if true { [1] } else { [] } { "
+                "return }\n"
+            ),
+        )
+        escaped_swift_keywords = (
+            "if", "else", "guard", "while", "for", "switch", "do",
+            "repeat", "catch", "defer", "func", "class", "struct",
+            "enum", "actor", "protocol", "extension",
+        )
+        round5_escaped_identifier_exits = tuple(
+            f"\n        let `{keyword}` = true; if `{keyword}` {{ return }}\n"
+            for keyword in escaped_swift_keywords
+        ) + tuple(
+            f"\n        if fixture.`{keyword}` {{ return }}\n"
+            for keyword in escaped_swift_keywords
+        ) + (
+            "\n        if fixture.actor { return }\n",
+            (
+                "\n        if \\Fixture.`class` == \\Fixture.`class` { "
+                "return }\n"
+            ),
+            (
+                "\n        if Bool(\\Fixture.`extension` == "
+                "\\Fixture.`extension`) { return }\n"
+            ),
+        )
+
+        for unconditional_nested_exit in (
+            "\n        if true { return }\n",
+            "\n        if\n            true\n        {\n            return\n        }\n",
+            "\n        if !false { return }\n",
+            "\n        do { return }\n",
+            "\n        repeat { return } while false\n",
+            "\n        if false { } else { return }\n",
+            "\n        if !true { } else { return }\n",
+            "\n        if ( false ) { } else { return }\n",
+            (
+                "\n        if\n            (\n                ! true\n            )\n"
+                "        {\n        }\n        else\n        {\n            return\n        }\n"
+            ),
+            "\n        if false { } else if true { return } else { }\n",
+            "\n        if false { } else if false { } else { return }\n",
+            "\n        if true { if false { } else { return } }\n",
+            "\n        do { if false { } else { return } }\n",
+            "\n        repeat { if !true { } else { return } } while false\n",
+            (
+                "\n        do { repeat { if false { } else { return } } "
+                "while false }\n"
+            ),
+            (
+                "\n        repeat { do { if !true { } else { return } } } "
+                "while false\n"
+            ),
+            "\n        while true { return }\n",
+            "\n        while ( true ) { return }\n",
+            "\n        while !false { return }\n",
+            "\n        do { while true { return } }\n",
+            "\n        for _ in 0..<1 { return }\n",
+            "\n        switch true { case true: return; default: break }\n",
+            "\n        if 1 == 1 { return }\n",
+            (
+                "\n        if [true].allSatisfy({ value in return value }) { "
+                "return }\n"
+            ),
+            "\n        if ({ true }()) { return }\n",
+            (
+                "\n        if [\"ok\": true].allSatisfy({ _, value in return value }) "
+                "{ return }\n"
+            ),
+            (
+                "\n        while [true].contains(where: { value in return value }) "
+                "{ return }\n"
+            ),
+        ) + round5_nested_expression_exits + round5_escaped_identifier_exits:
+            share_test.write_text(
+                wrap_named_test_body(
+                    original_share_test,
+                    "testExternalTaskCancellationDuringSuspendedRenderNeverWritesArtifact",
+                    unconditional_nested_exit,
+                    "",
+                ),
+                encoding="utf-8",
+            )
+            expect_task5_failure(fixture, "reachable direct behavior")
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        for prohibited_nested_terminal in (
+            (
+                "\n        let legitimateClosure: (Int) -> Int = { value in\n"
+                "            return value\n"
+                "        }\n"
+                "        _ = legitimateClosure(1)\n"
+            ),
+            (
+                "\n        func legitimateLocal(_ value: Int) -> Int {\n"
+                "            return value\n"
+                "        }\n"
+                "        _ = legitimateLocal(1)\n"
+            ),
+            (
+                "\n        do {\n"
+                "            let closure = { return 1 }\n"
+                "            func local() -> Int { return closure() }\n"
+                "            _ = local()\n"
+                "        }\n"
+            ),
+            (
+                "\n        repeat {\n"
+                "            let closure = { return 1 }\n"
+                "            func local() -> Int { return closure() }\n"
+                "            _ = local()\n"
+                "        } while false\n"
+            ),
+            (
+                "\n        if true {\n"
+                "            let closure = { return 1 }\n"
+                "            func local() -> Int { return closure() }\n"
+                "            _ = local()\n"
+                "        } else { return }\n"
+            ),
+            "\n        if false { return } else { _ = 1 }\n",
+            "\n        while false { return }\n",
+            (
+                "\n        if [true].allSatisfy({ value in return value }) {\n"
+                "            let closure = { return 1 }\n"
+                "            _ = closure()\n"
+                "        }\n"
+            ),
+            (
+                "\n        if ({ true }()) {\n"
+                "            func local() -> Int { return 1 }\n"
+                "            _ = local()\n"
+                "        }\n"
+            ),
+        ):
+            share_test.write_text(
+                wrap_named_test_body(
+                    original_share_test,
+                    "testExternalTaskCancellationDuringSuspendedRenderNeverWritesArtifact",
+                    prohibited_nested_terminal,
+                    "",
+                ),
+                encoding="utf-8",
+            )
+            expect_task5_failure(fixture, "reachable direct behavior")
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        for legitimate_nested_structure in (
+            (
+                "\n        let closure: (Int) -> Int = { value in value }\n"
+                "        _ = closure(1)\n"
+            ),
+            (
+                "\n        func local(_ value: Int) -> Int { value }\n"
+                "        _ = local(1)\n"
+            ),
+            (
+                "\n        struct Local {\n"
+                "            func value(_ input: Int) -> Int { input }\n"
+                "        }\n"
+                "        _ = Local().value(1)\n"
+            ),
+            (
+                "\n        do {\n"
+                "            let closure = { 1 }\n"
+                "            func local() -> Int { closure() }\n"
+                "            _ = local()\n"
+                "        }\n"
+            ),
+            (
+                "\n        repeat {\n"
+                "            let closure = { 1 }\n"
+                "            _ = closure()\n"
+                "        } while false\n"
+            ),
+            (
+                "\n        if [true].allSatisfy({ value in value }) {\n"
+                "            let closure = { 1 }\n"
+                "            _ = closure()\n"
+                "        }\n"
+            ),
+            (
+                "\n        let nestedIf = "
+                "(if true { true } else { false })\n"
+                "        XCTAssertTrue(nestedIf)\n"
+            ),
+            (
+                "\n        let nestedSwitch = switch true {\n"
+                "        case true: true\n"
+                "        case false: false\n"
+                "        }\n"
+                "        XCTAssertTrue(nestedSwitch)\n"
+            ),
+            (
+                "\n        let task = Task { 1 }\n"
+                "        let sendable: @Sendable () -> Int = { 1 }\n"
+                "        _ = (task, sendable())\n"
+            ),
+            (
+                "\n        let `func` = true\n"
+                "        let `class` = true\n"
+                "        XCTAssertTrue(`func` && `class`)\n"
+            ),
+            (
+                "\n        let `return` = 1\n"
+                "        let `throw` = 2\n"
+                "        let `XCTSkip` = 3\n"
+                "        XCTAssertEqual(`return` + `throw` + `XCTSkip`, 6)\n"
+            ),
+            (
+                "\n        let escapedReturnKeyPath = \\Fixture.`return`\n"
+                "        let escapedThrowKeyPath = \\Fixture.`throw`\n"
+                "        _ = (escapedReturnKeyPath, escapedThrowKeyPath)\n"
+            ),
+            (
+                "\n        let fixture = (actor: true, `func`: true)\n"
+                "        XCTAssertTrue(fixture.actor && fixture.`func`)\n"
+            ),
+            (
+                "\n        _ = \"return throw\"\n"
+                "        // return; throw\n"
+            ),
+        ):
+            share_test.write_text(
+                wrap_named_test_body(
+                    original_share_test,
+                    "testExternalTaskCancellationDuringSuspendedRenderNeverWritesArtifact",
+                    legitimate_nested_structure,
+                    "",
+                ),
+                encoding="utf-8",
+            )
+            verify_task5_assets(fixture, enforce_test_asset_digests=False)
+        share_test.write_text(original_share_test, encoding="utf-8")
+
+        original_gallery_test = gallery_test.read_text(encoding="utf-8")
+        gallery_test.write_text(
+            original_gallery_test.replace(
+                "first.imageRef: .available(firstFullJPEG)",
+                "first.imageRef: .available(Data([11]))",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        expect_task5_failure(fixture, "behavioral Task 5 test contracts")
+        gallery_test.write_text(original_gallery_test, encoding="utf-8")
+
+        original_ui_test = ui_test.read_text(encoding="utf-8")
+        ui_test.write_text(
+            original_ui_test.replace(
+                "func testShareAppearsForTwoReadyPhotosAndPresentsOnlyAfterExplicitTap",
+                "func renamedShareTest",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        expect_task5_failure(fixture, "meaningful Task 5 tests")
+        ui_test.write_text(original_ui_test, encoding="utf-8")
+
+        for path in (domain, renderer, coordinator, activity):
+            original = path.read_text(encoding="utf-8")
+            path.unlink()
+            expect_task5_failure(fixture, "Task 5 production contracts are missing")
+            path.write_text(original, encoding="utf-8")
+
+            path.write_text("", encoding="utf-8")
+            expect_task5_failure(fixture, "Task 5")
+            path.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            domain,
+            "    public let pose: ProgressPhotoPose\n",
+            "    public let pose: ProgressPhotoPose\n    public let note: String?\n",
+        )
+        expect_task5_failure(fixture, "only imageData, date, and pose")
+        domain.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            domain,
+            "lhs.imageData.lexicographicallyPrecedes(rhs.imageData)",
+            "false",
+        )
+        expect_task5_failure(fixture, "deterministically order")
+        domain.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            view_model,
+            """    public var canShareComparison: Bool {
+        guard selectedPhotoIDs.count == 2,
+              Set(selectedPhotoIDs).count == 2,
+              let comparison,
+              case let .available(beforeData) = comparison.before.assetState,
+              case let .available(afterData) = comparison.after.assetState else {
+            return false
+        }
+        return !beforeData.isEmpty && !afterData.isEmpty
+    }
+""",
+            """    public var canShareComparison: Bool {
+        (try? makeComparisonShareDescriptor()) != nil
+    }
+""",
+        )
+        expect_task5_failure(fixture, "fail closed")
+        view_model.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            view_model,
+            "ProgressPhotoComparisonImageValidation.validate(bytes)",
+            "_ = bytes",
+        )
+        expect_task5_failure(fixture, "independently decodable")
+        view_model.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            renderer,
+            "decode(descriptor.after.imageData)",
+            "decode(descriptor.before.imageData)",
+        )
+        expect_task5_failure(fixture, "independently decode both images")
+        renderer.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            renderer,
+            "let sanitizedJPEG = try JPEGPrivacySegmentSanitizer.sanitize(encodedJPEG)",
+            "let sanitizedJPEG = encodedJPEG",
+        )
+        expect_task5_failure(fixture, "JPEG sanitizer")
+        renderer.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            renderer,
+            "if (0xe1...0xef).contains(marker) || marker == 0xfe",
+            "if false",
+        )
+        expect_task5_failure(fixture, "JPEG sanitizer")
+        renderer.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            renderer,
+            "guard scanEnd == bytes.count",
+            "guard scanEnd <= bytes.count",
+        )
+        expect_task5_failure(fixture, "JPEG sanitizer")
+        renderer.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            renderer,
+            """UIColor(
+                    red: 0.07,
+                    green: 0.08,
+                    blue: 0.10,
+                    alpha: 1
+                )""",
+            "UIColor.label",
+        )
+        expect_task5_failure(fixture, "fixed dark ink")
+        renderer.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            renderer,
+            "paragraph.lineBreakMode = .byWordWrapping",
+            "paragraph.lineBreakMode = .byTruncatingTail",
+        )
+        expect_task5_failure(fixture, "measure wrapped localized captions")
+        renderer.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            renderer,
+            "x: originX + captionHorizontalInset",
+            "x: originX",
+        )
+        expect_task5_failure(fixture, "measure wrapped localized captions")
+        renderer.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            renderer,
+            "traitCollection ?? UITraitCollection.current",
+            "UITraitCollection.current",
+        )
+        expect_task5_failure(fixture, "measure wrapped localized captions")
+        renderer.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            renderer,
+            "compatibleWith: traitCollection",
+            "compatibleWith: UITraitCollection()",
+        )
+        expect_task5_failure(fixture, "accessibility-scaled caption fonts")
+        renderer.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            coordinator,
+            "            try ensureCurrent(operationGeneration)\n            let artifact",
+            "            let artifact",
+        )
+        expect_task5_failure(fixture, "current generation")
+        coordinator.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            coordinator,
+            (
+                "    ) async {\n"
+                "        guard !Task.isCancelled else { return }"
+            ),
+            (
+                "    ) async {\n"
+                "        _ = Task.isCancelled\n"
+                "        // guard !Task.isCancelled else { return }"
+            ),
+        )
+        expect_task5_failure(fixture, "already-cancelled queued shares")
+        coordinator.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            coordinator,
+            "                    retainLifetimeCleanup(for: allocatedOwnedDirectory)",
+            (
+                "                    _ = allocatedOwnedDirectory\n"
+                "                    // retainLifetimeCleanup(for: allocatedOwnedDirectory)"
+            ),
+        )
+        expect_task5_failure(fixture, "retryable idempotent cleanup")
+        coordinator.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            coordinator,
+            "                    cleanupRegistry.retainOwnedDirectory(",
+            "                    cleanupRegistry.didCleanOwnedDirectory(",
+        )
+        expect_task5_failure(fixture, "retryable idempotent cleanup")
+        coordinator.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            coordinator,
+            "        guard Self.isExactOwnedChild(directory, under: root) else { return }",
+            "        _ = directory\n        _ = root",
+        )
+        expect_task5_failure(fixture, "exact UUID child ownership")
+        coordinator.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            coordinator,
+            "        guard scheduledTokens[directory] == token else { return }",
+            "        _ = token",
+        )
+        expect_task5_failure(fixture, "retryable idempotent cleanup")
+        coordinator.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            coordinator,
+            "        30_000_000_000,",
+            "        10_000_000_000,",
+        )
+        expect_task5_failure(fixture, "retryable idempotent cleanup")
+        coordinator.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            coordinator,
+            "try fileSystem.createExclusiveDirectory(at: candidate)",
+            (
+                "try fileSystem.createDirectory(at: candidate)\n"
+                "                // try fileSystem.createExclusiveDirectory(at: candidate)"
+            ),
+        )
+        expect_task5_failure(fixture, "exclusive allocation")
+        coordinator.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            coordinator,
+            "            try cleanupAction()\n            didCleanUp = true",
+            "            didCleanUp = true\n            try cleanupAction()",
+        )
+        expect_task5_failure(fixture, "retryable idempotent cleanup")
+        coordinator.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            coordinator,
+            "rememberPendingOwnedDirectory(allocatedOwnedDirectory)",
+            "_ = allocatedOwnedDirectory",
+        )
+        expect_task5_failure(fixture, "retryable idempotent cleanup")
+        coordinator.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            coordinator,
+            "guard artifact?.id == artifactID else { return }",
+            "_ = artifactID",
+        )
+        expect_task5_failure(fixture, "exact artifact identity")
+        coordinator.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            activity,
+            "onCompletion(artifactID, completed, error)",
+            "onCompletion(UUID(), completed, error)",
+        )
+        expect_task5_failure(fixture, "system activity lifecycle")
+        activity.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            gallery,
+            "artifactID: artifact.id",
+            "artifactID: UUID()",
+        )
+        expect_task5_failure(fixture, "explicit localized 52-point share button")
+        gallery.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            gallery,
+            "                    shareTask = Task { @MainActor in",
+            "                    Task { @MainActor in",
+        )
+        expect_task5_failure(fixture, "explicit localized 52-point share button")
+        gallery.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            gallery,
+            "            shareTask?.cancel()\n            shareTask = nil\n            shareCoordinator.dismiss()",
+            "            shareTask = nil\n            shareCoordinator.dismiss()",
+        )
+        expect_task5_failure(fixture, "own and cancel queued share work")
+        gallery.write_text(original, encoding="utf-8")
+
+        original = coordinator.read_text(encoding="utf-8")
+        if "artifact.cleanup()" not in original:
+            raise SystemExit("Task 5 cleanup mutation source is missing")
+        coordinator.write_text(
+            original.replace("artifact.cleanup()", "_ = artifact.fileURL"),
+            encoding="utf-8",
+        )
+        expect_task5_failure(fixture, "idempotent cleanup")
+        coordinator.write_text(original, encoding="utf-8")
+
+        original = coordinator.read_text(encoding="utf-8")
+        coordinator.write_text(
+            original + "\nfunc unsafeCleanup() throws { try fileSystem.removeItemIfExists(at: rootDirectory) }\n",
+            encoding="utf-8",
+        )
+        expect_task5_failure(fixture, "never delete the shared root")
+        coordinator.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            activity,
+            "activityItems: [activityItemURL]",
+            'activityItems: [activityItemURL, "private caption"]',
+        )
+        expect_task5_failure(fixture, "exactly the final JPEG URL")
+        activity.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            gallery,
+            '.accessibilityIdentifier("photos.compare.share")',
+            '.accessibilityIdentifier("renamed.share")',
+        )
+        expect_task5_failure(fixture, "explicit localized 52-point share button")
+        gallery.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            gallery,
+            ".accessibilityElement(children: .contain)",
+            ".accessibilityElement(children: .ignore)",
+        )
+        expect_task5_failure(fixture, "explicit localized 52-point share button")
+        gallery.write_text(original, encoding="utf-8")
+
+        original_localization = localization.read_text(encoding="utf-8")
+        localized = json.loads(original_localization)
+        del localized["strings"]["photos.compare.share.hint"]
+        localization.write_text(json.dumps(localized), encoding="utf-8")
+        expect_task5_failure(fixture, "photos.compare.share.hint")
+        localization.write_text(original_localization, encoding="utf-8")
+
+        original = replace_once(
+            tracker_verifier,
+            (
+                '            "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Share/'
+                'UIKitProgressPhotoComparisonRenderer.swift",\n'
+            ),
+            "",
+        )
+        expect_task5_failure(fixture, "one exact added M3 named-adapter allowlist path")
+        tracker_verifier.write_text(original, encoding="utf-8")
+
+        original_domain = domain.read_text(encoding="utf-8")
+        domain.write_text(original_domain + "\n@Model final class Task5ModelDecoy {}\n", encoding="utf-8")
+        expect_task5_failure(fixture, "exactly 24 @Model declarations")
+        domain.write_text(original_domain, encoding="utf-8")
+
+        verify_task5_assets(fixture)
+
+
 def expect_failure(root: Path, expected: str) -> None:
     try:
         verify(root)
@@ -2290,10 +4185,12 @@ if mode == "--self-test":
     reports_architecture_self_test(root)
     task3_real_asset_self_test(root)
     task4_real_asset_self_test(root)
+    task5_real_asset_self_test(root)
     print("M4 focused CI verifier self-tests passed.")
 elif mode == "":
     verify(root)
     verify_reports_architecture(root)
+    verify_task5_assets(root)
     print("M4 reports verification passed.")
 else:
     raise SystemExit("Usage: scripts/verify-m4-reports.sh [--self-test]")

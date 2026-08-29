@@ -634,6 +634,7 @@ jobs:
               ;;
             test/m4.5-*)
               scripts/test-ios.sh --focused-testing ProgressPhotosKitTests/ProgressPhotoComparisonShareTests
+              scripts/test-ios.sh --focused-testing ProgressPhotosKitTests/ProgressPhotoGalleryViewModelTests
               scripts/test-ios.sh --focused-testing HealthTrackingAppUITests/ProgressPhotoGalleryUITests
               ;;
             test/m4.6-*)

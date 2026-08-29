@@ -1199,6 +1199,7 @@ for source_path in progress_photo_source_root.rglob("*.swift"):
             "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Platform/SystemPhotosPickerView.swift",
             "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Platform/PhotoThumbnailView.swift",
             "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Platform/ProgressPhotoAccessibilityAnnouncer.swift",
+            "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Share/UIKitProgressPhotoComparisonRenderer.swift",
         }
         if relative not in allowed:
             raise SystemExit(

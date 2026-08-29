@@ -36,6 +36,10 @@
     "photos.compare.after" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Sonra" } } } },
     "photos.compare.before" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Önce" } } } },
     "photos.compare.replaced" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "En eski seçim yeni fotoğrafla değiştirildi." } } } },
+    "photos.compare.share" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Karşılaştırmayı paylaş" } } } },
+    "photos.compare.share.error" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Karşılaştırma paylaşıma hazırlanamadı. Seçimlerin korundu; yeniden deneyebilirsin." } } } },
+    "photos.compare.share.hint" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Seçilen iki fotoğrafı özel bilgileri kaldırılmış tek bir görsel olarak açar." } } } },
+    "photos.compare.share.label" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Önce ve sonra karşılaştırmasını paylaş" } } } },
     "photos.compare.title" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "Önce ve sonra" } } } },
     "photos.title" : { "localizations" : { "tr" : { "stringUnit" : { "state" : "translated", "value" : "İlerleme fotoğrafları" } } } }
   },
