@@ -24,6 +24,7 @@ final class PersonalRecordTests: XCTestCase {
             EpleyEstimate.calculate(weightKg: -1, reps: 10),
             EpleyEstimate.calculate(weightKg: 20, reps: 0),
             EpleyEstimate.calculate(weightKg: 20, reps: -1),
+            EpleyEstimate.calculate(weightKg: 20, reps: Int.max),
         ] {
             XCTAssertNil(invalid)
         }

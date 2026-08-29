@@ -399,6 +399,50 @@ def verify_reports_architecture(root: Path) -> None:
     if "ReportsKit" not in target_dependencies(package, "PersistenceKit"):
         raise ValueError("PersistenceKit must depend on ReportsKit for repository implementation")
 
+    task2_sources = (
+        reports_root / "Domain/BodyStrengthReport.swift",
+        reports_root / "Builders/BodyStrengthDatasetBuilder.swift",
+        root / "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataReportsRepository.swift",
+    )
+    missing_task2 = [str(path.relative_to(root)) for path in task2_sources if not path.is_file()]
+    if missing_task2:
+        raise ValueError(f"Reports Task 2 production contracts are missing: {missing_task2}")
+
+    report_source = task2_sources[0].read_text(encoding="utf-8")
+    report_code = swift_code_without_comments_and_literals(report_source)
+    if re.search(r'\bvolumeKg\s*:\s*Double\s*\?', report_code) is None:
+        raise ValueError("Report strength volume must represent missing data as optional")
+
+    builder_source = task2_sources[1].read_text(encoding="utf-8")
+    builder_code = swift_code_without_comments_and_literals(builder_source)
+    epley_calls = re.findall(r'\bEpleyEstimate\s*\.\s*calculate\s*\(', builder_code)
+    if len(epley_calls) != 1:
+        raise ValueError("Body/strength builder must call canonical GuidanceKit Epley exactly once")
+    if re.search(r'/\s*30(?:\.0*)?\b', builder_code):
+        raise ValueError("Body/strength builder must not contain a local Epley formula")
+    duplicate_check = re.search(r'\brejectLogicalDuplicateSets\s*\(', builder_code)
+    warmup_exclusion = re.search(r'!\s*\$0\s*\.\s*isWarmup\b', builder_code)
+    if (
+        duplicate_check is None
+        or warmup_exclusion is None
+        or duplicate_check.start() > warmup_exclusion.start()
+    ):
+        raise ValueError("Body/strength builder must reject duplicates before warmup exclusion")
+
+    nil_to_zero = re.compile(r'\?\?\s*0(?:\.0*)?\b')
+    for source in task2_sources[1:]:
+        code = swift_code_without_comments_and_literals(source.read_text(encoding="utf-8"))
+        if nil_to_zero.search(code):
+            raise ValueError(
+                f"Reports Task 2 must not coerce missing values to zero: {source.relative_to(root)}"
+            )
+
+    repository_code = swift_code_without_comments_and_literals(
+        task2_sources[2].read_text(encoding="utf-8")
+    )
+    if re.search(r'\.\s*(?:insert|delete|save|rollback)\s*\(', repository_code):
+        raise ValueError("SwiftDataReportsRepository must remain read-only")
+
     forbidden_imports = {"CloudKit", "PersistenceKit", "PhotosUI", "SwiftData"}
     for source in reports_root.rglob("*.swift"):
         text = source.read_text(encoding="utf-8")
@@ -443,10 +487,28 @@ def reports_architecture_self_test(source_root: Path) -> None:
             "Domain/ReportsDashboardSource.swift",
             "Repository/ReportsRepository.swift",
             "Presentation/ReportsDashboardViewModel.swift",
+            "Domain/BodyStrengthReport.swift",
+            "Builders/BodyStrengthDatasetBuilder.swift",
         ):
             path = reports_root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("import Foundation\n", encoding="utf-8")
+            contents = "import Foundation\n"
+            if relative == "Domain/BodyStrengthReport.swift":
+                contents += "struct Point { let volumeKg: Double? }\n"
+            if relative == "Builders/BodyStrengthDatasetBuilder.swift":
+                contents += (
+                    "try rejectLogicalDuplicateSets(relevant)\n"
+                    "let eligible = relevant.filter { !$0.isWarmup }\n"
+                    "let estimate = EpleyEstimate.calculate(weightKg: weight, reps: reps)\n"
+                )
+            path.write_text(contents, encoding="utf-8")
+
+        task2_repository = (
+            fixture
+            / "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataReportsRepository.swift"
+        )
+        task2_repository.parent.mkdir(parents=True, exist_ok=True)
+        task2_repository.write_text("import Foundation\n", encoding="utf-8")
 
         verify_reports_architecture(fixture)
 
@@ -564,6 +626,69 @@ import PhotosUI
         missing_source.unlink()
         expect_architecture_failure(fixture, "production contracts are missing")
         missing_source.write_text("import Foundation\n", encoding="utf-8")
+
+        task2_builder = reports_root / "Builders/BodyStrengthDatasetBuilder.swift"
+        original_builder = task2_builder.read_text(encoding="utf-8")
+        task2_builder.unlink()
+        expect_architecture_failure(fixture, "Task 2 production contracts are missing")
+        task2_builder.write_text(original_builder, encoding="utf-8")
+
+        task2_repository.unlink()
+        expect_architecture_failure(fixture, "Task 2 production contracts are missing")
+        task2_repository.write_text("import Foundation\n", encoding="utf-8")
+
+        task2_builder.write_text(
+            original_builder.replace("EpleyEstimate.calculate", "LocalEstimate.calculate"),
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "must call canonical GuidanceKit Epley exactly once")
+        task2_builder.write_text(original_builder, encoding="utf-8")
+
+        task2_builder.write_text(
+            original_builder.replace(
+                "try rejectLogicalDuplicateSets(relevant)\n"
+                "let eligible = relevant.filter { !$0.isWarmup }",
+                "let eligible = relevant.filter { !$0.isWarmup }\n"
+                "try rejectLogicalDuplicateSets(eligible)",
+            ),
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "must reject duplicates before warmup exclusion")
+        task2_builder.write_text(original_builder, encoding="utf-8")
+
+        task2_builder.write_text(
+            original_builder
+            + "let unused = EpleyEstimate.calculate(weightKg: weight, reps: reps)\n",
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "must call canonical GuidanceKit Epley exactly once")
+        task2_builder.write_text(original_builder, encoding="utf-8")
+
+        task2_builder.write_text(
+            original_builder + "let local = weight * (1 + Double(reps) / 30)\n",
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "must not contain a local Epley formula")
+        task2_builder.write_text(original_builder, encoding="utf-8")
+
+        task2_report = reports_root / "Domain/BodyStrengthReport.swift"
+        original_report = task2_report.read_text(encoding="utf-8")
+        task2_report.write_text(original_report.replace("Double?", "Double"), encoding="utf-8")
+        expect_architecture_failure(fixture, "must represent missing data as optional")
+        task2_report.write_text(original_report, encoding="utf-8")
+
+        for source in (task2_builder, task2_repository):
+            original = source.read_text(encoding="utf-8")
+            source.write_text(original + "let coerced = missing ?? 0\n", encoding="utf-8")
+            expect_architecture_failure(fixture, "must not coerce missing values to zero")
+            source.write_text(original, encoding="utf-8")
+
+        task2_repository.write_text(
+            "import Foundation\nfunc mutate() { let alias = modelContext; try alias.save() }\n",
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "must remain read-only")
+        task2_repository.write_text("import Foundation\n", encoding="utf-8")
 
         original_package = package.read_text(encoding="utf-8")
         package.write_text(

@@ -6,7 +6,8 @@ public enum EpleyEstimate {
               let reps,
               weightKg.isFinite,
               weightKg > 0,
-              reps > 0 else {
+              reps > 0,
+              reps <= Int.max - 30 else {
             return nil
         }
         let factored = weightKg * (1 + Double(reps) / 30)
