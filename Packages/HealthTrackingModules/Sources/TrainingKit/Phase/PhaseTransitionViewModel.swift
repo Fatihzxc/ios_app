@@ -200,13 +200,17 @@ public final class PhaseTransitionViewModel {
         isConfirmed: Bool
     ) async {
         guard let programID else { return }
+        let previousPhaseID = programState?.currentPhaseId
+        guard previousPhaseID != phaseID else { return }
         do {
-            programState = try await repository.setActiveProgramPhase(
+            let updatedState = try await repository.setActiveProgramPhase(
                 programID: programID,
                 phaseID: phaseID,
                 at: date
             )
-            state = makeState(currentPhaseID: phaseID, evaluatedAt: date)
+            programState = updatedState
+            guard updatedState.currentPhaseId != previousPhaseID else { return }
+            state = makeState(currentPhaseID: updatedState.currentPhaseId, evaluatedAt: date)
             haptics?.handle(.phaseTransition(isConfirmed: isConfirmed))
         } catch {
             haptics?.handle(.repositoryError)

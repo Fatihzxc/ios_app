@@ -34,6 +34,24 @@ public enum ReportsRepositoryIntegrityError: Error, Equatable, Sendable {
     case nonFiniteProteinTotal(nutritionLogID: UUID)
     case duplicateUserProfileIDs(id: UUID, count: Int)
     case ambiguousUserProfiles(profileIDs: [UUID])
+    case duplicateSleepLogIDs(id: UUID, count: Int)
+    case duplicateSleepLocalDay(localDay: Date, recordIDs: [UUID])
+    case invalidSleepLog(id: UUID)
+    case duplicateMoodLogIDs(id: UUID, count: Int)
+    case duplicateMoodLocalDay(localDay: Date, recordIDs: [UUID])
+    case invalidMoodLog(id: UUID)
+    case duplicatePostureMetricIDs(id: UUID, count: Int)
+    case duplicatePostureLocalDay(localDay: Date, recordIDs: [UUID])
+    case invalidPostureMetric(id: UUID)
+    case duplicateActiveProgramIDs(id: UUID, count: Int)
+    case ambiguousActivePrograms(programIDs: [UUID])
+    case duplicateReportProgramPhaseIDs(id: UUID, count: Int)
+    case invalidReportProgramPhase(id: UUID)
+    case duplicateReportProgramStates(programID: UUID, count: Int)
+    case invalidReportProgramState(programID: UUID)
+    case duplicatePhaseTransitionSettings(programID: UUID, count: Int)
+    case invalidPhaseTransitionLedger(programID: UUID, PhaseTransitionLedgerError)
+    case phaseTransitionStateMismatch(programID: UUID)
 }
 
 @MainActor
@@ -155,16 +173,242 @@ public final class SwiftDataReportsRepository: ReportsRepository {
         }
         exerciseSetRecords.sort(by: exerciseSetOrderedBefore)
         let nutritionDayRecords = try nutritionDayRecords(in: interval)
+        let sleepRecords = try sleepRecords(in: interval)
+        let moodRecords = try moodRecords(in: interval)
+        let postureRecords = try postureRecords(in: interval)
+        let phaseProjection = try phaseProjection()
 
         return ReportsDashboardSource(
             coverage: ReportCoverage(
                 observationDates: bodyMetricRecords.map(\.date)
                     + exerciseSetRecords.map(\.sessionDate)
                     + nutritionDayRecords.map(\.date)
+                    + sleepRecords.map(\.date)
+                    + moodRecords.map(\.date)
+                    + postureRecords.map(\.date)
             ),
             bodyMetricRecords: bodyMetricRecords,
             exerciseSetRecords: exerciseSetRecords,
-            nutritionDayRecords: nutritionDayRecords
+            nutritionDayRecords: nutritionDayRecords,
+            sleepRecords: sleepRecords,
+            moodRecords: moodRecords,
+            postureRecords: postureRecords,
+            programPhases: phaseProjection.phases,
+            currentPhaseState: phaseProjection.state,
+            phaseTransitions: phaseProjection.transitions
+        )
+    }
+
+    private func sleepRecords(in interval: ReportDateInterval) throws -> [ReportSleepRecord] {
+        let all = try modelContext.fetch(FetchDescriptor<SleepLog>())
+        let selected = all.filter { interval.contains($0.date) }
+        let selectedIDs = Set(selected.map(\.id))
+        try rejectDuplicateIDs(
+            all.filter { selectedIDs.contains($0.id) },
+            id: \.id,
+            makeError: ReportsRepositoryIntegrityError.duplicateSleepLogIDs
+        )
+        try rejectDuplicateLocalDays(
+            selected,
+            id: \.id,
+            date: \.date,
+            makeError: ReportsRepositoryIntegrityError.duplicateSleepLocalDay
+        )
+        if let invalid = selected.filter({ !validSleep($0) })
+            .min(by: { $0.id.uuidString < $1.id.uuidString }) {
+            throw ReportsRepositoryIntegrityError.invalidSleepLog(id: invalid.id)
+        }
+        return selected.map {
+            ReportSleepRecord(
+                id: $0.id,
+                date: $0.date,
+                createdAt: $0.createdAt,
+                durationHours: $0.durationHours,
+                quality: $0.quality
+            )
+        }.sorted(by: lifestyleRecordOrder)
+    }
+
+    private func moodRecords(in interval: ReportDateInterval) throws -> [ReportMoodRecord] {
+        let all = try modelContext.fetch(FetchDescriptor<MoodLog>())
+        let selected = all.filter { interval.contains($0.date) }
+        let selectedIDs = Set(selected.map(\.id))
+        try rejectDuplicateIDs(
+            all.filter { selectedIDs.contains($0.id) },
+            id: \.id,
+            makeError: ReportsRepositoryIntegrityError.duplicateMoodLogIDs
+        )
+        try rejectDuplicateLocalDays(
+            selected,
+            id: \.id,
+            date: \.date,
+            makeError: ReportsRepositoryIntegrityError.duplicateMoodLocalDay
+        )
+        if let invalid = selected.filter({ !validMood($0) })
+            .min(by: { $0.id.uuidString < $1.id.uuidString }) {
+            throw ReportsRepositoryIntegrityError.invalidMoodLog(id: invalid.id)
+        }
+        return selected.map {
+            ReportMoodRecord(
+                id: $0.id,
+                date: $0.date,
+                createdAt: $0.createdAt,
+                score: $0.moodScore,
+                energy: $0.energy
+            )
+        }.sorted(by: lifestyleRecordOrder)
+    }
+
+    private func postureRecords(in interval: ReportDateInterval) throws -> [ReportPostureRecord] {
+        let all = try modelContext.fetch(FetchDescriptor<PostureMetric>())
+        let selected = all.filter { interval.contains($0.date) }
+        let selectedIDs = Set(selected.map(\.id))
+        try rejectDuplicateIDs(
+            all.filter { selectedIDs.contains($0.id) },
+            id: \.id,
+            makeError: ReportsRepositoryIntegrityError.duplicatePostureMetricIDs
+        )
+        try rejectDuplicateLocalDays(
+            selected,
+            id: \.id,
+            date: \.date,
+            makeError: ReportsRepositoryIntegrityError.duplicatePostureLocalDay
+        )
+        if let invalid = selected.filter({ !validPosture($0) })
+            .min(by: { $0.id.uuidString < $1.id.uuidString }) {
+            throw ReportsRepositoryIntegrityError.invalidPostureMetric(id: invalid.id)
+        }
+        return selected.map {
+            ReportPostureRecord(
+                id: $0.id,
+                date: $0.date,
+                createdAt: $0.createdAt,
+                symptomScore: $0.symptomScore,
+                wallTestPass: $0.wallTestPass
+            )
+        }.sorted(by: lifestyleRecordOrder)
+    }
+
+    private func phaseProjection() throws -> (
+        phases: [ReportProgramPhaseRecord],
+        state: ReportCurrentPhaseStateRecord?,
+        transitions: [ReportPhaseTransitionRecord]
+    ) {
+        let allPrograms = try modelContext.fetch(FetchDescriptor<Program>())
+        let active = allPrograms.filter { $0.isActive }
+        let activeIDs = Set(active.map(\.id))
+        try rejectDuplicateIDs(
+            allPrograms.filter { activeIDs.contains($0.id) },
+            id: \.id,
+            makeError: ReportsRepositoryIntegrityError.duplicateActiveProgramIDs
+        )
+        guard active.count <= 1 else {
+            throw ReportsRepositoryIntegrityError.ambiguousActivePrograms(
+                programIDs: active.map(\.id).sorted { $0.uuidString < $1.uuidString }
+            )
+        }
+        guard let program = active.first else { return ([], nil, []) }
+
+        let allPhases = try modelContext.fetch(FetchDescriptor<ProgramPhase>())
+        let phases = allPhases.filter { $0.program?.id == program.id }
+        try rejectDuplicateIDs(
+            phases,
+            id: \.id,
+            makeError: ReportsRepositoryIntegrityError.duplicateReportProgramPhaseIDs
+        )
+        if let invalid = phases.filter({
+            let name = $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty || name != $0.name || $0.orderIndex < 0
+                || !Self.validDate($0.createdAt) || !Self.validDate($0.updatedAt)
+        }).min(by: { $0.id.uuidString < $1.id.uuidString }) {
+            throw ReportsRepositoryIntegrityError.invalidReportProgramPhase(id: invalid.id)
+        }
+        let projectedPhases = phases.map {
+            ReportProgramPhaseRecord(id: $0.id, name: $0.name, orderIndex: $0.orderIndex)
+        }.sorted {
+            if $0.orderIndex != $1.orderIndex { return $0.orderIndex < $1.orderIndex }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+        let phaseIDs = Set(projectedPhases.map(\.id))
+
+        let states = try modelContext.fetch(FetchDescriptor<ProgramState>())
+            .filter { $0.programId == program.id }
+        guard states.count <= 1 else {
+            throw ReportsRepositoryIntegrityError.duplicateReportProgramStates(
+                programID: program.id,
+                count: states.count
+            )
+        }
+
+        let key = PhaseTransitionLedgerV1.key(for: program.id)
+        let settings = try modelContext.fetch(FetchDescriptor<AppSetting>())
+            .filter { $0.key == key }
+        guard settings.count <= 1 else {
+            throw ReportsRepositoryIntegrityError.duplicatePhaseTransitionSettings(
+                programID: program.id,
+                count: settings.count
+            )
+        }
+        let ledger: PhaseTransitionLedgerV1?
+        if let setting = settings.first {
+            do {
+                ledger = try PhaseTransitionLedgerV1.decode(setting.value, for: program.id)
+            } catch let error as PhaseTransitionLedgerError {
+                throw ReportsRepositoryIntegrityError.invalidPhaseTransitionLedger(
+                    programID: program.id,
+                    error
+                )
+            }
+        } else {
+            ledger = nil
+        }
+
+        guard let state = states.first else {
+            guard ledger == nil else {
+                throw ReportsRepositoryIntegrityError.phaseTransitionStateMismatch(
+                    programID: program.id
+                )
+            }
+            return (projectedPhases, nil, [])
+        }
+        guard phaseIDs.contains(state.currentPhaseId),
+              Self.validDate(state.phaseStartedAt) else {
+            throw ReportsRepositoryIntegrityError.invalidReportProgramState(programID: program.id)
+        }
+        let projectedState = ReportCurrentPhaseStateRecord(
+            programID: program.id,
+            phaseID: state.currentPhaseId,
+            phaseStartedAt: state.phaseStartedAt
+        )
+        guard let ledger else {
+            return (projectedPhases, projectedState, [])
+        }
+        guard ledger.records.allSatisfy({
+            phaseIDs.contains($0.fromPhaseID) && phaseIDs.contains($0.toPhaseID)
+        }) else {
+            throw ReportsRepositoryIntegrityError.invalidReportProgramState(programID: program.id)
+        }
+        if let last = ledger.records.last {
+            guard last.toPhaseID == state.currentPhaseId,
+                  last.transitionedAt == state.phaseStartedAt else {
+                throw ReportsRepositoryIntegrityError.phaseTransitionStateMismatch(
+                    programID: program.id
+                )
+            }
+        }
+        return (
+            projectedPhases,
+            projectedState,
+            ledger.records.map {
+                ReportPhaseTransitionRecord(
+                    id: $0.id,
+                    programID: $0.programID,
+                    fromPhaseID: $0.fromPhaseID,
+                    toPhaseID: $0.toPhaseID,
+                    fromStartedAt: $0.fromStartedAt,
+                    transitionedAt: $0.transitionedAt
+                )
+            }
         )
     }
 
@@ -473,6 +717,62 @@ public final class SwiftDataReportsRepository: ReportsRepository {
         throw makeError(duplicate.key, duplicate.value.count)
     }
 
+    private func rejectDuplicateLocalDays<Model>(
+        _ models: [Model],
+        id: KeyPath<Model, UUID>,
+        date: KeyPath<Model, Date>,
+        makeError: (Date, [UUID]) -> ReportsRepositoryIntegrityError
+    ) throws {
+        let grouped = Dictionary(grouping: models) {
+            calendar.startOfDay(for: $0[keyPath: date])
+        }
+        guard let duplicate = grouped.filter({ $0.value.count > 1 })
+            .sorted(by: { $0.key < $1.key }).first else { return }
+        throw makeError(
+            duplicate.key,
+            duplicate.value.map { $0[keyPath: id] }.sorted { $0.uuidString < $1.uuidString }
+        )
+    }
+
+    private func validSleep(_ model: SleepLog) -> Bool {
+        Self.validDate(model.date) && Self.validDate(model.createdAt)
+            && model.durationHours.isFinite
+            && model.durationHours > 0 && model.durationHours <= 24
+            && (1...10).contains(model.quality)
+            && canonicalOptionalText(model.note)
+    }
+
+    private func validMood(_ model: MoodLog) -> Bool {
+        guard Self.validDate(model.date), Self.validDate(model.createdAt),
+              model.moodScore.map({ (0...10).contains($0) }) != false,
+              model.energy.map({ (0...10).contains($0) }) != false,
+              canonicalOptionalText(model.note) else { return false }
+        let normalized = model.moodTags.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard normalized == model.moodTags, normalized.allSatisfy({ !$0.isEmpty }) else {
+            return false
+        }
+        let locale = Locale(identifier: "tr_TR")
+        return Set(normalized.map { $0.lowercased(with: locale) }).count == normalized.count
+            && (model.moodScore != nil || !normalized.isEmpty)
+    }
+
+    private func validPosture(_ model: PostureMetric) -> Bool {
+        guard Self.validDate(model.date), Self.validDate(model.createdAt),
+              model.symptomScore.map({ (0...10).contains($0) }) != false,
+              canonicalOptionalText(model.region),
+              canonicalOptionalText(model.note) else { return false }
+        return model.wallTestPass != nil || model.symptomScore != nil
+            || model.region != nil || model.note != nil
+    }
+
+    private func canonicalOptionalText(_ value: String?) -> Bool {
+        guard let value else { return true }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed == value
+    }
+
     private func rejectLogicalDuplicateSets(
         _ records: [(setLog: SetLog, session: WorkoutSession)]
     ) throws {
@@ -514,6 +814,33 @@ public final class SwiftDataReportsRepository: ReportsRepository {
 
     private static func validDate(_ date: Date) -> Bool {
         date.timeIntervalSinceReferenceDate.isFinite
+    }
+
+    private func lifestyleRecordOrder(
+        _ lhs: ReportSleepRecord,
+        _ rhs: ReportSleepRecord
+    ) -> Bool {
+        if lhs.date != rhs.date { return lhs.date < rhs.date }
+        if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private func lifestyleRecordOrder(
+        _ lhs: ReportMoodRecord,
+        _ rhs: ReportMoodRecord
+    ) -> Bool {
+        if lhs.date != rhs.date { return lhs.date < rhs.date }
+        if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private func lifestyleRecordOrder(
+        _ lhs: ReportPostureRecord,
+        _ rhs: ReportPostureRecord
+    ) -> Bool {
+        if lhs.date != rhs.date { return lhs.date < rhs.date }
+        if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+        return lhs.id.uuidString < rhs.id.uuidString
     }
 
     private func bodyMetricOrderedBefore(

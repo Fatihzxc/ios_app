@@ -146,16 +146,34 @@ public struct ReportsDashboardSource: Equatable, Sendable {
     public let bodyMetricRecords: [ReportBodyMetricRecord]
     public let exerciseSetRecords: [ReportExerciseSetRecord]
     public let nutritionDayRecords: [ReportNutritionDayRecord]
+    public let sleepRecords: [ReportSleepRecord]
+    public let moodRecords: [ReportMoodRecord]
+    public let postureRecords: [ReportPostureRecord]
+    public let programPhases: [ReportProgramPhaseRecord]
+    public let currentPhaseState: ReportCurrentPhaseStateRecord?
+    public let phaseTransitions: [ReportPhaseTransitionRecord]
 
     public init(
         coverage: ReportCoverage = .empty,
         bodyMetricRecords: [ReportBodyMetricRecord] = [],
         exerciseSetRecords: [ReportExerciseSetRecord] = [],
-        nutritionDayRecords: [ReportNutritionDayRecord] = []
+        nutritionDayRecords: [ReportNutritionDayRecord] = [],
+        sleepRecords: [ReportSleepRecord] = [],
+        moodRecords: [ReportMoodRecord] = [],
+        postureRecords: [ReportPostureRecord] = [],
+        programPhases: [ReportProgramPhaseRecord] = [],
+        currentPhaseState: ReportCurrentPhaseStateRecord? = nil,
+        phaseTransitions: [ReportPhaseTransitionRecord] = []
     ) {
         self.coverage = coverage
         self.bodyMetricRecords = bodyMetricRecords
         self.exerciseSetRecords = exerciseSetRecords
         self.nutritionDayRecords = nutritionDayRecords
+        self.sleepRecords = sleepRecords
+        self.moodRecords = moodRecords
+        self.postureRecords = postureRecords
+        self.programPhases = programPhases
+        self.currentPhaseState = currentPhaseState
+        self.phaseTransitions = phaseTransitions
     }
 }

@@ -20,7 +20,7 @@ ROUTES = {
     "m4.0": ("HealthTrackingAppTests",), "m4.1": ("ReportsKitTests",),
     "m4.2": ("ReportsKitTests/BodyStrengthDatasetBuilderTests", "PersistenceKitTests/ReportsRepositoryTests"),
     "m4.3": ("ReportsKitTests/ProteinAdherenceBuilderTests", "PersistenceKitTests/ReportsRepositoryTests"),
-    "m4.4": ("CoreModelsTests/PhaseTransitionLedgerTests", "ReportsKitTests/LifestylePhaseDatasetBuilderTests", "PersistenceKitTests/PhaseTransitionLedgerRepositoryTests"),
+    "m4.4": ("CoreModelsTests/PhaseTransitionLedgerTests", "ReportsKitTests/LifestylePhaseDatasetBuilderTests", "PersistenceKitTests/PhaseTransitionLedgerRepositoryTests", "TrainingKitTests/PhaseTransitionViewModelTests"),
     "m4.5": ("ProgressPhotosKitTests/ProgressPhotoComparisonShareTests", "HealthTrackingAppUITests/ProgressPhotoGalleryUITests"),
     "m4.6": ("ReportsKitTests/ExportSchemaInventoryTests", "ReportsKitTests/RFC4180CSVEncoderTests", "PersistenceKitTests/ReportsExportRepositoryTests"),
     "m4.7": ("ReportsKitTests/JSONExportEncoderTests", "ReportsKitTests/StoredZIPWriterTests", "ReportsKitTests/ReportExportCoordinatorTests"),
@@ -571,6 +571,216 @@ TASK3_REPOSITORY_TEST_BEHAVIORS = {
     ),
 }
 
+TASK4_LEDGER_TEST_BEHAVIORS = {
+    "testKeyUsesExactVersionedPrefixAndLowercaseProgramIdentifier": (
+        "PhaseTransitionLedgerV1.key(for: programID)",
+        "XCTAssertEqual",
+    ),
+    "testEncodingSortsByTransitionDateAndIsByteDeterministic": (
+        "PhaseTransitionLedgerV1(records:",
+        ".encoded(for: programID)",
+        "XCTAssertEqual(forward, reverse)",
+        "XCTAssertEqual(decoded.records.map(\\.id)",
+    ),
+    "testMalformedAndUnknownSchemaPayloadsFailWithTypedErrors": (
+        ".malformedPayload",
+        ".unsupportedSchemaVersion(2)",
+        "assertDecodeError",
+    ),
+    "testDuplicateIdentifiersAndLogicalTransitionsFailDeterministically": (
+        ".duplicateRecordID(lowerID)",
+        ".duplicateLogicalTransition(recordIDs: [lowerID, higherID])",
+        "for records in [[duplicateLogical, first], [first, duplicateLogical]]",
+    ),
+    "testDuplicateLogicalGroupSelectionUsesProgramIDAcrossAllInputPermutations": (
+        "XCTAssertEqual(lowerProgramID.uuidString",
+        "XCTAssertLessThan(lowerProgramID.uuidString, higherProgramID.uuidString)",
+        "XCTAssertGreaterThan(lowerRecordID.uuidString, higherDuplicateID.uuidString)",
+        "let inputs = permutations(of:",
+        "XCTAssertEqual(inputs.count, 24)",
+        "for records in inputs",
+        ".validated(for: lowerProgramID)",
+        "recordIDs: [lowerRecordID, lowerDuplicateID]",
+    ),
+    "testEqualTransitionTimestampsFailBeforeChainValidationRegardlessOfIDOrInputOrder": (
+        "for (firstID, secondID) in [(lowerID, higherID), (higherID, lowerID)]",
+        "for records in [[first, second], [second, first]]",
+        ".duplicateTransitionTimestamp(",
+        "recordIDs: [lowerID, higherID]",
+    ),
+    "testInvalidCrossProgramAndBrokenChainRecordsFailClosed": (
+        ".invalidRecord(id: invalid.id)",
+        ".crossProgramRecord(",
+        ".brokenTransitionChain(previousRecordID: valid.id, recordID: broken.id)",
+    ),
+    "testLedgerPublicContractsAreEquatableCodableAndSendable": (
+        "assertCodableEquatableSendable(PhaseTransitionRecord.self)",
+        "assertCodableEquatableSendable(PhaseTransitionLedgerV1.self)",
+        "assertEquatableSendable(PhaseTransitionLedgerError.self)",
+    ),
+}
+
+TASK4_LIFESTYLE_TEST_BEHAVIORS = {
+    "testMissingLocalDaySplitsSeriesWhileStoredZeroRemainsObserved": (
+        "moodScoreSeries.map",
+        "[[4, 0], [7]]",
+        "postureSymptomSeries.map",
+        "[[2, 0]]",
+    ),
+    "testDSTGroupingUsesInjectedCalendarAndHalfOpenBoundsWithoutFixedDaySeconds": (
+        "interval.start.addingTimeInterval(-0.001)",
+        "date: interval.endExclusive",
+        "[6, 7, 8]",
+    ),
+    "testStableOrderingAndDuplicateLocalDayFailureUseDateCreatedAtThenIdentifier": (
+        "for input in [records, Array(records.reversed())]",
+        ".duplicateLocalDay(",
+        "recordIDs: [lowerID, higherID]",
+    ),
+    "testInvalidFiniteRangeAndCanonicalPhaseDataFailWithStableTypedErrors": (
+        "hours: .nan",
+        "score: 11",
+        "score: -1",
+        ".invalidPhase(id: invalidPhase.id)",
+    ),
+    "testLoneCurrentStateIsPartialEvidenceAndMonthMetadataNeverCreatesHistory": (
+        ".partialCurrentState",
+        "XCTAssertEqual(report.phaseSegments",
+        "XCTAssertFalse(report.phaseTimelineProvenance == .actualTransitions)",
+    ),
+    "testActualLedgerTransitionsProduceClippedRealSegmentsWithExplicitProvenance": (
+        ".actualTransitions",
+        "phaseSegments.map(\\.startedAt)",
+        "phaseSegments.map(\\.visibleStart)",
+        "phaseSegments.map(\\.visibleEndExclusive)",
+    ),
+    "testPhaseRelationshipIdentityAndChainCorruptionFailDeterministically": (
+        ".missingPhase(id: missingID)",
+        "assertBuilderError",
+    ),
+    "testDuplicateTransitionIdentifierFailsBeforeChainValidation": (
+        ".duplicateTransitionID(id: sharedID)",
+        "for records in [transitions, Array(transitions.reversed())]",
+    ),
+    "testDuplicateLogicalTransitionUsesStableSortedIDsBeforeTimestampAmbiguity": (
+        ".duplicateLogicalTransition(recordIDs: [lowerID, higherID])",
+        "for records in [transitions, Array(transitions.reversed())]",
+    ),
+    "testEqualTransitionTimestampFailsWithStableIDsRegardlessOfIDOrInputOrder": (
+        "for (firstID, secondID) in [(lowerID, higherID), (higherID, lowerID)]",
+        "for input in [records, Array(records.reversed())]",
+        ".duplicateTransitionTimestamp(",
+        "recordIDs: [lowerID, higherID]",
+    ),
+    "testLifestylePhaseContractsAreImmutableEquatableAndSendable": (
+        "assertEquatableSendable(LifestylePhaseReport.self)",
+        "assertEquatableSendable(LifestylePhaseDatasetError.self)",
+        "assertEquatableSendable(PhaseTimelineProvenance.self)",
+    ),
+}
+
+TASK4_PERSISTENCE_TEST_BEHAVIORS = {
+    "testActualPhaseChangeAppendsExplicitRecordAndPersistsStateAndLedgerTogether": (
+        "XCTAssertEqual(saveCount, 1)",
+        "PhaseTransitionRecord(",
+        "let reopened = ModelContext(fixture.container)",
+    ),
+    "testSamePhaseIsTrueNoOpWithoutLedgerIDsTimestampChangeOrSave": (
+        "XCTAssertEqual(recordIDCount, 0)",
+        "XCTAssertEqual(settingIDCount, 0)",
+        "XCTAssertEqual(saveCount, 0)",
+    ),
+    "testSamePhaseWithUnrelatedPendingMutationSucceedsWithoutAnySideEffect": (
+        "XCTAssertEqual(rollbackCount, 0)",
+        "XCTAssertTrue(fixture.context.hasChanges)",
+        "XCTAssertEqual(saveCount, 0)",
+    ),
+    "testZeroDurationFirstTransitionFailsBeforeIDsMutationSaveOrRollback": (
+        ".invalidPhaseTransitionDate(",
+        "currentPhaseStartedAt: fixture.startedAt",
+        "transitionedAt: fixture.startedAt",
+        "XCTAssertEqual(rollbackCount, 0)",
+    ),
+    "testSequentialTransitionsAtSameTimestampRejectSecondWithoutPartialMutation": (
+        ".invalidPhaseTransitionDate(",
+        "currentPhaseStartedAt: transitionedAt",
+        "XCTAssertEqual(recordIDCount, 1)",
+        "XCTAssertEqual(setting.value, savedLedgerValue)",
+    ),
+    "testMalformedAndUnknownLedgerFailBeforeAnyStateMutation": (
+        "for value in [",
+        ".invalidPhaseTransitionLedger",
+        "XCTAssertFalse(fixture.context.hasChanges)",
+    ),
+    "testInjectedSaveFailureRollsBackNewSettingAndEveryStateFieldExactly": (
+        ".phaseTransitionSaveFailed",
+        "fetchCount(FetchDescriptor<AppSetting>())",
+        "XCTAssertFalse(fixture.context.hasChanges)",
+    ),
+    "testInjectedSaveFailureRestoresExistingSettingFieldsExactly": (
+        "XCTAssertEqual(setting.value, originalValue)",
+        "XCTAssertEqual(setting.updatedAt, originalUpdatedAt)",
+        "persistedSetting",
+    ),
+    "testUnrelatedPendingMutationIsNeitherSavedNorDiscarded": (
+        ".pendingContextChanges",
+        "XCTAssertTrue(fixture.context.hasChanges)",
+    ),
+    "testDuplicateSettingStateAndPhaseIdentitiesFailDeterministically": (
+        ".duplicatePhaseTransitionSettings",
+        ".duplicateProgramStates",
+        ".duplicateProgramPhases",
+    ),
+    "testCrossProgramTargetFailsWithoutCreatingLedger": (
+        ".phaseNotFound(programID: fixture.program.id, phaseID: otherPhase.id)",
+        "fetchCount(FetchDescriptor<AppSetting>())",
+    ),
+    "testReportsRepositoryProjectsLifestyleCurrentProgramAndActualLedgerReadOnly": (
+        "XCTAssertEqual(first, second)",
+        "XCTAssertFalse(reader.hasChanges)",
+        "XCTAssertEqual(try persistenceSnapshot(reader), before)",
+    ),
+    "testLoneCurrentStateProjectsPartialEvidenceAndNeverInfersFromMonthFields": (
+        "monthStart = 1",
+        "monthEnd = 99",
+        ".partialCurrentState",
+    ),
+    "testNoProgramStateAndNoLedgerProjectsHonestUnavailableEvidence": (
+        "fixture.context.delete(fixture.state)",
+        ".unavailable",
+        "XCTAssertTrue(report.phaseSegments.isEmpty)",
+    ),
+    "testNoProgramStateWithValidNonemptyLedgerFailsStateLedgerMismatch": (
+        "PhaseTransitionLedgerV1(records: [record]).encoded",
+        ".phaseTransitionStateMismatch(programID: fixture.program.id)",
+    ),
+    "testNoProgramStateWithValidEmptyLedgerSettingFailsStateLedgerMismatch": (
+        "value: emptyLedger()",
+        ".phaseTransitionStateMismatch(programID: fixture.program.id)",
+    ),
+    "testNoProgramStateStillDecodesMalformedUnknownCrossProgramAndBrokenLedgers": (
+        ".malformedPayload",
+        ".unsupportedSchemaVersion(2)",
+        ".crossProgramRecord(",
+        ".brokenTransitionChain(",
+    ),
+    "testOutOfIntervalAndOtherProgramCorruptionDoesNotPoisonSelectedProjection": (
+        "durationHours: .nan",
+        "isActive: false",
+        "XCTAssertTrue(source.sleepRecords.isEmpty)",
+    ),
+}
+
+TASK4_TRAINING_VIEW_MODEL_TEST_BEHAVIORS = {
+    "testConfirmingAlreadyCurrentPhaseIsExactNoOpWithoutTransitionHapticOrPublication": (
+        "repository.programState?.currentPhaseId = nextID",
+        "await viewModel.confirmTransition(at: confirmedAt)",
+        "XCTAssertTrue(repository.activePhaseSelectionRequests.isEmpty)",
+        "XCTAssertEqual(viewModel.state, before)",
+        "XCTAssertTrue(hapticClient.feedback.isEmpty)",
+    ),
+}
+
 
 def compact_swift_tokens(source: str) -> str:
     return re.sub(r"[ \t\f\v\r\n]+", "", source)
@@ -608,6 +818,42 @@ def verify_meaningful_task3_tests(
         if missing:
             raise ValueError(
                 f"{path.name} must retain behavioral Task 3 test contracts in {name}: "
+                f"{missing}"
+            )
+
+
+def verify_meaningful_task4_tests(
+    path: Path,
+    suite_name: str,
+    require_main_actor: bool,
+    behavior_contracts: dict[str, tuple[str, ...]],
+) -> None:
+    methods = swift_xctest_suite_methods(
+        path.read_text(encoding="utf-8"),
+        suite_name,
+        require_main_actor,
+    )
+    required_names = set(behavior_contracts)
+    if len(methods) < len(required_names) or not required_names.issubset(methods):
+        raise ValueError(
+            f"{path.name} must retain a nonzero suite of meaningful Task 4 tests"
+        )
+    assertion = re.compile(r"\b(?:XCTAssert|assert)[A-Z][A-Za-z0-9_]*\s*\(")
+    assertionless = sorted(name for name in required_names if assertion.search(methods[name]) is None)
+    if assertionless:
+        raise ValueError(
+            f"{path.name} must retain meaningful Task 4 tests with assertions: {assertionless}"
+        )
+    for name, required_fragments in behavior_contracts.items():
+        body = compact_swift_tokens(methods[name])
+        missing = [
+            fragment
+            for fragment in required_fragments
+            if compact_swift_tokens(fragment) not in body
+        ]
+        if missing:
+            raise ValueError(
+                f"{path.name} must retain behavioral Task 4 test contracts in {name}: "
                 f"{missing}"
             )
 
@@ -775,6 +1021,182 @@ def verify_reports_architecture(root: Path) -> None:
                 f"Reports Task 3 must not coerce missing protein targets to zero: {source.relative_to(root)}"
             )
 
+    task4_sources = (
+        reports_root / "Domain/LifestylePhaseReport.swift",
+        reports_root / "Builders/LifestylePhaseDatasetBuilder.swift",
+        root / "Packages/HealthTrackingModules/Sources/CoreModels/Values/PhaseTransitionLedger.swift",
+        root / "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataTrainingRepository.swift",
+        root / "Packages/HealthTrackingModules/Sources/TrainingKit/Phase/PhaseTransitionViewModel.swift",
+    )
+    missing_task4 = [str(path.relative_to(root)) for path in task4_sources if not path.is_file()]
+    if missing_task4:
+        raise ValueError(f"Reports Task 4 production contracts are missing: {missing_task4}")
+    task4_tests = (
+        root / "Packages/HealthTrackingModules/Tests/CoreModelsTests/PhaseTransitionLedgerTests.swift",
+        root / "Packages/HealthTrackingModules/Tests/ReportsKitTests/LifestylePhaseDatasetBuilderTests.swift",
+        root / "Packages/HealthTrackingModules/Tests/PersistenceKitTests/PhaseTransitionLedgerRepositoryTests.swift",
+        root / "Packages/HealthTrackingModules/Tests/TrainingKitTests/FoundationProgramViewModelTests.swift",
+    )
+    missing_task4_tests = [str(path.relative_to(root)) for path in task4_tests if not path.is_file()]
+    if missing_task4_tests:
+        raise ValueError(f"Task 4 test contracts are missing: {missing_task4_tests}")
+    verify_meaningful_task4_tests(
+        task4_tests[0],
+        "PhaseTransitionLedgerTests",
+        False,
+        TASK4_LEDGER_TEST_BEHAVIORS,
+    )
+    verify_meaningful_task4_tests(
+        task4_tests[1],
+        "LifestylePhaseDatasetBuilderTests",
+        False,
+        TASK4_LIFESTYLE_TEST_BEHAVIORS,
+    )
+    verify_meaningful_task4_tests(
+        task4_tests[2],
+        "PhaseTransitionLedgerRepositoryTests",
+        True,
+        TASK4_PERSISTENCE_TEST_BEHAVIORS,
+    )
+    verify_meaningful_task4_tests(
+        task4_tests[3],
+        "PhaseTransitionViewModelTests",
+        True,
+        TASK4_TRAINING_VIEW_MODEL_TEST_BEHAVIORS,
+    )
+
+    ledger_code = swift_code_without_comments_and_literals(task4_sources[2].read_text(encoding="utf-8"))
+    if re.search(r'@Model\b', ledger_code):
+        raise ValueError("Phase transition ledger must remain a Codable CoreModels value, not a model")
+    if (
+        "phase-transition-ledger.v1." not in task4_sources[2].read_text(encoding="utf-8")
+        or re.search(r'\bcurrentSchemaVersion\s*=\s*1\b', ledger_code) is None
+    ):
+        raise ValueError("Phase transition ledger must retain its exact V1 key and schema version")
+    ledger_compact = compact_swift_tokens(ledger_code)
+    ledger_checks = (
+        "throwPhaseTransitionLedgerError.duplicateRecordID",
+        "throwPhaseTransitionLedgerError.duplicateLogicalTransition",
+        "throwPhaseTransitionLedgerError.duplicateTransitionTimestamp",
+        "throwPhaseTransitionLedgerError.brokenTransitionChain",
+    )
+    ledger_positions = [ledger_compact.find(fragment) for fragment in ledger_checks]
+    if any(position < 0 for position in ledger_positions) or ledger_positions != sorted(ledger_positions):
+        raise ValueError("Phase transition ledger must enforce duplicate ID, logical, timestamp, then chain precedence")
+    logical_key_start = ledger_compact.find("privatestaticfunclogicalKeyOrderedBefore")
+    logical_key_order = (
+        "iflhs.programID!=rhs.programID{returnuuidOrderedBefore(lhs.programID,rhs.programID)}",
+        "iflhs.transitionedAt!=rhs.transitionedAt{returnlhs.transitionedAt<rhs.transitionedAt}",
+        "iflhs.fromStartedAt!=rhs.fromStartedAt{returnlhs.fromStartedAt<rhs.fromStartedAt}",
+        "iflhs.fromPhaseID!=rhs.fromPhaseID{returnuuidOrderedBefore(lhs.fromPhaseID,rhs.fromPhaseID)}",
+        "returnuuidOrderedBefore(lhs.toPhaseID,rhs.toPhaseID)",
+    )
+    logical_key_positions = [
+        ledger_compact.find(fragment, logical_key_start) for fragment in logical_key_order
+    ]
+    if (
+        logical_key_start < 0
+        or any(position < 0 for position in logical_key_positions)
+        or logical_key_positions != sorted(logical_key_positions)
+    ):
+        raise ValueError(
+            "Phase transition ledger logical-key ordering must compare every field with program ID first"
+        )
+    if "fromStartedAt>=$0.transitionedAt" not in ledger_compact:
+        raise ValueError("Phase transition ledger must reject zero-duration records")
+
+    lifestyle_domain_code = swift_code_without_comments_and_literals(
+        task4_sources[0].read_text(encoding="utf-8")
+    )
+    if (
+        re.search(r'\bcase\s+partialCurrentState\b', lifestyle_domain_code) is None
+        or re.search(r'\bcase\s+actualTransitions\b', lifestyle_domain_code) is None
+        or re.search(r'\bsymptomScore\s*:\s*Int\s*\?', lifestyle_domain_code) is None
+        or re.search(r'\bscore\s*:\s*Int\s*\?', lifestyle_domain_code) is None
+    ):
+        raise ValueError("Lifestyle and phase report must preserve optional zeros and exact provenance")
+
+    training_code = swift_code_without_comments_and_literals(
+        task4_sources[3].read_text(encoding="utf-8")
+    )
+    training_compact = compact_swift_tokens(training_code)
+    training_order = (
+        "guardstate.currentPhaseId!=phaseIDelse{returnstate}",
+        "guard!modelContext.hasChangeselse",
+        "guarddate.timeIntervalSinceReferenceDate.isFinite,date>state.phaseStartedAtelse",
+        "letrecordID=phaseTransitionRecordID()",
+    )
+    training_positions = [training_compact.find(fragment) for fragment in training_order]
+    if any(position < 0 for position in training_positions) or training_positions != sorted(training_positions):
+        raise ValueError("Training phase mutation must no-op before pending checks and enforce strict time before IDs")
+    for fragment in (
+        "letoriginalPhaseID=state.currentPhaseId",
+        "letoriginalPhaseStartedAt=state.phaseStartedAt",
+        "letoriginalStateUpdatedAt=state.updatedAt",
+        "originalSetting=(existing,existing.value,existing.updatedAt)",
+        "setting.value=tryledger.encoded(for:programID)",
+        "state.currentPhaseId=phaseID",
+        "state.phaseStartedAt=date",
+        "trysaveOperation()",
+        "state.currentPhaseId=originalPhaseID",
+        "originalSetting.model.value=originalSetting.value",
+        "rollbackOperation()",
+    ):
+        if fragment not in training_compact:
+            raise ValueError("Training phase mutation must retain one-save exact snapshot restoration and rollback")
+
+    lifestyle_builder_code = swift_code_without_comments_and_literals(
+        task4_sources[1].read_text(encoding="utf-8")
+    )
+    lifestyle_builder_compact = compact_swift_tokens(lifestyle_builder_code)
+    builder_checks = (
+        "throwLifestylePhaseDatasetError.duplicateTransitionID",
+        "throwLifestylePhaseDatasetError.duplicateLogicalTransition",
+        "throwLifestylePhaseDatasetError.duplicateTransitionTimestamp",
+        "throwLifestylePhaseDatasetError.brokenTransitionChain",
+    )
+    builder_positions = [lifestyle_builder_compact.find(fragment) for fragment in builder_checks]
+    if any(position < 0 for position in builder_positions) or builder_positions != sorted(builder_positions):
+        raise ValueError("Lifestyle builder must enforce duplicate ID, logical, timestamp, then chain precedence")
+    for fragment in (
+        "calendar.date(byAdding:.day,value:1,to:previous.localDay)",
+        "record.score.map",
+        "record.symptomScore.map",
+        ".partialCurrentState",
+        ".actualTransitions",
+    ):
+        if fragment not in lifestyle_builder_compact:
+            raise ValueError("Lifestyle builder must retain gap, explicit-zero, partial, and actual provenance behavior")
+    if "monthStart" in lifestyle_builder_code or "monthEnd" in lifestyle_builder_code:
+        raise ValueError("Lifestyle builder must never infer phase history from month metadata")
+
+    reports_repository_compact = compact_swift_tokens(
+        swift_code_without_comments_and_literals(task2_sources[2].read_text(encoding="utf-8"))
+    )
+    ledger_decode = reports_repository_compact.find("PhaseTransitionLedgerV1.decode")
+    absent_state = reports_repository_compact.find("guardletstate=states.firstelse")
+    if ledger_decode < 0 or absent_state < 0 or ledger_decode >= absent_state:
+        raise ValueError("Reports repository must decode selected ledger before deciding state is unavailable")
+    for fragment in (
+        "guardledger==nilelse",
+        "phaseTransitionStateMismatch(programID:program.id)",
+    ):
+        if fragment not in reports_repository_compact:
+            raise ValueError("Reports repository must reject any ledger setting when ProgramState is absent")
+
+    phase_view_model_compact = compact_swift_tokens(
+        swift_code_without_comments_and_literals(task4_sources[4].read_text(encoding="utf-8"))
+    )
+    view_model_order = (
+        "guardpreviousPhaseID!=phaseIDelse{return}",
+        "repository.setActiveProgramPhase",
+        "guardupdatedState.currentPhaseId!=previousPhaseIDelse{return}",
+        "haptics?.handle(.phaseTransition",
+    )
+    view_model_positions = [phase_view_model_compact.find(fragment) for fragment in view_model_order]
+    if any(position < 0 for position in view_model_positions) or view_model_positions != sorted(view_model_positions):
+        raise ValueError("PhaseTransitionViewModel must suppress same-phase publication and transition haptics")
+
     forbidden_imports = {"CloudKit", "PersistenceKit", "PhotosUI", "SwiftData"}
     for source in reports_root.rglob("*.swift"):
         text = source.read_text(encoding="utf-8")
@@ -823,6 +1245,8 @@ def reports_architecture_self_test(source_root: Path) -> None:
             "Builders/BodyStrengthDatasetBuilder.swift",
             "Domain/ProteinAdherenceReport.swift",
             "Builders/ProteinAdherenceBuilder.swift",
+            "Domain/LifestylePhaseReport.swift",
+            "Builders/LifestylePhaseDatasetBuilder.swift",
         ):
             path = reports_root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -850,7 +1274,25 @@ def reports_architecture_self_test(source_root: Path) -> None:
                     "let adherencePercent = targetDays.isEmpty ? nil : "
                     "Double(hitDays.count) / Double(targetDays.count) * 100\n"
                 )
+            if relative == "Domain/LifestylePhaseReport.swift":
+                contents += (
+                    "enum PhaseTimelineProvenance {\n"
+                    "case partialCurrentState\n"
+                    "case actualTransitions\n"
+                    "}\n"
+                    "struct Mood { let score: Int? }\n"
+                    "struct Posture { let symptomScore: Int? }\n"
+                )
             path.write_text(contents, encoding="utf-8")
+
+        for relative in (
+            "Domain/LifestylePhaseReport.swift",
+            "Builders/LifestylePhaseDatasetBuilder.swift",
+        ):
+            shutil.copyfile(
+                source_root / "Packages/HealthTrackingModules/Sources/ReportsKit" / relative,
+                reports_root / relative,
+            )
 
         task3_repository_contents = (
             "import Foundation\n"
@@ -859,6 +1301,11 @@ def reports_architecture_self_test(source_root: Path) -> None:
             "init(calendar: Calendar) { self.calendar = calendar }\n"
             "func project() { for entries in allEntries { "
             "guard !entries.isEmpty else { continue } } }\n"
+            "func phaseProjection() { "
+            "let ledger = PhaseTransitionLedgerV1.decode(value, for: program.id); "
+            "guard let state = states.first else { "
+            "guard ledger == nil else { throw ReportsRepositoryIntegrityError."
+            "phaseTransitionStateMismatch(programID: program.id) }; return } }\n"
             "}\n"
         )
         task2_repository = (
@@ -868,9 +1315,31 @@ def reports_architecture_self_test(source_root: Path) -> None:
         task2_repository.parent.mkdir(parents=True, exist_ok=True)
         task2_repository.write_text(task3_repository_contents, encoding="utf-8")
 
+        ledger = fixture / "Packages/HealthTrackingModules/Sources/CoreModels/Values/PhaseTransitionLedger.swift"
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(
+            source_root / "Packages/HealthTrackingModules/Sources/CoreModels/Values/PhaseTransitionLedger.swift",
+            ledger,
+        )
+        training = fixture / "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataTrainingRepository.swift"
+        shutil.copyfile(
+            source_root / "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataTrainingRepository.swift",
+            training,
+        )
+        phase_view_model = fixture / "Packages/HealthTrackingModules/Sources/TrainingKit/Phase/PhaseTransitionViewModel.swift"
+        phase_view_model.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(
+            source_root / "Packages/HealthTrackingModules/Sources/TrainingKit/Phase/PhaseTransitionViewModel.swift",
+            phase_view_model,
+        )
+
         for relative in (
             "Tests/ReportsKitTests/ProteinAdherenceBuilderTests.swift",
             "Tests/PersistenceKitTests/ReportsRepositoryTests.swift",
+            "Tests/CoreModelsTests/PhaseTransitionLedgerTests.swift",
+            "Tests/ReportsKitTests/LifestylePhaseDatasetBuilderTests.swift",
+            "Tests/PersistenceKitTests/PhaseTransitionLedgerRepositoryTests.swift",
+            "Tests/TrainingKitTests/FoundationProgramViewModelTests.swift",
         ):
             source = source_root / "Packages/HealthTrackingModules" / relative
             destination = fixture / "Packages/HealthTrackingModules" / relative
@@ -1156,6 +1625,30 @@ def task3_real_asset_self_test(source_root: Path) -> None:
             source_root / "Packages/HealthTrackingModules",
             fixture / "Packages/HealthTrackingModules",
         )
+        task4_placeholders = {
+            "Sources/ReportsKit/Domain/LifestylePhaseReport.swift": (
+                "enum PhaseTimelineProvenance { case partialCurrentState; case actualTransitions }\n"
+                "struct Mood { let score: Int? }\nstruct Posture { let symptomScore: Int? }\n"
+            ),
+            "Sources/ReportsKit/Builders/LifestylePhaseDatasetBuilder.swift": "import Foundation\n",
+            "Sources/CoreModels/Values/PhaseTransitionLedger.swift": (
+                'let key = "phase-transition-ledger.v1."\n'
+                "struct PhaseTransitionLedgerV1 { static let currentSchemaVersion = 1 }\n"
+            ),
+        }
+        for relative, contents in task4_placeholders.items():
+            path = fixture / "Packages/HealthTrackingModules" / relative
+            if not path.is_file():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(contents, encoding="utf-8")
+        training = fixture / "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataTrainingRepository.swift"
+        training_text = training.read_text(encoding="utf-8")
+        if "guard state.currentPhaseId != phaseID else { return state }" not in training_text:
+            training.write_text(
+                training_text
+                + "\nfunc task4NoOpFixture() { guard state.currentPhaseId != phaseID else { return state } }\n",
+                encoding="utf-8",
+            )
         verify_reports_architecture(fixture)
 
         builder_test = (
@@ -1383,6 +1876,302 @@ def task3_real_asset_self_test(source_root: Path) -> None:
         builder.write_text(original_builder, encoding="utf-8")
 
 
+def task4_real_asset_self_test(source_root: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="m4-task4-real-assets-verifier-") as directory:
+        fixture = Path(directory)
+        shutil.copytree(
+            source_root / "Packages/HealthTrackingModules",
+            fixture / "Packages/HealthTrackingModules",
+        )
+        verify_reports_architecture(fixture)
+
+        module = fixture / "Packages/HealthTrackingModules"
+        test_specs = (
+            (
+                module / "Tests/CoreModelsTests/PhaseTransitionLedgerTests.swift",
+                "PhaseTransitionLedgerTests",
+                False,
+                TASK4_LEDGER_TEST_BEHAVIORS,
+            ),
+            (
+                module / "Tests/ReportsKitTests/LifestylePhaseDatasetBuilderTests.swift",
+                "LifestylePhaseDatasetBuilderTests",
+                False,
+                TASK4_LIFESTYLE_TEST_BEHAVIORS,
+            ),
+            (
+                module / "Tests/PersistenceKitTests/PhaseTransitionLedgerRepositoryTests.swift",
+                "PhaseTransitionLedgerRepositoryTests",
+                True,
+                TASK4_PERSISTENCE_TEST_BEHAVIORS,
+            ),
+            (
+                module / "Tests/TrainingKitTests/FoundationProgramViewModelTests.swift",
+                "PhaseTransitionViewModelTests",
+                True,
+                TASK4_TRAINING_VIEW_MODEL_TEST_BEHAVIORS,
+            ),
+        )
+        for path, suite_name, _, behaviors in test_specs:
+            original = path.read_text(encoding="utf-8")
+            path.unlink()
+            expect_architecture_failure(fixture, "Task 4 test contracts are missing")
+            path.write_text(original, encoding="utf-8")
+
+            path.write_text("", encoding="utf-8")
+            expect_architecture_failure(fixture, "expected concrete XCTestCase suite")
+            path.write_text(original, encoding="utf-8")
+
+            path.write_text(
+                original.replace(
+                    f"final class {suite_name}: XCTestCase",
+                    f"final class {suite_name}",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            expect_architecture_failure(fixture, "expected concrete XCTestCase suite")
+            path.write_text(original, encoding="utf-8")
+
+            renamed = original
+            for name in behaviors:
+                renamed = renamed.replace(f"func {name}", f"func renamed{name}", 1)
+            path.write_text(renamed, encoding="utf-8")
+            expect_architecture_failure(fixture, "nonzero suite of meaningful Task 4 tests")
+            path.write_text(original, encoding="utf-8")
+
+            path.write_text(
+                replace_named_test_bodies(
+                    original,
+                    set(behaviors),
+                    "\n        XCTAssertTrue(true)\n    ",
+                ),
+                encoding="utf-8",
+            )
+            expect_architecture_failure(fixture, "behavioral Task 4 test contracts")
+            path.write_text(original, encoding="utf-8")
+
+        ledger = module / "Sources/CoreModels/Values/PhaseTransitionLedger.swift"
+        builder = module / "Sources/ReportsKit/Builders/LifestylePhaseDatasetBuilder.swift"
+        training = module / "Sources/PersistenceKit/Repositories/SwiftDataTrainingRepository.swift"
+        repository = module / "Sources/PersistenceKit/Repositories/SwiftDataReportsRepository.swift"
+        view_model = module / "Sources/TrainingKit/Phase/PhaseTransitionViewModel.swift"
+        for path, expected in (
+            (ledger, "Reports Task 4 production contracts are missing"),
+            (builder, "Reports Task 4 production contracts are missing"),
+            (training, "Reports Task 4 production contracts are missing"),
+            (view_model, "Reports Task 4 production contracts are missing"),
+            (repository, "Reports Task 2 production contracts are missing"),
+        ):
+            original = path.read_text(encoding="utf-8")
+            path.unlink()
+            expect_architecture_failure(fixture, expected)
+            path.write_text(original, encoding="utf-8")
+
+        for before, after in (
+            (
+                "throw PhaseTransitionLedgerError.duplicateRecordID(duplicate.key)",
+                "throw PhaseTransitionLedgerError.invalidRecord(id: duplicate.key)",
+            ),
+            (
+                "throw PhaseTransitionLedgerError.duplicateLogicalTransition(",
+                "throw PhaseTransitionLedgerError.removedDuplicateLogicalTransition(",
+            ),
+            (
+                "throw PhaseTransitionLedgerError.duplicateTransitionTimestamp(",
+                "throw PhaseTransitionLedgerError.removedDuplicateTransitionTimestamp(",
+            ),
+            (
+                "throw PhaseTransitionLedgerError.brokenTransitionChain(",
+                "throw PhaseTransitionLedgerError.removedBrokenTransitionChain(",
+            ),
+            ("$0.fromStartedAt >= $0.transitionedAt", "$0.fromStartedAt > $0.transitionedAt"),
+        ):
+            original = replace_once(ledger, before, after)
+            expected = (
+                "reject zero-duration records"
+                if "fromStartedAt" in before
+                else "duplicate ID, logical, timestamp, then chain precedence"
+            )
+            expect_architecture_failure(fixture, expected)
+            ledger.write_text(original, encoding="utf-8")
+
+        program_comparator = (
+            "        if lhs.programID != rhs.programID {\n"
+            "            return uuidOrderedBefore(lhs.programID, rhs.programID)\n"
+            "        }\n"
+        )
+        for replacement in (
+            "",
+            (
+                "        if lhs.programID != rhs.programID {\n"
+                "            return uuidOrderedBefore(rhs.programID, lhs.programID)\n"
+                "        }\n"
+            ),
+        ):
+            original = replace_once(ledger, program_comparator, replacement)
+            expect_architecture_failure(
+                fixture,
+                "logical-key ordering must compare every field with program ID first",
+            )
+            ledger.write_text(original, encoding="utf-8")
+
+        for before, after, expected in (
+            (
+                "throw LifestylePhaseDatasetError.duplicateTransitionID(id: duplicate.key)",
+                "throw LifestylePhaseDatasetError.invalidTransition(id: duplicate.key)",
+                "duplicate ID, logical, timestamp, then chain precedence",
+            ),
+            (
+                "throw LifestylePhaseDatasetError.duplicateLogicalTransition(",
+                "throw LifestylePhaseDatasetError.removedDuplicateLogicalTransition(",
+                "duplicate ID, logical, timestamp, then chain precedence",
+            ),
+            (
+                "throw LifestylePhaseDatasetError.duplicateTransitionTimestamp(",
+                "throw LifestylePhaseDatasetError.removedDuplicateTransitionTimestamp(",
+                "duplicate ID, logical, timestamp, then chain precedence",
+            ),
+            (
+                "throw LifestylePhaseDatasetError.brokenTransitionChain(",
+                "throw LifestylePhaseDatasetError.removedBrokenTransitionChain(",
+                "duplicate ID, logical, timestamp, then chain precedence",
+            ),
+            (
+                "calendar.date(byAdding: .day, value: 1, to: previous.localDay)",
+                "nil",
+                "gap, explicit-zero, partial, and actual provenance behavior",
+            ),
+            (
+                "record.score.map {",
+                "record.score.flatMap {",
+                "gap, explicit-zero, partial, and actual provenance behavior",
+            ),
+            (
+                "record.symptomScore.map {",
+                "record.symptomScore.flatMap {",
+                "gap, explicit-zero, partial, and actual provenance behavior",
+            ),
+            (
+                ".partialCurrentState",
+                ".unavailable",
+                "gap, explicit-zero, partial, and actual provenance behavior",
+            ),
+            (
+                ".actualTransitions",
+                ".unavailable",
+                "gap, explicit-zero, partial, and actual provenance behavior",
+            ),
+        ):
+            original = replace_once(builder, before, after)
+            expect_architecture_failure(fixture, expected)
+            builder.write_text(original, encoding="utf-8")
+        original_builder = builder.read_text(encoding="utf-8")
+        builder.write_text(original_builder + "\nlet inferred = phase.monthStart + phase.monthEnd\n", encoding="utf-8")
+        expect_architecture_failure(fixture, "never infer phase history from month metadata")
+        builder.write_text(original_builder, encoding="utf-8")
+
+        original = replace_once(
+            training,
+            "        guard state.currentPhaseId != phaseID else { return state }\n",
+            "",
+        )
+        expect_architecture_failure(fixture, "no-op before pending checks and enforce strict time before IDs")
+        training.write_text(original, encoding="utf-8")
+
+        same_phase = "        guard state.currentPhaseId != phaseID else { return state }\n"
+        pending = (
+            "        guard !modelContext.hasChanges else {\n"
+            "            throw TrainingRepositoryOperationError.pendingContextChanges\n"
+            "        }\n"
+        )
+        original = training.read_text(encoding="utf-8")
+        if same_phase + pending not in original:
+            raise SystemExit("Task 4 verifier mutation source is missing same-phase/pending order")
+        training.write_text(original.replace(same_phase + pending, pending + same_phase, 1), encoding="utf-8")
+        expect_architecture_failure(fixture, "no-op before pending checks and enforce strict time before IDs")
+        training.write_text(original, encoding="utf-8")
+
+        for before, after, expected in (
+            (
+                "date > state.phaseStartedAt",
+                "date >= state.phaseStartedAt",
+                "no-op before pending checks and enforce strict time before IDs",
+            ),
+            (
+                "let originalPhaseID = state.currentPhaseId",
+                "let removedOriginalPhaseID = state.currentPhaseId",
+                "one-save exact snapshot restoration and rollback",
+            ),
+            (
+                "try saveOperation()",
+                "_ = saveOperation",
+                "one-save exact snapshot restoration and rollback",
+            ),
+            (
+                "state.currentPhaseId = originalPhaseID",
+                "state.currentPhaseId = phaseID",
+                "one-save exact snapshot restoration and rollback",
+            ),
+            (
+                "originalSetting.model.value = originalSetting.value",
+                "originalSetting.model.value = setting.value",
+                "one-save exact snapshot restoration and rollback",
+            ),
+            (
+                "rollbackOperation()",
+                "_ = rollbackOperation",
+                "one-save exact snapshot restoration and rollback",
+            ),
+        ):
+            original = replace_once(training, before, after)
+            expect_architecture_failure(fixture, expected)
+            training.write_text(original, encoding="utf-8")
+
+        key_line = "        let key = PhaseTransitionLedgerV1.key(for: program.id)\n"
+        early_return = "        guard let state = states.first else { return (projectedPhases, nil, []) }\n"
+        original = replace_once(repository, key_line, early_return + key_line)
+        expect_architecture_failure(fixture, "decode selected ledger before deciding state is unavailable")
+        repository.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            repository,
+            "PhaseTransitionLedgerV1.decode(setting.value, for: program.id)",
+            "PhaseTransitionLedgerV1.removedDecode(setting.value, for: program.id)",
+        )
+        expect_architecture_failure(fixture, "decode selected ledger before deciding state is unavailable")
+        repository.write_text(original, encoding="utf-8")
+
+        original_repository = repository.read_text(encoding="utf-8")
+        repository.write_text(
+            original_repository + "\nfunc mutate() { modelContext.insert(AppSetting()) }\n",
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "must remain read-only")
+        repository.write_text(original_repository, encoding="utf-8")
+
+        original = replace_once(
+            view_model,
+            "        guard previousPhaseID != phaseID else { return }\n",
+            "",
+        )
+        expect_architecture_failure(fixture, "suppress same-phase publication and transition haptics")
+        view_model.write_text(original, encoding="utf-8")
+        original = view_model.read_text(encoding="utf-8")
+        late_guard = "            guard updatedState.currentPhaseId != previousPhaseID else { return }\n"
+        haptic = "            haptics?.handle(.phaseTransition(isConfirmed: isConfirmed))\n"
+        if late_guard not in original or haptic not in original:
+            raise SystemExit("Task 4 verifier mutation source is missing ViewModel no-haptic guard")
+        view_model.write_text(
+            original.replace(late_guard, "", 1).replace(haptic, haptic + late_guard, 1),
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "suppress same-phase publication and transition haptics")
+        view_model.write_text(original, encoding="utf-8")
+
+        verify_reports_architecture(fixture)
+
+
 def expect_failure(root: Path, expected: str) -> None:
     try:
         verify(root)
@@ -1500,6 +2289,7 @@ if mode == "--self-test":
     self_test(root)
     reports_architecture_self_test(root)
     task3_real_asset_self_test(root)
+    task4_real_asset_self_test(root)
     print("M4 focused CI verifier self-tests passed.")
 elif mode == "":
     verify(root)

@@ -719,6 +719,75 @@ final class FoundationProgramViewModelTests: XCTestCase {
 }
 
 @MainActor
+final class PhaseTransitionViewModelTests: XCTestCase {
+    func testConfirmingAlreadyCurrentPhaseIsExactNoOpWithoutTransitionHapticOrPublication() async {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "en_US_POSIX")
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let repository = FakeTrainingRepository()
+        let programID = UUID(uuidString: "00000000-0000-4000-8000-000000000b01")!
+        let currentID = UUID(uuidString: "00000000-0000-4000-8000-000000000b02")!
+        let nextID = UUID(uuidString: "00000000-0000-4000-8000-000000000b03")!
+        let programStart = Date(timeIntervalSinceReferenceDate: 100)
+        let confirmedAt = Date(timeIntervalSinceReferenceDate: 3_000_000)
+        repository.userProfileResponses = [.success(UserProfile(
+            id: UUID(uuidString: "00000000-0000-4000-8000-000000000b04")!,
+            displayName: "Ada",
+            programStartDate: programStart
+        ))]
+        repository.activeProgramResponses = [.success(Program(
+            id: programID,
+            name: "Program",
+            isActive: true
+        ))]
+        repository.programPhaseResponses = [.success([
+            ProgramPhase(
+                id: currentID,
+                name: "Temel",
+                orderIndex: 1,
+                monthStart: 1,
+                monthEnd: 1
+            ),
+            ProgramPhase(
+                id: nextID,
+                name: "İnşa",
+                orderIndex: 2,
+                monthStart: 2,
+                monthEnd: 3
+            ),
+        ])]
+        repository.programState = ProgramState(
+            programId: programID,
+            currentPhaseId: currentID,
+            phaseStartedAt: programStart
+        )
+        let hapticClient = PhaseTransitionRecordingHapticClient()
+        let haptics = TrainingHapticController(
+            client: hapticClient,
+            preferenceStore: PhaseTransitionEnabledHapticStore()
+        )
+        haptics.loadPreference()
+        let viewModel = PhaseTransitionViewModel(
+            repository: repository,
+            calendar: calendar,
+            haptics: haptics
+        )
+
+        await viewModel.load(at: confirmedAt)
+        let before = viewModel.state
+        repository.programState?.currentPhaseId = nextID
+        repository.programState?.phaseStartedAt = confirmedAt
+        repository.programState?.updatedAt = confirmedAt
+
+        await viewModel.confirmTransition(at: confirmedAt)
+
+        XCTAssertTrue(repository.activePhaseSelectionRequests.isEmpty)
+        XCTAssertEqual(viewModel.state, before)
+        XCTAssertTrue(hapticClient.feedback.isEmpty)
+    }
+}
+
+@MainActor
 private final class FakeTrainingRepository: TrainingRepository {
     var userProfileResponses: [QueuedResponse<UserProfile?>] = []
     var activeProgramResponses: [QueuedResponse<Program?>] = []
@@ -907,6 +976,21 @@ private struct ActivePhaseSelectionRequest: Equatable {
     let programID: UUID
     let phaseID: UUID
     let at: Date
+}
+
+@MainActor
+private final class PhaseTransitionRecordingHapticClient: TrainingHapticClient {
+    private(set) var feedback: [TrainingHapticFeedback] = []
+
+    func play(_ feedback: TrainingHapticFeedback) {
+        self.feedback.append(feedback)
+    }
+}
+
+@MainActor
+private final class PhaseTransitionEnabledHapticStore: TrainingHapticPreferenceStore {
+    func loadHapticsEnabled() throws -> Bool { true }
+    func saveHapticsEnabled(_: Bool) throws {}
 }
 
 private struct QueuedResponse<Value> {

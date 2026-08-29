@@ -630,6 +630,7 @@ jobs:
               scripts/test-ios.sh --focused-testing CoreModelsTests/PhaseTransitionLedgerTests
               scripts/test-ios.sh --focused-testing ReportsKitTests/LifestylePhaseDatasetBuilderTests
               scripts/test-ios.sh --focused-testing PersistenceKitTests/PhaseTransitionLedgerRepositoryTests
+              scripts/test-ios.sh --focused-testing TrainingKitTests/PhaseTransitionViewModelTests
               ;;
             test/m4.5-*)
               scripts/test-ios.sh --focused-testing ProgressPhotosKitTests/ProgressPhotoComparisonShareTests
