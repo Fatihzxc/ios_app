@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -207,6 +208,381 @@ def verify(root: Path) -> None:
     verify_focused_runner(runner)
 
 
+def target_dependencies(package: str, name: str) -> list[str]:
+    match = re.search(
+        rf'        \.target\(\s*\n            name: "{re.escape(name)}",\s*\n(.*?)^        \),',
+        package,
+        re.MULTILINE | re.DOTALL,
+    )
+    if match is None:
+        raise ValueError(f"Package target {name} must exist")
+    dependencies = re.search(r'dependencies: \[([^\]]*)\]', match.group(1))
+    if dependencies is None:
+        return []
+    return re.findall(r'"([A-Za-z][A-Za-z0-9_]*)"', dependencies.group(1))
+
+
+def swift_code_without_comments_and_literals(source: str) -> str:
+    sanitized: list[str] = []
+    index = 0
+    length = len(source)
+
+    def append_blank(character: str) -> None:
+        sanitized.append(character if character in {"\r", "\n"} else " ")
+
+    def consume_until(end: int) -> None:
+        nonlocal index
+        while index < end:
+            append_blank(source[index])
+            index += 1
+
+    def line_end(after: int) -> int:
+        carriage_return = source.find("\r", after)
+        line_feed = source.find("\n", after)
+        candidates = [position for position in (carriage_return, line_feed) if position != -1]
+        return min(candidates) if candidates else length
+
+    def bare_regex_end(start: int) -> int | None:
+        probe = start + 1
+        escaped = False
+        in_character_class = False
+        while probe < length and source[probe] not in {"\r", "\n"}:
+            character = source[probe]
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == "[":
+                in_character_class = True
+            elif character == "]" and in_character_class:
+                in_character_class = False
+            elif character == "/" and not in_character_class:
+                return probe + 1
+            probe += 1
+        return None
+
+    def can_begin_bare_regex(at: int) -> bool:
+        if at + 1 >= length or source[at + 1].isspace() or source[at + 1] in {"/", "*", "="}:
+            return False
+        if at == 0 or source[at - 1].isspace():
+            return True
+        return source[at - 1] in "=([{,:;!&|?+-*%^~<>"
+
+    while index < length:
+        if source.startswith("//", index):
+            consume_until(line_end(index + 2))
+            continue
+
+        if source.startswith("/*", index):
+            depth = 1
+            append_blank(source[index])
+            append_blank(source[index + 1])
+            index += 2
+            while index < length and depth:
+                if source.startswith("/*", index):
+                    append_blank(source[index])
+                    append_blank(source[index + 1])
+                    index += 2
+                    depth += 1
+                elif source.startswith("*/", index):
+                    append_blank(source[index])
+                    append_blank(source[index + 1])
+                    index += 2
+                    depth -= 1
+                else:
+                    append_blank(source[index])
+                    index += 1
+            continue
+
+        hash_count = 0
+        while index + hash_count < length and source[index + hash_count] == "#":
+            hash_count += 1
+        quote_index = index + hash_count
+        if quote_index < length and source[quote_index] == '"':
+            quote_count = 3 if source.startswith('"""', quote_index) else 1
+            opening_length = hash_count + quote_count
+            consume_until(index + opening_length)
+            closing = '"' * quote_count + "#" * hash_count
+            while index < length:
+                if source.startswith(closing, index):
+                    if hash_count or quote_count == 3:
+                        consume_until(index + len(closing))
+                        break
+                    backslashes = 0
+                    probe = index - 1
+                    while probe >= 0 and source[probe] == "\\":
+                        backslashes += 1
+                        probe -= 1
+                    if backslashes % 2 == 0:
+                        consume_until(index + len(closing))
+                        break
+                append_blank(source[index])
+                index += 1
+            continue
+
+        if hash_count and quote_index < length and source[quote_index] == "/":
+            closing = "/" + "#" * hash_count
+            closing_index = source.find(closing, quote_index + 1)
+            if closing_index != -1:
+                consume_until(closing_index + len(closing))
+                continue
+
+        if source[index] == "/" and can_begin_bare_regex(index):
+            regex_end = bare_regex_end(index)
+            if regex_end is not None:
+                consume_until(regex_end)
+                continue
+
+        sanitized.append(source[index])
+        index += 1
+
+    return "".join(sanitized)
+
+
+def swift_imported_modules(source: str) -> set[str]:
+    code = swift_code_without_comments_and_literals(source)
+    identifier = r"[A-Za-z_][A-Za-z0-9_]*"
+    horizontal_space = r"[ \t\f\v]"
+    token_space = r"[ \t\f\v\r\n]"
+    token_space_characters = " \t\f\v\r\n"
+    attribute = rf"@{identifier}(?:{horizontal_space}*\([^()\r\n]*\))?"
+    import_start = re.compile(
+        rf"(?:\A|(?<=[;\r\n])){horizontal_space}*"
+        rf"(?:{attribute}[ \t\f\v\r\n]+)*"
+        rf"import(?={token_space})"
+    )
+    token = re.compile(rf"`{identifier}`|{identifier}")
+    scoped_kinds = {"typealias", "struct", "class", "enum", "protocol", "let", "var", "func"}
+    modules: set[str] = set()
+
+    for declaration in import_start.finditer(code):
+        cursor = declaration.end()
+        while cursor < len(code) and code[cursor] in token_space_characters:
+            cursor += 1
+        first = token.match(code, cursor)
+        if first is None:
+            continue
+        root = first.group(0)
+        if not root.startswith("`") and root in scoped_kinds:
+            cursor = first.end()
+            if cursor >= len(code) or code[cursor] not in token_space_characters:
+                continue
+            while cursor < len(code) and code[cursor] in token_space_characters:
+                cursor += 1
+            scoped_root = token.match(code, cursor)
+            if scoped_root is None:
+                continue
+            root = scoped_root.group(0)
+        modules.add(root[1:-1] if root.startswith("`") else root)
+
+    return modules
+
+
+def verify_reports_architecture(root: Path) -> None:
+    required_sources = (
+        "DateRange/ReportDateRange.swift",
+        "Domain/ReportsDashboardSource.swift",
+        "Repository/ReportsRepository.swift",
+        "Presentation/ReportsDashboardViewModel.swift",
+    )
+    reports_root = root / "Packages/HealthTrackingModules/Sources/ReportsKit"
+    missing = [relative for relative in required_sources if not (reports_root / relative).is_file()]
+    if missing:
+        raise ValueError(f"ReportsKit Task 1 production contracts are missing: {missing}")
+
+    package_path = root / "Packages/HealthTrackingModules/Package.swift"
+    if not package_path.is_file():
+        raise ValueError("ReportsKit package manifest is missing")
+    package = package_path.read_text(encoding="utf-8")
+    if target_dependencies(package, "ReportsKit") != ["DesignSystem", "GuidanceKit"]:
+        raise ValueError("ReportsKit must depend exactly on DesignSystem and GuidanceKit")
+    if "ReportsKit" not in target_dependencies(package, "PersistenceKit"):
+        raise ValueError("PersistenceKit must depend on ReportsKit for repository implementation")
+
+    forbidden_imports = {"CloudKit", "PersistenceKit", "PhotosUI", "SwiftData"}
+    for source in reports_root.rglob("*.swift"):
+        text = source.read_text(encoding="utf-8")
+        code = swift_code_without_comments_and_literals(text)
+        imports = swift_imported_modules(text)
+        forbidden = sorted(imports & forbidden_imports)
+        if forbidden:
+            raise ValueError(
+                f"ReportsKit must remain persistence/photo independent; "
+                f"{source.relative_to(root)} imports {forbidden}"
+            )
+        if re.search(r'\bModelContext\b', code):
+            raise ValueError(f"ReportsKit must not reference ModelContext: {source.relative_to(root)}")
+        if re.search(r'\bCalendar\s*\.\s*current\b', code):
+            raise ValueError(f"ReportsKit must use injected calendars: {source.relative_to(root)}")
+        if re.search(r'\b(?:86_400|86400)\b', code):
+            raise ValueError(f"ReportsKit must not use fixed-day second arithmetic: {source.relative_to(root)}")
+
+
+def expect_architecture_failure(root: Path, expected: str) -> None:
+    try:
+        verify_reports_architecture(root)
+    except ValueError as error:
+        if expected not in str(error):
+            raise SystemExit(
+                f"ReportsKit architecture mutation failed for the wrong reason; expected {expected!r}: {error}"
+            ) from error
+    else:
+        raise SystemExit(f"ReportsKit architecture mutation escaped: {expected}")
+
+
+def reports_architecture_self_test(source_root: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="m4-reports-architecture-verifier-") as directory:
+        fixture = Path(directory)
+        source_package = source_root / "Packages/HealthTrackingModules/Package.swift"
+        package = fixture / "Packages/HealthTrackingModules/Package.swift"
+        package.parent.mkdir(parents=True)
+        shutil.copyfile(source_package, package)
+        reports_root = fixture / "Packages/HealthTrackingModules/Sources/ReportsKit"
+        for relative in (
+            "DateRange/ReportDateRange.swift",
+            "Domain/ReportsDashboardSource.swift",
+            "Repository/ReportsRepository.swift",
+            "Presentation/ReportsDashboardViewModel.swift",
+        ):
+            path = reports_root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("import Foundation\n", encoding="utf-8")
+
+        verify_reports_architecture(fixture)
+
+        mutation_source = reports_root / "DateRange/ReportDateRange.swift"
+        scoped_symbols = {
+            "SwiftData": "ModelContext",
+            "CloudKit": "CKContainer",
+            "PhotosUI": "PHPickerConfiguration",
+            "PersistenceKit": "SwiftDataReportsRepository",
+        }
+
+        original = mutation_source.read_text(encoding="utf-8")
+        mutation_source.write_text(
+            original
+            + r'''
+let bareRegexImportDecoy = /import CloudKit/
+let bareRegexSemicolonImportDecoy = /foo; import PhotosUI/
+let extendedRegexImportDecoy = #/import SwiftData/#
+let extendedRegexSemicolonImportDecoy = ##/foo; import PersistenceKit/##
+let multilineExtendedRegexImportDecoy = #/
+foo
+import SwiftData
+/#
+let multilineImportTokensRegexDecoy = #/
+import
+`SwiftData`
+import struct
+`PhotosUI`.PHPickerConfiguration
+/#
+''',
+            encoding="utf-8",
+        )
+        verify_reports_architecture(fixture)
+        mutation_source.write_text(original, encoding="utf-8")
+
+        import_mutations = []
+        for module, symbol in scoped_symbols.items():
+            import_mutations.extend(
+                (
+                    f"import {module}\n",
+                    f"import `{module}`\n",
+                    f"import\n{module}\n",
+                    f"import\n`{module}`\n",
+                    f"import\r\n`{module}`\r\n",
+                    f"@preconcurrency import {module}\n",
+                    f"@_implementationOnly import {module}\n",
+                    f"@_exported import {module}\n",
+                    f"import struct {module}.{symbol}\n",
+                    f"import struct `{module}`.{symbol}\n",
+                    f"import struct\n{module}.{symbol}\n",
+                    f"import struct\r\n`{module}`.{symbol}\r\n",
+                    f"import /* multiline import comment\ncontinued */ {module}\n",
+                    (
+                        "import struct /* multiline scope comment\r\n"
+                        f"continued */ `{module}`.{symbol}\r\n"
+                    ),
+                    f"@_spi(Testing) import `{module}`\n",
+                    (
+                        "@preconcurrency /* attribute boundary */\n"
+                        "    import /* import boundary */ class "
+                        f"/* scope boundary */ {module}.{symbol} // trailing comment\n"
+                    ),
+                    (
+                        "@_implementationOnly /* attribute boundary */\r\n"
+                        "    import /* import boundary */ class "
+                        f"/* scope boundary */ `{module}`.{symbol} // trailing comment\r\n"
+                    ),
+                    f"let precedingDeclaration = 0; import `{module}`\n",
+                    f"let quotient = numerator / denominator\nimport `{module}`\n",
+                    f"let quotient = numerator / denominator; import struct `{module}`.{symbol}\n",
+                )
+            )
+
+        for mutation in import_mutations:
+            original = mutation_source.read_text(encoding="utf-8")
+            mutation_source.write_text(original + mutation, encoding="utf-8")
+            expect_architecture_failure(fixture, "persistence/photo independent")
+            mutation_source.write_text(original, encoding="utf-8")
+
+        original = mutation_source.read_text(encoding="utf-8")
+        mutation_source.write_text(
+            original
+            + '''
+// @preconcurrency import SwiftData
+/*
+@_implementationOnly import CloudKit
+import struct PhotosUI.PHPickerConfiguration
+/* nested comment with @_exported import PersistenceKit */
+*/
+let regularImportDecoy = "@_exported import PersistenceKit"
+let multilineImportDecoy = """
+import SwiftData
+"""
+let rawImportDecoy = #"import CloudKit"#
+let rawMultilineImportDecoy = #"""
+import PhotosUI
+"""#
+''',
+            encoding="utf-8",
+        )
+        verify_reports_architecture(fixture)
+        mutation_source.write_text(original, encoding="utf-8")
+
+        for mutation, expected in (
+            ("let context: ModelContext\n", "must not reference ModelContext"),
+            ("let calendar = Calendar.current\n", "must use injected calendars"),
+            ("let seconds = 86_400\n", "must not use fixed-day second arithmetic"),
+        ):
+            original = mutation_source.read_text(encoding="utf-8")
+            mutation_source.write_text(original + mutation, encoding="utf-8")
+            expect_architecture_failure(fixture, expected)
+            mutation_source.write_text(original, encoding="utf-8")
+
+        missing_source = reports_root / "Repository/ReportsRepository.swift"
+        missing_source.unlink()
+        expect_architecture_failure(fixture, "production contracts are missing")
+        missing_source.write_text("import Foundation\n", encoding="utf-8")
+
+        original_package = package.read_text(encoding="utf-8")
+        package.write_text(
+            original_package.replace(
+                'dependencies: ["DesignSystem", "GuidanceKit"]',
+                'dependencies: ["DesignSystem"]',
+                1,
+            ),
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "depend exactly on DesignSystem and GuidanceKit")
+        package.write_text(original_package, encoding="utf-8")
+        package.write_text(
+            original_package.replace('"ProgressPhotosKit", "ReportsKit",', '"ProgressPhotosKit",', 1),
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "PersistenceKit must depend on ReportsKit")
+
+
 def expect_failure(root: Path, expected: str) -> None:
     try:
         verify(root)
@@ -322,9 +698,11 @@ root = Path(sys.argv[1])
 mode = sys.argv[2]
 if mode == "--self-test":
     self_test(root)
+    reports_architecture_self_test(root)
     print("M4 focused CI verifier self-tests passed.")
 elif mode == "":
     verify(root)
+    verify_reports_architecture(root)
     print("M4 reports verification passed.")
 else:
     raise SystemExit("Usage: scripts/verify-m4-reports.sh [--self-test]")
