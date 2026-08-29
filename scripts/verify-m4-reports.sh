@@ -383,6 +383,36 @@ def swift_imported_modules(source: str) -> set[str]:
     return modules
 
 
+def swift_model_context_mutates(source: str) -> bool:
+    code = swift_code_without_comments_and_literals(source)
+    identifier = r"[A-Za-z_][A-Za-z0-9_]*"
+    contexts = {"modelContext"}
+    contexts.update(
+        re.findall(
+            rf"\b({identifier})\s*:\s*(?:SwiftData\s*\.\s*)?ModelContext\b",
+            code,
+        )
+    )
+    alias_pattern = re.compile(
+        rf"\b(?:let|var)\s+({identifier})"
+        rf"(?:\s*:\s*(?:SwiftData\s*\.\s*)?ModelContext)?\s*=\s*"
+        rf"(?:self\s*\.\s*)?({identifier})\b"
+    )
+    changed = True
+    while changed:
+        changed = False
+        for alias, source_name in alias_pattern.findall(code):
+            if source_name in contexts and alias not in contexts:
+                contexts.add(alias)
+                changed = True
+    receiver = "|".join(re.escape(name) for name in sorted(contexts))
+    return re.search(
+        rf"\b(?:self\s*\.\s*)?(?:{receiver})\s*\.\s*"
+        rf"(?:insert|delete|save|rollback)\s*\(",
+        code,
+    ) is not None
+
+
 def balanced_brace_end(code: str, opening: int, label: str) -> int:
     depth = 1
     cursor = opening + 1
@@ -394,6 +424,26 @@ def balanced_brace_end(code: str, opening: int, label: str) -> int:
         cursor += 1
     if depth:
         raise ValueError(f"{label} must have a complete body")
+    return cursor - 1
+
+
+def balanced_delimiter_end(
+    code: str,
+    opening: int,
+    opening_character: str,
+    closing_character: str,
+    label: str,
+) -> int:
+    depth = 1
+    cursor = opening + 1
+    while cursor < len(code) and depth:
+        if code[cursor] == opening_character:
+            depth += 1
+        elif code[cursor] == closing_character:
+            depth -= 1
+        cursor += 1
+    if depth:
+        raise ValueError(f"{label} must have a complete delimiter pair")
     return cursor - 1
 
 
@@ -1443,6 +1493,200 @@ def swift_named_type_body(code: str, type_name: str) -> str:
     return code[opening + 1 : closing]
 
 
+def swift_named_type_bodies(source: str, type_name: str) -> tuple[str, str]:
+    code = swift_code_without_comments_and_literals(source)
+    declaration = re.search(
+        rf"\b(?:struct|class|enum|protocol)\s+{re.escape(type_name)}\b[^{{}}]*\{{",
+        code,
+    )
+    if declaration is None:
+        raise ValueError(f"Task 6 type {type_name} must exist")
+    opening = declaration.end() - 1
+    closing = balanced_brace_end(code, opening, f"Task 6 type {type_name}")
+    return code[opening + 1 : closing], source[opening + 1 : closing]
+
+
+def swift_named_array_initializer_calls(
+    source: str,
+    type_name: str,
+    property_name: str,
+    callee: str,
+) -> list[str]:
+    code_body, raw_body = swift_named_type_bodies(source, type_name)
+    declaration = re.search(
+        rf"\b(?:private\s+|fileprivate\s+|internal\s+|public\s+)?"
+        rf"static\s+let\s+{re.escape(property_name)}\s*=\s*\[",
+        code_body,
+    )
+    if declaration is None:
+        raise ValueError(
+            f"Task 6 {type_name}.{property_name} must have one array initializer"
+        )
+    opening = declaration.end() - 1
+    closing = balanced_delimiter_end(
+        code_body,
+        opening,
+        "[",
+        "]",
+        f"Task 6 {type_name}.{property_name}",
+    )
+    code_initializer = code_body[opening + 1 : closing]
+    raw_initializer = raw_body[opening + 1 : closing]
+    calls: list[str] = []
+    for call in re.finditer(rf"\b{re.escape(callee)}\s*\(", code_initializer):
+        call_opening = code_initializer.find("(", call.start(), call.end())
+        call_closing = balanced_delimiter_end(
+            code_initializer,
+            call_opening,
+            "(",
+            ")",
+            f"Task 6 {type_name}.{property_name} {callee} call",
+        )
+        calls.append(raw_initializer[call.start() : call_closing + 1])
+    return calls
+
+
+def swift_real_raw_fragment_present(
+    code_scope: str,
+    raw_scope: str,
+    fragment: str,
+) -> bool:
+    expected_structure = compact_swift_tokens(
+        swift_code_without_comments_and_literals(fragment)
+    )
+    cursor = 0
+    while True:
+        occurrence = raw_scope.find(fragment, cursor)
+        if occurrence == -1:
+            return False
+        code_segment = code_scope[occurrence : occurrence + len(fragment)]
+        if compact_swift_tokens(code_segment) == expected_structure:
+            return True
+        cursor = occurrence + 1
+
+
+def swift_direct_raw_enum_cases(source: str, type_name: str) -> dict[str, list[str]]:
+    code = swift_code_without_comments_and_literals(source)
+    declaration = re.search(
+        rf"\benum\s+{re.escape(type_name)}\b[^{{}}]*\{{",
+        code,
+    )
+    if declaration is None:
+        raise ValueError(f"Task 6 enum {type_name} must exist")
+    opening = declaration.end() - 1
+    closing = balanced_brace_end(code, opening, f"Task 6 enum {type_name}")
+    code_body = code[opening + 1 : closing]
+    raw_body = source[opening + 1 : closing]
+
+    depths: list[int] = []
+    depth = 0
+    for character in code_body:
+        depths.append(depth)
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+
+    cases: dict[str, list[str]] = {}
+    declaration_pattern = re.compile(
+        r"\bcase[ \t\f\v\r\n]+([A-Za-z_][A-Za-z0-9_]*)"
+        r"[ \t\f\v\r\n]*="
+    )
+    for match in declaration_pattern.finditer(code_body):
+        if depths[match.start()] != 0:
+            continue
+        cursor = match.end()
+        while cursor < len(raw_body) and raw_body[cursor].isspace():
+            cursor += 1
+        literal = re.match(r'"(?:[^"\\]|\\.)*"', raw_body[cursor:])
+        if literal is None:
+            cases.setdefault(match.group(1), []).append("")
+            continue
+        cases.setdefault(match.group(1), []).append(literal.group(0))
+    return cases
+
+
+def swift_unique_function_body(
+    code: str,
+    function_name: str,
+    signature_fragment: str,
+) -> str:
+    declaration = re.compile(
+        rf"\bfunc[ \t\f\v\r\n]+{re.escape(function_name)}\b[^{{}}]*\{{"
+    )
+    expected_signature = compact_swift_tokens(signature_fragment)
+    matches = [
+        match
+        for match in declaration.finditer(code)
+        if expected_signature in compact_swift_tokens(match.group(0))
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            f"Task 6 function {function_name} must have one expected declaration"
+        )
+    opening = matches[0].end() - 1
+    closing = balanced_brace_end(
+        code,
+        opening,
+        f"Task 6 function {function_name}",
+    )
+    return code[opening + 1 : closing]
+
+
+def swift_unique_function_bodies(
+    source: str,
+    function_name: str,
+    signature_fragment: str,
+) -> tuple[str, str]:
+    code = swift_code_without_comments_and_literals(source)
+    declaration = re.compile(
+        rf"\bfunc[ \t\f\v\r\n]+{re.escape(function_name)}\b[^{{}}]*\{{"
+    )
+    expected_signature = compact_swift_tokens(signature_fragment)
+    matches = [
+        match
+        for match in declaration.finditer(code)
+        if expected_signature in compact_swift_tokens(match.group(0))
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            f"Task 6 function {function_name} must have one expected declaration"
+        )
+    opening = matches[0].end() - 1
+    closing = balanced_brace_end(
+        code,
+        opening,
+        f"Task 6 function {function_name}",
+    )
+    return code[opening + 1 : closing], source[opening + 1 : closing]
+
+
+def swift_unique_initializer_body(
+    code: str,
+    type_name: str,
+    signature_fragment: str,
+) -> str:
+    type_body = swift_named_type_body(code, type_name)
+    declaration = re.compile(r"\binit\b[^{{}}]*\{")
+    expected_signature = compact_swift_tokens(signature_fragment)
+    matches = [
+        match
+        for match in declaration.finditer(type_body)
+        if expected_signature in compact_swift_tokens(match.group(0))
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            f"Task 6 {type_name} initializer must have one expected declaration"
+        )
+    opening = matches[0].end() - 1
+    closing = balanced_brace_end(
+        type_body,
+        opening,
+        f"Task 6 {type_name} initializer",
+    )
+    return type_body[opening + 1 : closing]
+
+
 def task5_stored_let_names(code: str, type_name: str) -> set[str]:
     body = swift_named_type_body(code, type_name)
     return set(
@@ -1974,7 +2218,7 @@ def verify_reports_architecture(root: Path) -> None:
     repository_code = swift_code_without_comments_and_literals(
         task2_sources[2].read_text(encoding="utf-8")
     )
-    if re.search(r'\.\s*(?:insert|delete|save|rollback)\s*\(', repository_code):
+    if swift_model_context_mutates(task2_sources[2].read_text(encoding="utf-8")):
         raise ValueError("SwiftDataReportsRepository must remain read-only")
 
     task3_sources = (
@@ -2580,6 +2824,26 @@ import PhotosUI
         )
         expect_architecture_failure(fixture, "must remain read-only")
         task2_repository.write_text(task3_repository_contents, encoding="utf-8")
+
+        task2_repository.write_text(
+            task3_repository_contents
+            + "func harmless(_ values: inout Set<UUID>) { values.insert(UUID()) }\n",
+            encoding="utf-8",
+        )
+        verify_reports_architecture(fixture)
+        task2_repository.write_text(task3_repository_contents, encoding="utf-8")
+
+        for mutation in (
+            "func mutate() { let first = modelContext; let second = first; "
+            "second.insert(AppSetting()) }\n",
+            "func mutateHelper(_ context: ModelContext) { context.delete(AppSetting()) }\n",
+        ):
+            task2_repository.write_text(
+                task3_repository_contents + mutation,
+                encoding="utf-8",
+            )
+            expect_architecture_failure(fixture, "must remain read-only")
+            task2_repository.write_text(task3_repository_contents, encoding="utf-8")
 
         task3_report = reports_root / "Domain/ProteinAdherenceReport.swift"
         original_task3_report = task3_report.read_text(encoding="utf-8")
@@ -4067,6 +4331,1025 @@ def task5_real_asset_self_test(source_root: Path) -> None:
         verify_task5_assets(fixture)
 
 
+TASK6_TEST_SUITES = {
+    "Packages/HealthTrackingModules/Tests/ReportsKitTests/ExportSchemaInventoryTests.swift": (
+        "ExportSchemaInventoryTests",
+        False,
+        {
+            "testInventoryEnumeratesExactlyTwentyFourRecordsInFixedModuleOrder",
+            "testEveryModuleUsesOneFixedTypedUnionWithCanonicalLeadingColumns",
+            "testEveryRecordDeclaresExactPersistentProjectionAndDocumentedPrivacyTransform",
+            "testTableRejectsDuplicateUnknownMissingAndWrongTypedCells",
+            "testCanonicalTableRejectsPrimaryTimestampThatDisagreesWithTypedRecordCell",
+            "testSnapshotPreservesExactRequestAndOrdersTablesWithoutInventingAllModules",
+            "testSnapshotRejectsUnselectedOrMalformedExtraTablesUnlessRowsAreReferencedConfig",
+        },
+        "ExportSchemaV1",
+    ),
+    "Packages/HealthTrackingModules/Tests/ReportsKitTests/RFC4180CSVEncoderTests.swift": (
+        "RFC4180CSVEncoderTests",
+        False,
+        {
+            "testEncodesRFC4180EscapesUnicodeNullEmptyAndCanonicalScalars",
+            "testFormulaNeutralizationAndInverseAreUnambiguousForEveryLeadingScalar",
+            "testRejectsEveryNonFiniteDecimalBeforeReturningBytes",
+            "testSortsRowsByRecordTypePrimaryTimestampUUIDAndProducesDeterministicBytes",
+            "testEmptyTableContainsStableHeaderAndFinalCRLF",
+            "testDecimalScientificPolicyAndFinalTieBreakAreCanonical",
+        },
+        "RFC4180CSVEncoder",
+    ),
+    "Packages/HealthTrackingModules/Tests/PersistenceKitTests/ReportsExportRepositoryTests.swift": (
+        "ReportsExportRepositoryTests",
+        True,
+        {
+            "testInventoryUsesAllTwentyFourRealModelTypesAndProjectsEveryRecord",
+            "testHalfOpenRangeIncludesExactStartAndJustBeforeEndOnly",
+            "testSelectedTrainingAddsOnlyTransitiveReferencedConfiguration",
+            "testSelectedTrainingFailsClosedOnProgressChecklistReferenceTypeAndDay",
+            "testSelectedTrainingExerciseReferencesMatchSessionDayAndIgnoreOutOfRangeRows",
+            "testSelectedTrainingMissingReferencesPreserveActualSourceProvenance",
+            "testRelevantCorruptionFailsInCanonicalUUIDOrderAcrossInsertionOrders",
+            "testSelectedNutritionExportsAllSelectedFoodAndRecipeConfiguration",
+            "testSelectedNutritionFailsClosedOnMealReferencesAndDuplicateConfiguration",
+            "testExplicitProfileAndSystemConfigurationUsesSelectedScope",
+            "testProgramStateRequiredReferencesFailClosedWhenSelectedOrTransitivelyReferenced",
+            "testIrrelevantCorruptProgressPayloadDoesNotPoisonButSelectedPayloadFailsTyped",
+            "testEmptySelectionAndSelectedEmptyModuleRemainDistinct",
+        },
+        "fetchExportSnapshot",
+    ),
+}
+
+TASK6_TEST_ASSET_SHA256 = {
+    "Packages/HealthTrackingModules/Tests/ReportsKitTests/ExportSchemaInventoryTests.swift": (
+        "9e82c60e959a7ee5157ea3c1c0385114520af16d6a81c9f811abee745b9c07d0"
+    ),
+    "Packages/HealthTrackingModules/Tests/ReportsKitTests/RFC4180CSVEncoderTests.swift": (
+        "0560295aa9e71f19e5cc7a23e67b26ef5efc17d3aca6d98aecce518a0fc3a34a"
+    ),
+    "Packages/HealthTrackingModules/Tests/PersistenceKitTests/ReportsExportRepositoryTests.swift": (
+        "e1f6aac5922db82cdfb53171076cb163fa0460ac476610f24e45b1e8d49be99a"
+    ),
+}
+
+TASK6_RECORD_CASES = {
+    "userProfile": "user_profile",
+    "program": "program",
+    "programPhase": "program_phase",
+    "programState": "program_state",
+    "workoutDayTemplate": "workout_day_template",
+    "exerciseTemplate": "exercise_template",
+    "warmupItem": "warmup_item",
+    "cooldownItem": "cooldown_item",
+    "workoutSession": "workout_session",
+    "setLog": "set_log",
+    "workoutSessionProgress": "workout_session_progress",
+    "food": "food",
+    "recipe": "recipe",
+    "dailyNutritionLog": "daily_nutrition_log",
+    "mealEntry": "meal_entry",
+    "bodyMetric": "body_metric",
+    "postureMetric": "posture_metric",
+    "sleepLog": "sleep_log",
+    "moodLog": "mood_log",
+    "healthCheckReminder": "health_check_reminder",
+    "bloodworkResult": "bloodwork_result",
+    "progressPhoto": "progress_photo",
+    "appReminder": "app_reminder",
+    "appSetting": "app_setting",
+}
+
+TASK6_MODULE_CASES = {
+    "profileProgram": "profile_program",
+    "training": "training",
+    "nutrition": "nutrition",
+    "metrics": "metrics",
+    "lifestyle": "lifestyle",
+    "health": "health",
+    "photos": "photos",
+    "system": "system",
+}
+
+TASK6_PRODUCTION_PATHS = (
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/ExportSchemaV1.swift",
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/ExportSnapshotV1.swift",
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/RFC4180CSVEncoder.swift",
+    "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataReportsRepository.swift",
+)
+
+TASK6_PRODUCTION_ASSET_SHA256 = {
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/ExportSchemaV1.swift": (
+        "a1622d72d05179f1e584145f8a2dffe10aa35df5f6949033700ca0e25eb255ab"
+    ),
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/ExportSnapshotV1.swift": (
+        "d88703ee02e4b5d797a9bcdd35393f1e721e141cbea3202693b60b6e7a2c74a1"
+    ),
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/RFC4180CSVEncoder.swift": (
+        "97fdf5b29135ebd245fc48a852100f207609befdd33404adcbbad65209b12314"
+    ),
+    "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataReportsRepository.swift": (
+        "7c0ef896f096e677acf947868d12a5100567c25db6f6862e196aba10866a2bc1"
+    ),
+}
+
+
+def verify_task6_test_contracts(
+    root: Path,
+    enforce_test_asset_digests: bool = True,
+) -> None:
+    for relative, (suite, main_actor, expected_methods, production_token) in TASK6_TEST_SUITES.items():
+        path = root / relative
+        if not path.is_file():
+            raise ValueError(f"Task 6 test contract is missing: {relative}")
+        source = path.read_text(encoding="utf-8")
+        methods = swift_xctest_suite_methods(
+            source,
+            suite,
+            main_actor,
+        )
+        if set(methods) != expected_methods:
+            raise ValueError(f"Task 6 {suite} must retain every exact behavior test")
+        for name, body in methods.items():
+            if re.search(r"\bXCTExpectFailure\s*\(", body):
+                raise ValueError(
+                    f"Task 6 test {suite}.{name} must retain reachable direct behavior"
+                )
+            reachable = task5_reachable_direct_method_body(body, path, name)
+            if not re.search(r"\bXCTAssert[A-Za-z0-9_]*\s*\(", reachable):
+                raise ValueError(
+                    f"Task 6 test {suite}.{name} must assert real behavior with "
+                    "reachable direct behavior"
+                )
+        if production_token not in swift_code_without_comments_and_literals(source):
+            raise ValueError(f"Task 6 {suite} must exercise {production_token}")
+    if enforce_test_asset_digests:
+        for relative in TASK6_TEST_SUITES:
+            path = root / relative
+            actual_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if TASK6_TEST_ASSET_SHA256.get(relative) != actual_digest:
+                raise ValueError(f"Task 6 test asset digest mismatch: {relative}")
+
+
+def verify_task6_assets(root: Path) -> None:
+    verify_task6_test_contracts(root)
+    missing = [relative for relative in TASK6_PRODUCTION_PATHS if not (root / relative).is_file()]
+    if missing:
+        raise ValueError(f"Task 6 production contracts are missing: {missing}")
+
+    schema_path = root / TASK6_PRODUCTION_PATHS[0]
+    snapshot_path = root / TASK6_PRODUCTION_PATHS[1]
+    encoder_path = root / TASK6_PRODUCTION_PATHS[2]
+    repository_path = root / TASK6_PRODUCTION_PATHS[3]
+    schema_source = schema_path.read_text(encoding="utf-8")
+    snapshot_source = snapshot_path.read_text(encoding="utf-8")
+    encoder_source = encoder_path.read_text(encoding="utf-8")
+    repository_source = repository_path.read_text(encoding="utf-8")
+    schema_code = swift_code_without_comments_and_literals(schema_source)
+    snapshot_code = swift_code_without_comments_and_literals(snapshot_source)
+    encoder_code = swift_code_without_comments_and_literals(encoder_source)
+    repository_code = swift_code_without_comments_and_literals(repository_source)
+
+    for source, label in (
+        (schema_source, "schema"),
+        (snapshot_source, "snapshot"),
+        (encoder_source, "CSV encoder"),
+    ):
+        forbidden = swift_imported_modules(source) & {
+            "CoreModels", "PersistenceKit", "SwiftData",
+        }
+        if forbidden:
+            raise ValueError(
+                f"Task 6 ReportsKit {label} must remain persistence-neutral: {sorted(forbidden)}"
+            )
+
+    record_cases = swift_direct_raw_enum_cases(schema_source, "ExportRecordTypeV1")
+    if set(record_cases) != set(TASK6_RECORD_CASES):
+        raise ValueError("Task 6 schema must enumerate exactly the 24 model record types")
+    for case_name, raw_value in TASK6_RECORD_CASES.items():
+        if record_cases.get(case_name) != [json.dumps(raw_value)]:
+            raise ValueError("Task 6 record inventory must use exact stable raw identifiers")
+
+    module_cases = swift_direct_raw_enum_cases(schema_source, "ExportModuleV1")
+    if set(module_cases) != set(TASK6_MODULE_CASES):
+        raise ValueError("Task 6 schema must enumerate exactly eight fixed modules")
+    for case_name, raw_value in TASK6_MODULE_CASES.items():
+        if module_cases.get(case_name) != [json.dumps(raw_value)]:
+            raise ValueError("Task 6 module inventory must use exact stable raw identifiers")
+
+    schema_compact = compact_swift_tokens(schema_code)
+    for fragment in (
+        "case null", "case text(String)", "case integer(Int64)",
+        "case decimal(Double)", "case boolean(Bool)", "case timestamp(Date)",
+        "case uuid(UUID)", "duplicateColumn", "duplicateCell", "unknownCell",
+        "rowWidthMismatch", "cellTypeMismatch", "nullInRequiredColumn",
+        "public static func columns(for module: ExportModuleV1)",
+    ):
+        if compact_swift_tokens(fragment) not in schema_compact:
+            raise ValueError("Task 6 typed schema must fail closed on every row/column invariant")
+    leading_calls = swift_named_array_initializer_calls(
+        schema_source,
+        "ExportSchemaV1",
+        "leadingColumns",
+        "column",
+    )
+    expected_leading_calls = (
+        'column("record_type", .text, false)',
+        'column("id", .uuid, false)',
+        'column("created_at", .timestamp, false)',
+        'column("updated_at", .timestamp, false)',
+    )
+    if [compact_swift_tokens(call) for call in leading_calls] != [
+        compact_swift_tokens(call) for call in expected_leading_calls
+    ]:
+        raise ValueError("Task 6 typed schema must use exact canonical leading columns")
+
+    snapshot_compact = compact_swift_tokens(snapshot_code)
+    for fragment in (
+        "public let schemaVersion: Int", "self.schemaVersion = 1",
+        "public let interval: ReportDateInterval",
+        "public let selectedModules: [ExportModuleV1]",
+        "public let tables: [ExportTableV1]",
+        "missingSelectedModule", "ExportModuleV1.allCases",
+    ):
+        if compact_swift_tokens(fragment) not in snapshot_compact:
+            raise ValueError("Task 6 snapshot must preserve the exact versioned request and table order")
+    if re.search(r"\b(?:Date\.now|Date\s*\(\s*\))", snapshot_code):
+        raise ValueError("Task 6 snapshot must not contain generation wall-clock state")
+
+    encoder_compact = compact_swift_tokens(encoder_code)
+    formula_code, _ = swift_named_type_bodies(encoder_source, "CSVFormulaTextCodecV1")
+    neutralize_code, _ = swift_unique_function_bodies(
+        encoder_source,
+        "neutralize",
+        "_ value: String",
+    )
+    restore_code, _ = swift_unique_function_bodies(
+        encoder_source,
+        "restore",
+        "_ value: String",
+    )
+    formula_scalar_code, _ = swift_unique_function_bodies(
+        encoder_source,
+        "isFormulaScalar",
+        "_ first: Unicode.Scalar",
+    )
+    timestamp_code, timestamp_raw = swift_unique_function_bodies(
+        encoder_source,
+        "timestamp",
+        "_ value: Date",
+    )
+    table_encode_code, table_encode_raw = swift_unique_function_bodies(
+        encoder_source,
+        "encode",
+        "_ table: ExportTableV1",
+    )
+    escape_code, escape_raw = swift_unique_function_bodies(
+        encoder_source,
+        "escape",
+        "_ value: String, forceQuote: Bool",
+    )
+    for fragment in (
+        "guard value.isFinite else", "value.uuidString.lowercased()",
+        "Locale(identifier:", "TimeZone(secondsFromGMT: 0)",
+        "value.replacingOccurrences(of: , with: )",
+        "public static func restore", "Data(output.utf8)",
+    ):
+        if compact_swift_tokens(fragment) not in encoder_compact:
+            raise ValueError("Task 6 CSV must be canonical RFC 4180 and reversibly formula-safe")
+    scoped_raw_fragments = (
+        ('let recordSeparator = "\\r\\n"', table_encode_code, table_encode_raw),
+        ('Locale(identifier: "en_US_POSIX")', timestamp_code, timestamp_raw),
+        (
+            'formatter.dateFormat = "yyyy-MM-dd\'T\'HH:mm:ss.SSSSSS\'Z\'"',
+            timestamp_code,
+            timestamp_raw,
+        ),
+        (
+            'value.replacingOccurrences(of: "\\\"", with: "\\\"\\\"")',
+            escape_code,
+            escape_raw,
+        ),
+    )
+    if any(
+        not swift_real_raw_fragment_present(scoped_code, scoped_raw, fragment)
+        for fragment, scoped_code, scoped_raw in scoped_raw_fragments
+    ):
+        raise ValueError(
+            "Task 6 canonical RFC 4180 CSV must retain exact scalar and formula encodings"
+        )
+    neutralize_compact = compact_swift_tokens(neutralize_code)
+    restore_compact = compact_swift_tokens(restore_code)
+    formula_scalar_compact = compact_swift_tokens(formula_scalar_code)
+    for fragment, scoped_code in (
+        ("guard let first = value.unicodeScalars.first", neutralize_compact),
+        ("first.value == 0x27", neutralize_compact),
+        ("isFormulaScalar(first)", neutralize_compact),
+        ("let scalars = value.unicodeScalars", restore_compact),
+        ("String(scalars[remainderIndex...])", restore_compact),
+        ("remainder.unicodeScalars.first?.value == 0x27", restore_compact),
+        ("_ first: Unicode.Scalar", compact_swift_tokens(formula_code)),
+        (
+            "[0x3D, 0x2B, 0x2D, 0x40, 0x09, 0x0D].contains(first.value)",
+            formula_scalar_compact,
+        ),
+    ):
+        if compact_swift_tokens(fragment) not in scoped_code:
+            raise ValueError(
+                "Task 6 canonical RFC 4180 CSV must retain exact scalar and formula encodings"
+            )
+    if encoder_compact.count(compact_swift_tokens("guard value.isFinite else")) != 2:
+        raise ValueError(
+            "Task 6 canonical RFC 4180 CSV must validate every decimal before returning bytes"
+        )
+    if "Calendar.current" in encoder_code or "Locale.current" in encoder_code:
+        raise ValueError("Task 6 CSV must never use current locale/calendar state")
+
+    inventory_body = swift_named_type_body(repository_code, "ReportsExportModelInventoryV1")
+    for model_name in (
+        "UserProfile", "Program", "ProgramPhase", "ProgramState",
+        "WorkoutDayTemplate", "ExerciseTemplate", "WarmupItem", "CooldownItem",
+        "WorkoutSession", "SetLog", "WorkoutSessionProgress", "Food", "Recipe",
+        "DailyNutritionLog", "MealEntry", "BodyMetric", "PostureMetric", "SleepLog",
+        "MoodLog", "HealthCheckReminder", "BloodworkResult", "ProgressPhoto",
+        "AppReminder", "AppSetting",
+    ):
+        if len(re.findall(rf"\b{model_name}\s*\.\s*self\b", inventory_body)) != 1:
+            raise ValueError("Task 6 persistence inventory must bind all 24 real model metatypes")
+
+    repository_compact = compact_swift_tokens(repository_code)
+    fetch_export_compact = compact_swift_tokens(swift_unique_function_body(
+        repository_code,
+        "fetchExportSnapshot",
+        "modules: Set<ExportModuleV1>",
+    ))
+    progress_export_compact = compact_swift_tokens(swift_unique_function_body(
+        repository_code,
+        "exportRow",
+        "_ progress: WorkoutSessionProgress",
+    ))
+    photo_export_compact = compact_swift_tokens(swift_unique_function_body(
+        repository_code,
+        "exportRow",
+        "_ photo: ProgressPhoto",
+    ))
+    progress_validation_compact = compact_swift_tokens(swift_unique_function_body(
+        repository_code,
+        "validateExportProgressChecklistReferences",
+        "_ progress: WorkoutSessionProgress",
+    ))
+    progress_reference_compact = compact_swift_tokens(swift_unique_function_body(
+        repository_code,
+        "validateExportProgressReference",
+        "progressID: UUID",
+    ))
+    program_state_validation_compact = compact_swift_tokens(swift_unique_function_body(
+        repository_code,
+        "validateExportProgramStateReferences",
+        "_ states: [ProgramState]",
+    ))
+    training_exercise_validation_compact = compact_swift_tokens(swift_unique_function_body(
+        repository_code,
+        "validateExportTrainingExerciseReference",
+        "_ exercise: ExerciseTemplate",
+    ))
+    canonical_export_records_compact = compact_swift_tokens(swift_unique_function_body(
+        repository_code,
+        "canonicalExportRecords",
+        "_ records: [Record]",
+    ))
+    selected_profile_program_compact = compact_swift_tokens(swift_unique_function_body(
+        repository_code,
+        "appendSelectedProfileProgramRows",
+        "profiles: [UserProfile]",
+    ))
+    referenced_training_config_compact = compact_swift_tokens(swift_unique_function_body(
+        repository_code,
+        "appendReferencedTrainingConfiguration",
+        "referencedProgramIDs: Set<UUID>",
+    ))
+    for fragment, scoped_code in (
+        ("WorkoutSessionProgressCodec.decode(progress.completedWarmupItemIdsData)", progress_export_compact),
+        ("WorkoutSessionProgressCodec.decode(progress.completedCooldownItemIdsData)", progress_export_compact),
+        ("interval.contains(record.updatedAt)", fetch_export_compact),
+        ("!photo.imageRef.isEmpty", photo_export_compact),
+        ("referencedProgramIDs", fetch_export_compact),
+        ("referencedWorkoutDayTemplateSources", fetch_export_compact),
+        ("referencedExerciseTemplateSources", fetch_export_compact),
+        ("selectedModules.contains(.system)", fetch_export_compact),
+        ("configScope: .referenced", repository_compact),
+    ):
+        if compact_swift_tokens(fragment) not in scoped_code:
+            raise ValueError(
+                "Task 6 persistence mapper must range-filter, decode codecs, sanitize photos, "
+                "and close referenced configuration transitively"
+            )
+    for forbidden in (
+        ".base64EncodedString",
+        ".text(photo.imageRef)", "ExportCellV1.text(progress.completedWarmupItemIdsData",
+        "ExportCellV1.text(progress.completedCooldownItemIdsData",
+    ):
+        if compact_swift_tokens(forbidden) in repository_compact:
+            raise ValueError("Task 6 snapshot mapping must be read-only and never emit opaque private blobs")
+    if (
+        repository_compact.count(compact_swift_tokens("configScope: .referenced")) != 8
+        or repository_compact.count(compact_swift_tokens("configScope: .selected")) != 12
+    ):
+        raise ValueError(
+            "Task 6 persistence mapper must range-filter, decode codecs, sanitize photos, "
+            "and close referenced configuration transitively"
+        )
+    if swift_model_context_mutates(repository_source):
+        raise ValueError("Task 6 snapshot mapping must be read-only and never emit opaque private blobs")
+
+    export_table_initializer_compact = compact_swift_tokens(swift_unique_initializer_body(
+        schema_code,
+        "ExportTableV1",
+        "module: ExportModuleV1",
+    ))
+    progress_issue_compact = compact_swift_tokens(swift_named_type_body(
+        repository_code,
+        "ReportsExportProgressReferenceIssueV1",
+    ))
+    training_exercise_issue_compact = compact_swift_tokens(swift_named_type_body(
+        repository_code,
+        "ReportsExportTrainingExerciseReferenceIssueV1",
+    ))
+    review_contracts = {
+        "canonical primary timestamp integrity": all(
+            compact_swift_tokens(fragment) in export_table_initializer_compact
+            for fragment in (
+                "definition.primaryTimestampColumn",
+                "canonicalPrimaryTimestamp == row.primaryTimestamp",
+                "primaryTimestampMismatch",
+            )
+        ),
+        "Unicode-scalar formula prefix handling": all((
+            compact_swift_tokens("guard let first = value.unicodeScalars.first")
+            in neutralize_compact,
+            compact_swift_tokens("let scalars = value.unicodeScalars")
+            in restore_compact,
+            compact_swift_tokens("String(scalars[remainderIndex...])")
+            in restore_compact,
+            compact_swift_tokens("_ first: Unicode.Scalar")
+            in compact_swift_tokens(formula_code),
+            compact_swift_tokens("contains(first.value)") in formula_scalar_compact,
+        )),
+        "all selected nutrition configuration": all(
+            compact_swift_tokens(fragment) in fetch_export_compact
+            for fragment in (
+                "rejectExportDuplicateIDs(foods, type: .food, id: \.id)",
+                "rejectExportDuplicateIDs(recipes, type: .recipe, id: \.id)",
+                "foods.map { try exportRow($0, configScope: .selected) }",
+                "recipes.map { try exportRow($0, configScope: .selected) }",
+            )
+        ),
+        "typed progress checklist references": all((
+            fetch_export_compact.count(compact_swift_tokens(
+                "validateExportProgressChecklistReferences("
+            )) == 1,
+            all(
+                compact_swift_tokens(fragment) in progress_validation_compact
+                for fragment in (
+                    "WorkoutSessionProgressCodec.decode("
+                    "progress.completedWarmupItemIdsData)",
+                    "WorkoutSessionProgressCodec.decode("
+                    "progress.completedCooldownItemIdsData)",
+                )
+            ),
+            progress_validation_compact.count(compact_swift_tokens(
+                "validateExportProgressReference("
+            )) == 2,
+            all(
+                compact_swift_tokens(fragment) in progress_reference_compact
+                for fragment in (
+                    "wrongMatches.isEmpty ? .missing : .wrongRecordType(wrongType)",
+                    "record[keyPath: workoutDay]?.id",
+                    "actualWorkoutDayID == expectedWorkoutDayID",
+                    "wrongRecordType(wrongType)",
+                    "missingWorkoutDay",
+                    "wrongWorkoutDay",
+                )
+            ),
+            all(
+                compact_swift_tokens(fragment) in progress_issue_compact
+                for fragment in (
+                    "case missing",
+                    "case wrongRecordType(ExportRecordTypeV1)",
+                    "case missingWorkoutDay",
+                    "case wrongWorkoutDay(expected: UUID, actual: UUID)",
+                )
+            ),
+        )),
+        "required ProgramState references": all((
+            selected_profile_program_compact.count(compact_swift_tokens(
+                "validateExportProgramStateReferences("
+            )) == 1,
+            referenced_training_config_compact.count(compact_swift_tokens(
+                "validateExportProgramStateReferences("
+            )) == 1,
+            all(
+                compact_swift_tokens(fragment) in program_state_validation_compact
+                for fragment in (
+                    "resolveExportReference(state.programId, in: programs",
+                    "resolveExportReference(state.currentPhaseId, in: phases",
+                    "phase.program?.id",
+                    "phaseProgramID == state.programId",
+                    "programStatePhaseProgramMismatch",
+                )
+            ),
+        )),
+        "reference diagnostic provenance": all((
+            compact_swift_tokens("ExportReferenceProvenanceV1") in repository_compact,
+            fetch_export_compact.count(
+                compact_swift_tokens("sourceType: source.sourceType")
+            ) == 2,
+            fetch_export_compact.count(
+                compact_swift_tokens("sourceID: source.sourceID")
+            ) == 2,
+        )),
+        "training exercise session-day integrity": all((
+            fetch_export_compact.count(compact_swift_tokens(
+                "validateExportTrainingExerciseReference("
+            )) == 2,
+            all(
+                compact_swift_tokens(fragment) in training_exercise_validation_compact
+                for fragment in (
+                    "exercise.workoutDayTemplate?.id",
+                    "actualWorkoutDayID == session.workoutDayTemplateId",
+                    "sourceType: sourceType",
+                    "sourceID: sourceID",
+                    "exerciseTemplateID: exercise.id",
+                    "invalidTrainingExerciseReference",
+                )
+            ),
+            all(
+                compact_swift_tokens(fragment) in training_exercise_issue_compact
+                for fragment in (
+                    "case missingWorkoutDay",
+                    "case wrongWorkoutDay(expected: UUID, actual: UUID)",
+                )
+            ),
+        )),
+        "canonical fetched-record ordering": all((
+            fetch_export_compact.count(
+                compact_swift_tokens("canonicalExportRecords(")
+            ) == 24
+            and all(
+                compact_swift_tokens(
+                    "canonicalExportRecords(try modelContext.fetch("
+                    f"FetchDescriptor<{model}>()), id: \\.id)"
+                ) in fetch_export_compact
+                for model in (
+                    "UserProfile", "Program", "ProgramPhase", "ProgramState",
+                    "WorkoutDayTemplate", "ExerciseTemplate", "WarmupItem",
+                    "CooldownItem", "WorkoutSession", "SetLog",
+                    "WorkoutSessionProgress", "Food", "Recipe",
+                    "DailyNutritionLog", "MealEntry", "BodyMetric",
+                    "PostureMetric", "SleepLog", "MoodLog",
+                    "HealthCheckReminder", "BloodworkResult", "ProgressPhoto",
+                    "AppReminder", "AppSetting",
+                )
+            ),
+            compact_swift_tokens("records.sorted") in canonical_export_records_compact,
+            compact_swift_tokens(
+                "uuidOrderedBefore($0[keyPath: id], $1[keyPath: id])"
+            ) in canonical_export_records_compact,
+        )),
+    }
+    missing_review_contracts = [
+        name for name, present in review_contracts.items() if not present
+    ]
+    if missing_review_contracts:
+        raise ValueError(
+            "Task 6 review production contracts are missing: "
+            f"{missing_review_contracts}"
+        )
+    for relative in TASK6_PRODUCTION_PATHS:
+        path = root / relative
+        actual_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if TASK6_PRODUCTION_ASSET_SHA256.get(relative) != actual_digest:
+            raise ValueError(f"Task 6 production asset digest mismatch: {relative}")
+
+
+def expect_task6_failure(root: Path, expected: str) -> None:
+    try:
+        verify_task6_assets(root)
+    except ValueError as error:
+        if expected not in str(error):
+            raise SystemExit(
+                f"Task 6 real-asset mutation failed for wrong reason; expected {expected!r}: {error}"
+            ) from error
+    else:
+        raise SystemExit(f"Task 6 real-asset mutation escaped: {expected}")
+
+
+def task6_real_asset_self_test(source_root: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="m4-task6-real-assets-") as directory:
+        fixture = Path(directory)
+        relative_paths = tuple(TASK6_TEST_SUITES) + TASK6_PRODUCTION_PATHS
+        for relative in relative_paths:
+            source = source_root / relative
+            destination = fixture / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if source.is_file():
+                shutil.copy2(source, destination)
+        verify_task6_assets(fixture)
+
+        for relative in relative_paths:
+            path = fixture / relative
+            original = path.read_bytes()
+            path.unlink()
+            expected = "test contract is missing" if relative in TASK6_TEST_SUITES else "production contracts are missing"
+            expect_task6_failure(fixture, expected)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(original)
+
+        for relative, (suite, _, _, _) in TASK6_TEST_SUITES.items():
+            path = fixture / relative
+            original = replace_once(path, f"final class {suite}", f"final class Removed{suite}")
+            expect_task6_failure(fixture, "expected concrete XCTestCase suite")
+            path.write_text(original, encoding="utf-8")
+            original = path.read_text(encoding="utf-8")
+            path.write_text(original.replace("XCTAssert", "Task6RemovedAssert"), encoding="utf-8")
+            expect_task6_failure(fixture, "must assert real behavior")
+            path.write_text(original, encoding="utf-8")
+
+        rfc_test = fixture / (
+            "Packages/HealthTrackingModules/Tests/ReportsKitTests/"
+            "RFC4180CSVEncoderTests.swift"
+        )
+        original_rfc_test = rfc_test.read_text(encoding="utf-8")
+        bound_rfc_method = (
+            "testFormulaNeutralizationAndInverseAreUnambiguousForEveryLeadingScalar"
+        )
+        for prefix, suffix in (
+            ("\n        return\n", ""),
+            ("\n        throw XCTSkip()\n", ""),
+            ("\n        XCTExpectFailure()\n", ""),
+            ("\n        if false {\n", "\n        }\n"),
+        ):
+            rfc_test.write_text(
+                wrap_named_test_body(
+                    original_rfc_test,
+                    bound_rfc_method,
+                    prefix,
+                    suffix,
+                ),
+                encoding="utf-8",
+            )
+            expect_task6_failure(fixture, "reachable direct behavior")
+        rfc_test.write_text(original_rfc_test, encoding="utf-8")
+
+        for digest_decoy in (
+            "\n// Task 6 canonical-test comment decoy.\n",
+            "\nprivate let task6UnusedHelper = { XCTAssertTrue(true) }\n",
+        ):
+            rfc_test.write_text(original_rfc_test + digest_decoy, encoding="utf-8")
+            expect_task6_failure(fixture, "Task 6 test asset digest")
+        rfc_test.write_text(original_rfc_test, encoding="utf-8")
+
+        rfc_test.write_text(
+            wrap_named_test_body(
+                original_rfc_test,
+                bound_rfc_method,
+                "\n        let neverCalled = {\n",
+                "\n        }\n        _ = neverCalled\n",
+            ),
+            encoding="utf-8",
+        )
+        expect_task6_failure(fixture, "Task 6 test asset digest")
+        rfc_test.write_text(original_rfc_test, encoding="utf-8")
+
+        schema = fixture / TASK6_PRODUCTION_PATHS[0]
+        original = replace_once(
+            schema,
+            'case appSetting = "app_setting"',
+            'case appSetting = "wrong" // case appSetting = "app_setting"',
+        )
+        expect_task6_failure(fixture, "exact stable raw identifiers")
+        schema.write_text(original, encoding="utf-8")
+
+        original = replace_once(schema, 'case appSetting = "app_setting"', 'case removedSetting = "app_setting"')
+        expect_task6_failure(fixture, "exactly the 24 model record types")
+        schema.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            schema,
+            'column("record_type", .text, false)',
+            'column("wrong_record_type", .text, false) '
+            '// column("record_type", .text, false)',
+        )
+        expect_task6_failure(fixture, "exact canonical leading columns")
+        schema.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            schema,
+            "canonicalPrimaryTimestamp == row.primaryTimestamp",
+            "true",
+        )
+        expect_task6_failure(fixture, "canonical primary timestamp integrity")
+        schema.write_text(original, encoding="utf-8")
+
+        encoder = fixture / TASK6_PRODUCTION_PATHS[2]
+        for before, after, expected in (
+            ("guard value.isFinite else", "guard true else", "canonical RFC 4180"),
+            (
+                'let recordSeparator = "\\r\\n"',
+                'let recordSeparator = "\\n"',
+                "canonical RFC 4180",
+            ),
+            (
+                "public static func restore",
+                "public static func removedRestore",
+                "function restore must have one expected declaration",
+            ),
+        ):
+            original = replace_once(encoder, before, after)
+            expect_task6_failure(fixture, expected)
+            encoder.write_text(original, encoding="utf-8")
+
+        for before, after in (
+            (
+                "guard let first = value.unicodeScalars.first else",
+                "guard let first = value.first else",
+            ),
+            (
+                "String(scalars[remainderIndex...])",
+                "String(value[remainderIndex...])",
+            ),
+            (
+                'let recordSeparator = "\\r\\n"',
+                'let recordSeparator = "\\n" '
+                '// let recordSeparator = "\\r\\n"',
+            ),
+        ):
+            original = replace_once(encoder, before, after)
+            expect_task6_failure(fixture, "canonical RFC 4180")
+            encoder.write_text(original, encoding="utf-8")
+
+        repository = fixture / TASK6_PRODUCTION_PATHS[3]
+        original_repository = repository.read_text(encoding="utf-8")
+        repository.write_text(
+            original_repository.replace(
+                "selectedModules.contains(.system)",
+                "true",
+                1,
+            )
+            + "\nprivate func task6UnusedSystemDecoy() { "
+            + "_ = selectedModules.contains(.system) }\n",
+            encoding="utf-8",
+        )
+        expect_task6_failure(
+            fixture,
+            "range-filter, decode codecs, sanitize photos",
+        )
+        repository.write_text(original_repository, encoding="utf-8")
+
+        for before, after, expected in (
+            (
+                "WorkoutSessionProgressCodec.decode(progress.completedWarmupItemIdsData)",
+                "Set<UUID>()",
+                "range-filter, decode codecs, sanitize photos",
+            ),
+            (
+                "interval.contains(record.updatedAt)",
+                "true",
+                "range-filter, decode codecs, sanitize photos",
+            ),
+            (
+                "!photo.imageRef.isEmpty",
+                "true",
+                "range-filter, decode codecs, sanitize photos",
+            ),
+            (
+                "configScope: .referenced",
+                "configScope: .selected",
+                "range-filter, decode codecs, sanitize photos",
+            ),
+        ):
+            original = replace_once(repository, before, after)
+            expect_task6_failure(fixture, expected)
+            repository.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            repository,
+            "WorkoutSessionProgressCodec.decode(\n"
+            "                progress.completedWarmupItemIdsData\n"
+            "            )",
+            "Set<UUID>()",
+        )
+        expect_task6_failure(fixture, "typed progress checklist references")
+        repository.write_text(original, encoding="utf-8")
+
+        for before, after, expected in (
+            (
+                "contentsOf: try foods.map { try exportRow($0, configScope: .selected) }",
+                "contentsOf: []",
+                "range-filter, decode codecs, sanitize photos",
+            ),
+            (
+                "contentsOf: try recipes.map { try exportRow($0, configScope: .selected) }",
+                "contentsOf: []",
+                "range-filter, decode codecs, sanitize photos",
+            ),
+            (
+                "try validateExportProgressChecklistReferences(",
+                "try task6RemovedProgressChecklistValidation(",
+                "typed progress checklist references",
+            ),
+            (
+                "actualWorkoutDayID == expectedWorkoutDayID",
+                "true",
+                "typed progress checklist references",
+            ),
+            (
+                "phaseProgramID == state.programId",
+                "true",
+                "required ProgramState references",
+            ),
+        ):
+            original = replace_once(repository, before, after)
+            expect_task6_failure(fixture, expected)
+            repository.write_text(original, encoding="utf-8")
+
+        for occurrence in (1, 2):
+            original = replace_nth_once(
+                repository,
+                "try validateExportProgramStateReferences(",
+                "try task6RemovedProgramStateValidation(",
+                occurrence,
+            )
+            expect_task6_failure(fixture, "required ProgramState references")
+            repository.write_text(original, encoding="utf-8")
+
+        for occurrence in (1, 2):
+            original = replace_nth_once(
+                repository,
+                "sourceID: source.sourceID",
+                "sourceID: targetID",
+                occurrence,
+            )
+            expect_task6_failure(fixture, "reference diagnostic provenance")
+            repository.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            repository,
+            "        let progressRecords = canonicalExportRecords(\n"
+            "            try modelContext.fetch(FetchDescriptor<WorkoutSessionProgress>()), "
+            "id: \\.id\n"
+            "        )",
+            "        let progressRecords = try modelContext.fetch(\n"
+            "            FetchDescriptor<WorkoutSessionProgress>()\n"
+            "        )",
+        )
+        expect_task6_failure(fixture, "canonical fetched-record ordering")
+        repository.write_text(original, encoding="utf-8")
+
+        original = replace_once(
+            repository,
+            "uuidOrderedBefore($0[keyPath: id], $1[keyPath: id])",
+            "uuidOrderedBefore($1[keyPath: id], $0[keyPath: id])",
+        )
+        expect_task6_failure(fixture, "canonical fetched-record ordering")
+        repository.write_text(original, encoding="utf-8")
+
+        original_repository = repository.read_text(encoding="utf-8")
+        selected_state_validation = (
+            "        try validateExportProgramStateReferences(\n"
+            "            states,\n"
+            "            programs: programs,\n"
+            "            phases: phases\n"
+            "        )"
+        )
+        repository.write_text(
+            original_repository.replace(
+                selected_state_validation,
+                "        if false {\n"
+                + selected_state_validation
+                + "\n        }",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        expect_task6_failure(fixture, "Task 6 production asset digest")
+        repository.write_text(original_repository, encoding="utf-8")
+
+        referenced_state_validation = (
+            "        try validateExportProgramStateReferences(\n"
+            "            selectedStates,\n"
+            "            programs: programs,\n"
+            "            phases: phases\n"
+            "        )"
+        )
+        progress_validation = (
+            "                try validateExportProgressChecklistReferences(\n"
+            "                    progress,\n"
+            "                    session: session,\n"
+            "                    warmups: warmups,\n"
+            "                    cooldowns: cooldowns\n"
+            "                )"
+        )
+        nutrition_configuration = (
+            "            try rejectExportDuplicateIDs(foods, type: .food, id: \\.id)\n"
+            "            try rejectExportDuplicateIDs(recipes, type: .recipe, id: \\.id)\n"
+            "            rowsByModule[.nutrition, default: []].append(\n"
+            "                contentsOf: try foods.map { try exportRow($0, configScope: .selected) }\n"
+            "            )\n"
+            "            rowsByModule[.nutrition, default: []].append(\n"
+            "                contentsOf: try recipes.map { try exportRow($0, configScope: .selected) }\n"
+            "            )"
+        )
+        exercise_day_guard = (
+            "        guard actualWorkoutDayID == session.workoutDayTemplateId else {\n"
+            "            throw ReportsExportRepositoryError.invalidTrainingExerciseReference(\n"
+            "                sourceType: sourceType,\n"
+            "                sourceID: sourceID,\n"
+            "                exerciseTemplateID: exercise.id,\n"
+            "                reason: .wrongWorkoutDay(\n"
+            "                    expected: session.workoutDayTemplateId,\n"
+            "                    actual: actualWorkoutDayID\n"
+            "                )\n"
+            "            )\n"
+            "        }"
+        )
+        for before, after in (
+            (
+                referenced_state_validation,
+                "        if 1 == 2 {\n"
+                + referenced_state_validation
+                + "\n        }",
+            ),
+            (
+                progress_validation,
+                "                let task6UnusedProgressValidation = {\n"
+                + progress_validation
+                + "\n                }\n"
+                "                _ = task6UnusedProgressValidation",
+            ),
+            (
+                nutrition_configuration,
+                "            if false {\n"
+                + nutrition_configuration
+                + "\n            }",
+            ),
+            (
+                exercise_day_guard,
+                "        if false {\n"
+                + exercise_day_guard
+                + "\n        }",
+            ),
+        ):
+            original = replace_once(repository, before, after)
+            expect_task6_failure(fixture, "Task 6 production asset digest")
+            repository.write_text(original, encoding="utf-8")
+
+        repository.write_text(
+            original_repository
+            + "\nprivate let task6UnusedProductionHelper = { true }\n",
+            encoding="utf-8",
+        )
+        expect_task6_failure(fixture, "Task 6 production asset digest")
+        repository.write_text(original_repository, encoding="utf-8")
+
+        original_encoder = encoder.read_text(encoding="utf-8")
+        for before, after in (
+            (
+                '        if isFormulaScalar(first) { return "\'" + value }',
+                "        if false {\n"
+                + '        if isFormulaScalar(first) { return "\'" + value }'
+                + "\n        }",
+            ),
+            (
+                "        if let protected = remainder.unicodeScalars.first, "
+                "isFormulaScalar(protected) {\n"
+                "            return remainder\n"
+                "        }",
+                "        if 1 == 2 {\n"
+                "        if let protected = remainder.unicodeScalars.first, "
+                "isFormulaScalar(protected) {\n"
+                "            return remainder\n"
+                "        }\n"
+                "        }",
+            ),
+        ):
+            original = replace_once(encoder, before, after)
+            expect_task6_failure(fixture, "Task 6 production asset digest")
+            encoder.write_text(original, encoding="utf-8")
+        encoder.write_text(original_encoder, encoding="utf-8")
+
+        for relative in TASK6_PRODUCTION_PATHS:
+            production = fixture / relative
+            original_production = production.read_text(encoding="utf-8")
+            production.write_text(
+                original_production
+                + "\nprivate let task6UnusedBoundProductionHelper = { true }\n",
+                encoding="utf-8",
+            )
+            expect_task6_failure(fixture, "Task 6 production asset digest")
+            production.write_text(original_production, encoding="utf-8")
+
+
 def expect_failure(root: Path, expected: str) -> None:
     try:
         verify(root)
@@ -4082,6 +5365,23 @@ def replace_once(path: Path, before: str, after: str) -> str:
     if before not in original:
         raise SystemExit(f"M4 focused CI self-test mutation source is missing: {before}")
     path.write_text(original.replace(before, after, 1), encoding="utf-8")
+    return original
+
+
+def replace_nth_once(path: Path, before: str, after: str, occurrence: int) -> str:
+    original = path.read_text(encoding="utf-8")
+    cursor = 0
+    start = -1
+    for _ in range(occurrence):
+        start = original.find(before, cursor)
+        if start == -1:
+            raise SystemExit(
+                f"M4 focused CI self-test mutation source occurrence "
+                f"{occurrence} is missing: {before}"
+            )
+        cursor = start + len(before)
+    mutated = original[:start] + after + original[start + len(before) :]
+    path.write_text(mutated, encoding="utf-8")
     return original
 
 
@@ -4186,11 +5486,13 @@ if mode == "--self-test":
     task3_real_asset_self_test(root)
     task4_real_asset_self_test(root)
     task5_real_asset_self_test(root)
+    task6_real_asset_self_test(root)
     print("M4 focused CI verifier self-tests passed.")
 elif mode == "":
     verify(root)
     verify_reports_architecture(root)
     verify_task5_assets(root)
+    verify_task6_assets(root)
     print("M4 reports verification passed.")
 else:
     raise SystemExit("Usage: scripts/verify-m4-reports.sh [--self-test]")
