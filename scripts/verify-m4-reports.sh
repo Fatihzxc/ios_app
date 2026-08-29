@@ -28,7 +28,11 @@ ROUTES = {
         "HealthTrackingAppUITests/ProgressPhotoGalleryUITests",
     ),
     "m4.6": ("ReportsKitTests/ExportSchemaInventoryTests", "ReportsKitTests/RFC4180CSVEncoderTests", "PersistenceKitTests/ReportsExportRepositoryTests"),
-    "m4.7": ("ReportsKitTests/JSONExportEncoderTests", "ReportsKitTests/StoredZIPWriterTests", "ReportsKitTests/ReportExportCoordinatorTests"),
+    "m4.7": (
+        "ReportsKitTests/JSONExportEncoderTests",
+        "ReportsKitTests/StoredZIPWriterTests",
+        "ReportsKitTests/ReportExportCoordinatorTests",
+    ),
     "m4.8": ("ReportsKitTests", "HealthTrackingAppTests/ReportsCompositionTests"),
 }
 
@@ -44,6 +48,16 @@ def routed_run() -> str:
 
 
 ROUTED_RUN = routed_run()
+TASK7_DEVICE_BUILD_GUARD = "${{ startsWith(github.ref_name, 'test/m4.7-') }}"
+TASK7_DEVICE_BUILD_RUN = """set -euo pipefail
+scripts/bootstrap.sh
+xcodebuild build \\
+  -project HealthTrackingApp.xcodeproj \\
+  -scheme HealthTrackingApp-Local \\
+  -configuration Debug \\
+  -destination 'generic/platform=iOS' \\
+  CODE_SIGNING_ALLOWED=NO \\
+  CODE_SIGNING_REQUIRED=NO"""
 CANONICAL_KEY = r"[A-Za-z][A-Za-z0-9_-]*"
 YAML_KEY = rf"(?:{CANONICAL_KEY}|'{CANONICAL_KEY}'|\"{CANONICAL_KEY}\")"
 RUNNER_SHA256 = "98065cbe584b6041011b52a253c05ed799467a4d5fe82611517ce13b29ec400c"
@@ -210,6 +224,17 @@ def verify(root: Path) -> None:
         raise ValueError("Focused M4 workflow job must have one canonical routed step")
     if block_run(routed[0][1]) != ROUTED_RUN:
         raise ValueError("Focused M4 routed step must use every exact executable M4 selector")
+    device = [
+        (values, body)
+        for values, body in parsed_steps
+        if values.get("name") == "Compile Task 7 device filesystem branch"
+    ]
+    if len(device) != 1 or device[0][0] != {
+        "name": "Compile Task 7 device filesystem branch",
+        "if": TASK7_DEVICE_BUILD_GUARD,
+        "run": "|",
+    } or block_run(device[0][1]) != TASK7_DEVICE_BUILD_RUN:
+        raise ValueError("Focused M4 workflow must compile the exact Task 7 device-only branch")
     verify_focused_runner(runner)
 
 
@@ -5350,6 +5375,1053 @@ def task6_real_asset_self_test(source_root: Path) -> None:
             production.write_text(original_production, encoding="utf-8")
 
 
+TASK7_TEST_SUITES = {
+    "Packages/HealthTrackingModules/Tests/ReportsKitTests/JSONExportEncoderTests.swift": (
+        "JSONExportEncoderTests",
+        False,
+        {
+            "testEncodesExactVersionedNativeShapeAndCanonicalScalars",
+            "testPreservesNullVersusEmptyAndOriginalFormulaLikeUnicodeText",
+            "testOrdersModulesTablesRowsAndProducesDeterministicSortedKeyBytes",
+            "testRejectsEveryNonFiniteDecimalAndInvalidTimestampBeforeReturningBytes",
+        },
+        "JSONExportEncoderV1",
+    ),
+    "Packages/HealthTrackingModules/Tests/ReportsKitTests/StoredZIPWriterTests.swift": (
+        "StoredZIPWriterTests",
+        False,
+        {
+            "testCRC32IEEEEmptyAndKnownVector",
+            "testWritesCanonicalStoredHeadersDescriptorsCentralDirectoryAndSortedUTF8Names",
+            "testRejectsDuplicateTraversalAbsoluteBackslashColonNULAndMalformedNamesBeforeOutput",
+            "testRejectsSourceSymlinkDirectoryDestinationSymlinkAndDestinationAliasingInput",
+            "testSourceDescriptorRejectsValidationToOpenSymlinkSwap",
+            "testRejectsEveryInjectableZIP32LimitBeforeTruncation",
+            "testCancellationAndStreamingFailureRemovePartialAndNeverPublishDestination",
+            "testPartialRemovalFailureRetriesAutomaticallyWithoutAnotherArchive",
+            "testStreamsBoundedChunksAndEquivalentTreesProduceIdenticalBytes",
+            "testNeverOverwritesExistingDestination",
+            "testAtomicNoReplacePublicationPreservesDestinationCreatedAtPublishBoundary",
+            "testPublicationNeverUsesReplacementStagingPathBytes",
+            "testPublicationNeverFollowsDestinationParentSwapOutsideHeldDirectory",
+            "testStageUnlinkFailureStopsBeforeSensitiveWriteAndAutomaticallyCleansZeroBytePartial",
+            "testStageHardLinkBeforeUnlinkFailsBeforeBytesAndCleansExactZeroByteInode",
+            "testStageMoveBetweenOpenAndUnlinkIsRejectedBeforePrivateBytesAreWritten",
+            "testPublicationDoesNotExposeBytesWhenParentMovesAfterFinalValidationBeforeClone",
+            "testPublicationCreateWindowKeepsParentAppendOnlyThroughDescriptorClone",
+            "testPostOpenMetadataFailureRetainsAndCleansExactZeroByteStage",
+            "testTerminalStageRecoveryNeverDeletesASecondNameForRetainedInode",
+            "testStandaloneRestoreFailureRetainsExactDescriptorUntilTransientRetry",
+            "testStandaloneRestoreCapacityRejectsBeforeSixtyFifthDirectoryMutation",
+        },
+        "StoredZIPWriter",
+    ),
+    "Packages/HealthTrackingModules/Tests/ReportsKitTests/ReportExportCoordinatorTests.swift": (
+        "ReportExportCoordinatorTests",
+        True,
+        {
+            "testRejectsInvalidRequestsBeforeAllocationOrFetchAndFetchesOneExactSnapshot",
+            "testEachFormatProducesExactOrderedShareLayoutWithoutCrossFormatArtifacts",
+            "testBothZipManifestHasDeterministicHashesSizesMediaAndNoSelfHashOrPrivateState",
+            "testPhotosAreExplicitZIPOnlyCandidatesAndStatusesAreCanonicalWithoutPrivateReferences",
+            "testZIPReleasesPhotoPayloadDataBeforeStreamingArchiveEntries",
+            "testUnexpectedProviderFailureAndCancellationCleanOwnedWorkspace",
+            "testAllocationMarkerPublicationDoesNotBlockMainActorProgressOrCancellation",
+            "testPayloadGenerationCancellationAcquiresMainActorAndCleansUUIDArtifacts",
+            "testRecursiveCleanupDoesNotBlockMainActorAndEventuallyRemovesExactOwnedDirectory",
+            "testTemporaryStoreProtectsContainedAllocationRetriesCollisionAndCleanupFailure",
+            "testTemporaryCleanupOutlivesStoreAndMarkerIdentityPreventsStaleDeletion",
+            "testArtifactTokenRetainsRealAllocationCleanupAfterStoreAndAllocationRelease",
+            "testFileManagerAtomicWriteNeverOverwritesAndLeavesNoSidecarOnSuccessOrFailure",
+            "testTemporaryStoreRetainsMarkerBoundCleanupWhenSetupFailureRemovalFails",
+            "testTemporaryCleanupRetriesTransientMarkerReadFailureThenRemovesExactOwnedDirectory",
+            "testTemporaryWriteRejectsExistingNestedSymlinkWithoutWritingOutsideOwnedDirectory",
+            "testTemporaryCleanupRejectsOwnedSymlinkSwapEvenWhenMarkerIsCopied",
+            "testTemporaryCleanupRejectsRootSymlinkSwapWithReproducedOwnedPathAndMarker",
+            "testTemporaryWriteRejectsRootSwapAtOperationBoundaryWithoutExternalWrite",
+            "testTemporaryWriteRejectsOwnedSwapAtOperationBoundaryWithoutExternalWrite",
+            "testTemporaryWriteRejectsNestedSwapAtOperationBoundaryWithoutExternalWrite",
+            "testTemporaryCleanupRejectsOwnedReplacementAfterMarkerReadWithoutDeletingIt",
+            "testTemporaryCleanupRejectsRootReplacementAfterMarkerReadWithoutDeletingIt",
+            "testPartialMarkerWriteFailureRetainsExactCleanupAfterStoreRelease",
+            "testReusedURLKeepsOldAndNewCleanupRetriesIndependentAfterTokenAndStoreRelease",
+            "testLifetimeCleanupRegistryStopsAfterFinitePermanentFailuresAndReleasesOperation",
+            "testNilCreationRecoveryKeepsAllSixtyFourCapacityReservations",
+            "testNextAllocationRecoversTerminalMarkerOwnedDirectoryWithoutRetainedClosure",
+            "testViewModelDefaultsEightModulesPhotoResetAndSelectionSurvivesFailureRetryAndCleanup",
+            "testViewModelDelayedProgressCancellationAndSupersessionIgnoreStaleCompletion",
+            "testViewModelFormatChangeInvalidatesInFlightPhotoZIPAndCleansStaleCompletion",
+            "testViewModelModuleChangeCleansReadyArtifactAndRequiresExplicitRegeneration",
+            "testPayloadStageUnlinkFailureStopsBeforeDataWriteAndAutomaticallyCleansResidue",
+            "testPayloadStageHardLinkBeforeUnlinkNeverReceivesPrivateBytesAndIsCleaned",
+            "testPayloadStageReplacementAtPreUnlinkBoundaryIsNeverDeleted",
+            "testDescriptorDirectoryEnumerationDoesNotAdvanceTheCallersCleanupCursor",
+            "testPrivateNamespaceLeaseRejectsRootOwnedAndNestedMovesWhileAllocationIsLive",
+            "testCleanupLeaseRejectsNestedMoveAtRecursiveCleanupBoundary",
+            "testRecursiveCleanupRejectsQuarantineReplacementBetweenMetadataAndOpen",
+            "testRecursiveCleanupRejectsQuarantineReplacementBetweenMetadataAndUnlink",
+            "testPostMkdirPathInspectionFailureRetainsCleanupAuthorization",
+            "testPostMkdirIdentityFailureRetainsCleanupAuthorization",
+            "testDescriptorMkdirOpenFailureRetainsExactCleanupAuthorization",
+            "testDescriptorPostSecurityFailureRetainsExactCleanupAuthorization",
+            "testCleanupRecoveryCapacityRejectsBeforeCreatingSixtyFifthOwnedDirectory",
+            "testViewModelDropsPermanentlyFailingTokensAfterRegistryHandoffAndRemainsResponsive",
+        },
+        "ReportExportCoordinator",
+    ),
+}
+
+TASK7_TEST_ASSET_SHA256 = {
+    "Packages/HealthTrackingModules/Tests/ReportsKitTests/JSONExportEncoderTests.swift": (
+        "d232fb5a4ef7a4b70b81d2d563913d7688fa9c54c2081f3a3737b893ddee0bfc"
+    ),
+    "Packages/HealthTrackingModules/Tests/ReportsKitTests/StoredZIPWriterTests.swift": (
+        "eec01f21f269e027b9e61c2263f6feb4d9c8758ebd32e30cc4bb17b6f6119b0e"
+    ),
+    "Packages/HealthTrackingModules/Tests/ReportsKitTests/ReportExportCoordinatorTests.swift": (
+        "0ad8375bf659a75656dbb113eb89218d98453e9bc8c85bc256736b70973222f6"
+    ),
+}
+
+TASK7_PRODUCTION_PATHS = (
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/JSONExportEncoderV1.swift",
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/CRC32.swift",
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/StoredZIPWriter.swift",
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/ExportManifestV1.swift",
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/DescriptorBoundFileSystem.swift",
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/ReportExportCoordinator.swift",
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Presentation/ReportExportViewModel.swift",
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Presentation/ReportExportView.swift",
+)
+
+TASK7_PRODUCTION_ASSET_SHA256: dict[str, str] = {
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/JSONExportEncoderV1.swift": (
+        "fe4f9e311da10f976ff6c7a011a4ee3792f0671487edbe87b0b46bbf5a66a68e"
+    ),
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/CRC32.swift": (
+        "baa88ef6ef3b56d8ad65b5dd26975962d6e8508c87071d2fd39d229791a74e11"
+    ),
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/StoredZIPWriter.swift": (
+        "079d7ae5d5f13f3f2d0f6f094676c0b71bb6b60b6ce4c107d73d1b655b96532c"
+    ),
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/ExportManifestV1.swift": (
+        "aef595aaed9246e01d2cefbcc247af5316ff0b19c5d18ef9a91b328afbda5bb2"
+    ),
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/DescriptorBoundFileSystem.swift": (
+        "161ff76f87877e86c2a75e6ae0ea39ee7199f1c46a32123b6cc41bf1c8b5d957"
+    ),
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Export/ReportExportCoordinator.swift": (
+        "01e8b44f0cef36fd19ec334f5aee1eb87f31dbc12c312ec8370557efeaa0638f"
+    ),
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Presentation/ReportExportViewModel.swift": (
+        "ee31f6e2283ae529cdcafa72dc5c2ea5430135677dabf52066712bb2211ca4a5"
+    ),
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Presentation/ReportExportView.swift": (
+        "bd211ac5148c8c9160863930f88163c157b8231b4ab4db4320c53e351d0641dd"
+    ),
+}
+
+TASK7_LOCALIZATION_KEYS = {
+    "reports.export.title",
+    "reports.export.range",
+    "reports.export.modules",
+    "reports.export.format",
+    "reports.export.format.csv",
+    "reports.export.format.json",
+    "reports.export.format.both",
+    "reports.export.photos",
+    "reports.export.action",
+    "reports.export.retry",
+    "reports.export.cancel",
+    "reports.export.progress",
+    "reports.export.share",
+    "reports.export.error",
+}
+
+
+def task7_blank_unexecuted_assertion_wrappers(code: str, name: str) -> str:
+    reachable = list(code)
+    wrapper_patterns = (
+        re.compile(
+            r"\bfunc[ \t\f\v\r\n]+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"
+            r"[ \t\f\v\r\n]*\([^)]*\)[^{]*\{"
+        ),
+        re.compile(
+            r"\b(?:let|var)[ \t\f\v\r\n]+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"
+            r"[^=\r\n]*=[ \t\f\v\r\n]*\{"
+        ),
+    )
+    occupied: list[tuple[int, int]] = []
+    for pattern in wrapper_patterns:
+        for match in pattern.finditer(code):
+            if any(start <= match.start() < end for start, end in occupied):
+                continue
+            opening = code.find("{", match.start(), match.end())
+            closing = balanced_brace_end(
+                code,
+                opening,
+                f"Task 7 assertion wrapper in {name}",
+            )
+            wrapper_name = match.group("name")
+            tail = code[closing + 1 :]
+            if re.search(rf"\b{re.escape(wrapper_name)}[ \t\f\v\r\n]*\(", tail):
+                continue
+            task5_blank_range(reachable, match.start(), closing + 1)
+            occupied.append((match.start(), closing + 1))
+
+    closure_array = re.compile(
+        r"\b(?:let|var)[ \t\f\v\r\n]+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"
+        r"[^=\r\n]*=[ \t\f\v\r\n]*\[[ \t\f\v\r\n]*\{"
+    )
+    for match in closure_array.finditer(code):
+        array_opening = code.find("[", match.start(), match.end())
+        array_closing = balanced_delimiter_end(
+            code,
+            array_opening,
+            "[",
+            "]",
+            f"Task 7 closure array in {name}",
+        )
+        wrapper_name = match.group("name")
+        tail = code[array_closing + 1 :]
+        executes_directly = re.search(
+            rf"\b{re.escape(wrapper_name)}[ \t\f\v\r\n]*"
+            rf"(?:\[[^\]]+\][ \t\f\v\r\n]*)?\(",
+            tail,
+        ) or re.search(
+            rf"\b{re.escape(wrapper_name)}[ \t\f\v\r\n]*\."
+            r"[ \t\f\v\r\n]*(?:forEach|map|compactMap|flatMap)[ \t\f\v\r\n]*\{",
+            tail,
+        )
+        if executes_directly:
+            continue
+        cursor = array_opening + 1
+        while cursor < array_closing:
+            closure_opening = code.find("{", cursor, array_closing)
+            if closure_opening == -1:
+                break
+            closure_closing = balanced_brace_end(
+                code,
+                closure_opening,
+                f"Task 7 anonymous assertion wrapper in {name}",
+            )
+            task5_blank_range(reachable, closure_opening, closure_closing + 1)
+            cursor = closure_closing + 1
+    return "".join(reachable)
+
+
+def task7_depth_zero_code(code: str) -> str:
+    direct = list(code)
+    depth = 0
+    for index, character in enumerate(code):
+        if character == "{":
+            depth += 1
+            direct[index] = " "
+            continue
+        if character == "}":
+            depth = max(0, depth - 1)
+            direct[index] = " "
+            continue
+        if depth > 0 and character not in {"\r", "\n"}:
+            direct[index] = " "
+    return "".join(direct)
+
+
+def task7_has_direct_terminal(code: str) -> bool:
+    return re.search(r"\b(?:return|throw)\b", task7_depth_zero_code(code)) is not None
+
+
+def task7_reject_deterministic_early_terminal(code: str, path: Path, name: str) -> None:
+    depths: list[int] = []
+    depth = 0
+    for character in code:
+        depths.append(depth)
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth = max(0, depth - 1)
+
+    def top_level(match: re.Match[str]) -> bool:
+        return depths[match.start()] == 0
+
+    def reject() -> None:
+        raise ValueError(
+            f"Task 7 test {path.name}.{name} must retain reachable direct behavior "
+            "without deterministic early terminal control"
+        )
+
+    for match in filter(top_level, re.finditer(r"\bdo\b", code)):
+        opening = task5_control_body_opening(code, match.start(), "do", name)
+        closing = balanced_brace_end(code, opening, f"Task 7 do statement in {name}")
+        if task7_has_direct_terminal(code[opening + 1 : closing]):
+            reject()
+
+    repeat_condition_positions: set[int] = set()
+    for match in filter(top_level, re.finditer(r"\brepeat\b", code)):
+        opening = task5_control_body_opening(code, match.start(), "repeat", name)
+        closing = balanced_brace_end(code, opening, f"Task 7 repeat statement in {name}")
+        if task7_has_direct_terminal(code[opening + 1 : closing]):
+            reject()
+        condition_start = task5_skip_swift_space(code, closing + 1)
+        if task5_swift_keyword_at(code, condition_start, "while"):
+            repeat_condition_positions.add(condition_start)
+
+    for keyword in ("if", "while", "guard"):
+        for match in filter(top_level, re.finditer(rf"\b{keyword}\b", code)):
+            if keyword == "while" and match.start() in repeat_condition_positions:
+                continue
+            opening = task5_control_body_opening(code, match.start(), keyword, name)
+            condition = code[match.end() : opening]
+            if keyword == "guard":
+                condition = re.sub(r"\belse[ \t\f\v\r\n]*$", "", condition)
+            selected = task5_constant_boolean(condition)
+            body = code[opening + 1 : balanced_brace_end(
+                code,
+                opening,
+                f"Task 7 {keyword} statement in {name}",
+            )]
+            if keyword == "if" and selected is True and task7_has_direct_terminal(body):
+                reject()
+            if keyword == "while" and selected is True:
+                reject()
+            if keyword == "guard" and selected is False:
+                reject()
+
+    for match in filter(top_level, re.finditer(r"\bswitch\b", code)):
+        opening = task5_control_body_opening(code, match.start(), "switch", name)
+        expression = re.sub(r"[\s()]", "", code[match.end() : opening])
+        if re.fullmatch(r"(?:true|false|-?[0-9]+)", expression) is None:
+            continue
+        closing = balanced_brace_end(code, opening, f"Task 7 switch statement in {name}")
+        body = task7_depth_zero_code(code[opening + 1 : closing])
+        selected_case = re.search(
+            rf"\bcase[ \t\f\v\r\n]+{re.escape(expression)}[ \t\f\v\r\n]*:"
+            rf"(?P<body>.*?)(?=\bcase\b|\bdefault\b|\Z)",
+            body,
+            re.DOTALL,
+        )
+        if selected_case and re.search(r"\b(?:return|throw)\b", selected_case.group("body")):
+            reject()
+
+
+def task7_control_body_kinds(code: str, name: str) -> dict[int, str]:
+    openings: dict[int, str] = {}
+    for keyword in (
+        "if", "else", "guard", "while", "for", "switch",
+        "do", "catch", "repeat", "defer",
+    ):
+        for match in re.finditer(rf"\b{keyword}\b", code):
+            if match.start() > 0 and code[match.start() - 1] == "#":
+                continue
+            try:
+                opening = task5_control_body_opening(
+                    code,
+                    match.start(),
+                    keyword,
+                    name,
+                )
+            except ValueError:
+                continue
+            openings.setdefault(opening, keyword)
+    return openings
+
+
+def task7_control_body_openings(code: str, name: str) -> set[int]:
+    return set(task7_control_body_kinds(code, name))
+
+
+def task7_method_owned_code(code: str, name: str) -> str:
+    """Blank every nested closure/function/type body, retaining method-owned control flow."""
+    control_openings = task7_control_body_openings(code, name)
+    pairs: dict[int, int] = {}
+    stack: list[int] = []
+    for index, character in enumerate(code):
+        if character == "{":
+            stack.append(index)
+        elif character == "}":
+            if not stack:
+                raise ValueError(f"Task 7 test {name} has an unmatched closing brace")
+            pairs[stack.pop()] = index
+    if stack:
+        raise ValueError(f"Task 7 test {name} has an incomplete nested body")
+
+    owned = list(code)
+    excluded_until = -1
+    for opening in sorted(pairs):
+        if opening < excluded_until:
+            continue
+        if opening in control_openings:
+            continue
+        closing = pairs[opening]
+        task5_blank_range(owned, opening, closing + 1)
+        excluded_until = closing + 1
+    return "".join(owned)
+
+
+def task7_constant_boolean(condition: str) -> bool | None:
+    selected = task5_constant_boolean(condition)
+    if selected is not None:
+        return selected
+    compact = re.sub(r"[\s()]", "", condition)
+    comparison = re.fullmatch(r"(-?[0-9]+)(==|!=|<=|>=|<|>)(-?[0-9]+)", compact)
+    if comparison is None:
+        return None
+    lhs = int(comparison.group(1))
+    rhs = int(comparison.group(3))
+    return {
+        "==": lhs == rhs,
+        "!=": lhs != rhs,
+        "<=": lhs <= rhs,
+        ">=": lhs >= rhs,
+        "<": lhs < rhs,
+        ">": lhs > rhs,
+    }[comparison.group(2)]
+
+
+def task7_is_statically_empty_iteration(clause: str) -> bool:
+    match = re.search(r"\bin\b(?P<expression>.*)\Z", clause, re.DOTALL)
+    if match is None:
+        return False
+    expression = re.sub(r"\s", "", match.group("expression"))
+    while expression.startswith("(") and expression.endswith(")"):
+        expression = expression[1:-1]
+    if expression == "[]":
+        return True
+    half_open = re.fullmatch(r"(-?[0-9]+)\.\.<(-?[0-9]+)", expression)
+    if half_open is not None:
+        return int(half_open.group(1)) >= int(half_open.group(2))
+    closed = re.fullmatch(r"(-?[0-9]+)\.\.\.(-?[0-9]+)", expression)
+    return closed is not None and int(closed.group(1)) > int(closed.group(2))
+
+
+def task7_has_reachable_outer_loop_break(code: str, name: str) -> bool:
+    """A break owned by a nested loop/switch cannot terminate the outer while."""
+    reachable = task5_code_with_unreachable_constant_branches_removed(code, name)
+    kinds = task7_control_body_kinds(reachable, name)
+    pairs: dict[int, int] = {}
+    stack: list[int] = []
+    for index, character in enumerate(reachable):
+        if character == "{":
+            stack.append(index)
+        elif character == "}":
+            if not stack:
+                raise ValueError(f"Task 7 test {name} has an unmatched closing brace")
+            pairs[stack.pop()] = index
+    if stack:
+        raise ValueError(f"Task 7 test {name} has an incomplete nested body")
+
+    outer_owned = list(reachable)
+    excluded_until = -1
+    for opening in sorted(pairs):
+        if opening < excluded_until:
+            continue
+        if kinds.get(opening) not in {"while", "for", "repeat", "switch"}:
+            continue
+        closing = pairs[opening]
+        task5_blank_range(outer_owned, opening, closing + 1)
+        excluded_until = closing + 1
+    return re.search(r"\bbreak\b", "".join(outer_owned)) is not None
+
+
+def task7_reject_method_owned_bypasses(code: str, path: Path, name: str) -> None:
+    def reject(detail: str) -> None:
+        raise ValueError(
+            f"Task 7 test {path.name}.{name} must retain reachable direct behavior "
+            f"without {detail}"
+        )
+
+    terminal = re.search(r"\b(?:return|throw)\b", code)
+    if terminal is not None:
+        reject("method-owned early return or throw")
+
+    repeat_condition_positions: set[int] = set()
+    for match in re.finditer(r"\brepeat\b", code):
+        try:
+            opening = task5_control_body_opening(code, match.start(), "repeat", name)
+            closing = balanced_brace_end(
+                code,
+                opening,
+                f"Task 7 repeat statement in {name}",
+            )
+        except ValueError:
+            continue
+        condition_start = task5_skip_swift_space(code, closing + 1)
+        if task5_swift_keyword_at(code, condition_start, "while"):
+            repeat_condition_positions.add(condition_start)
+            condition = code[condition_start + len("while") :]
+            line_end = condition.find("\n")
+            if line_end != -1:
+                condition = condition[:line_end]
+            if task7_constant_boolean(condition) is not None:
+                reject("constant repeat control")
+
+    for keyword in ("if", "guard", "while"):
+        for match in re.finditer(rf"\b{keyword}\b", code):
+            if keyword == "while" and match.start() in repeat_condition_positions:
+                continue
+            try:
+                opening = task5_control_body_opening(
+                    code,
+                    match.start(),
+                    keyword,
+                    name,
+                )
+                closing = balanced_brace_end(
+                    code,
+                    opening,
+                    f"Task 7 {keyword} statement in {name}",
+                )
+            except ValueError:
+                continue
+            condition = code[match.end() : opening]
+            if keyword == "guard":
+                condition = re.sub(r"\belse[ \t\f\v\r\n]*$", "", condition)
+            selected = task7_constant_boolean(condition)
+            if keyword in {"if", "guard"} and selected is not None:
+                reject(f"constant {keyword} control")
+            if keyword == "while" and selected is False:
+                reject("constant-unreachable while control")
+            if keyword == "while" and selected is True:
+                body = code[opening + 1 : closing]
+                if not task7_has_reachable_outer_loop_break(body, name):
+                    reject("unbounded constant while control")
+
+    for match in re.finditer(r"\bfor\b", code):
+        try:
+            opening = task5_control_body_opening(
+                code,
+                match.start(),
+                "for",
+                name,
+            )
+        except ValueError:
+            continue
+        if task7_is_statically_empty_iteration(code[match.end() : opening]):
+            reject("constant-unreachable for control")
+
+    for match in re.finditer(r"\bdo\b", code):
+        try:
+            opening = task5_control_body_opening(
+                code,
+                match.start(),
+                "do",
+                name,
+            )
+            closing = balanced_brace_end(
+                code,
+                opening,
+                f"Task 7 do statement in {name}",
+            )
+        except ValueError:
+            continue
+        catch_start = task5_skip_swift_space(code, closing + 1)
+        if not task5_swift_keyword_at(code, catch_start, "catch"):
+            continue
+        do_body = task7_method_owned_code(code[opening + 1 : closing], name)
+        can_reach_catch = re.search(r"\bthrow\b", do_body) is not None or re.search(
+            r"\btry\b(?![ \t\f\v\r\n]*[?!])",
+            do_body,
+        ) is not None
+        if not can_reach_catch:
+            reject("statically unreachable catch control")
+
+    for match in re.finditer(r"\bswitch\b", code):
+        try:
+            opening = task5_control_body_opening(code, match.start(), "switch", name)
+        except ValueError:
+            continue
+        expression = re.sub(r"[\s()]", "", code[match.end() : opening])
+        if re.fullmatch(r"(?:true|false|-?[0-9]+)", expression) or re.fullmatch(
+            r"Optional(?:<[^<>]+>)?\.none",
+            expression,
+        ):
+            reject("constant switch control")
+
+
+def task7_reachable_direct_method_body(method: str, path: Path, name: str) -> str:
+    lexical = task5_code_without_escaped_identifiers(method, name)
+    if re.search(r"\bXCTSkip(?:If|Unless)?\s*\(", lexical):
+        raise ValueError(
+            f"Task 7 test {path.name}.{name} must retain reachable direct behavior "
+            "without XCTest skips"
+        )
+    if re.search(r"\bXCTExpectFailure\s*\(", lexical):
+        raise ValueError(
+            f"Task 7 test {path.name}.{name} must retain reachable direct behavior "
+            "without expected-failure suppression"
+        )
+
+    method_owned = task7_method_owned_code(lexical, name)
+    task7_reject_method_owned_bypasses(method_owned, path, name)
+    reachable = task5_code_with_unreachable_constant_branches_removed(method_owned, name)
+    if reachable != method_owned:
+        raise ValueError(
+            f"Task 7 test {path.name}.{name} must retain reachable direct behavior "
+            "without constant-unreachable conditionals"
+        )
+    return reachable
+
+
+def verify_task7_test_contracts(
+    root: Path,
+    enforce_test_asset_digests: bool = True,
+) -> None:
+    for relative, (suite, main_actor, expected_methods, production_token) in TASK7_TEST_SUITES.items():
+        path = root / relative
+        if not path.is_file():
+            raise ValueError(f"Task 7 test contract is missing: {relative}")
+        source = path.read_text(encoding="utf-8")
+        methods = swift_xctest_suite_methods(source, suite, main_actor)
+        if set(methods) != expected_methods:
+            raise ValueError(f"Task 7 {suite} must retain every exact behavior test")
+        reachable_methods: list[str] = []
+        for name, body in methods.items():
+            reachable = task7_reachable_direct_method_body(body, path, name)
+            reachable_methods.append(reachable)
+            if not re.search(r"\bXCTAssert[A-Za-z0-9_]*\s*\(", reachable):
+                raise ValueError(
+                    f"Task 7 test {suite}.{name} must assert real production behavior "
+                    "with reachable direct behavior"
+                )
+        if not any(
+            re.search(rf"\b{re.escape(production_token)}\s*\(", body)
+            for body in reachable_methods
+        ):
+            raise ValueError(f"Task 7 {suite} must exercise {production_token}")
+    if enforce_test_asset_digests:
+        for relative in TASK7_TEST_SUITES:
+            actual_digest = hashlib.sha256((root / relative).read_bytes()).hexdigest()
+            if TASK7_TEST_ASSET_SHA256.get(relative) != actual_digest:
+                raise ValueError(f"Task 7 test asset digest mismatch: {relative}")
+
+
+def verify_task7_assets(root: Path) -> None:
+    verify_task7_test_contracts(root)
+    missing = [relative for relative in TASK7_PRODUCTION_PATHS if not (root / relative).is_file()]
+    if missing:
+        raise ValueError(f"Task 7 production contracts are missing: {missing}")
+
+    sources = {
+        relative: (root / relative).read_text(encoding="utf-8")
+        for relative in TASK7_PRODUCTION_PATHS
+    }
+    forbidden_imports = {"SwiftData", "PersistenceKit", "CoreModels", "ProgressPhotosKit"}
+    for relative, source in sources.items():
+        forbidden = swift_imported_modules(source) & forbidden_imports
+        if forbidden:
+            raise ValueError(
+                f"Task 7 ReportsKit export must remain persistence and photo-module neutral: "
+                f"{relative}: {sorted(forbidden)}"
+            )
+
+    required_tokens = {
+        TASK7_PRODUCTION_PATHS[0]: (
+            "schemaVersion", "selectedModules", "primaryTimestamp", "cells",
+            "sortedKeys", "withoutEscapingSlashes", "CanonicalExportScalarV1",
+        ),
+        TASK7_PRODUCTION_PATHS[1]: ("0xedb88320", "Accumulator", "checksum"),
+        TASK7_PRODUCTION_PATHS[2]: (
+            "0x0808", "0x0021", "0x08074b50", "Task.checkCancellation",
+            "FileHandle", "zip32LimitExceeded", "destinationExists", ".partial",
+            "O_NOFOLLOW", "Darwin.fstat", "createAnonymousFile",
+            "ReportExportDescriptorIO.clone", "acquireNamespaceLease",
+            "applyPublishedFileSecurity",
+        ),
+        TASK7_PRODUCTION_PATHS[3]: (
+            "schemaVersion", "includesPhotos", "sha256", "byteSize", "relativePath",
+            "included", "missing", "corrupt",
+        ),
+        TASK7_PRODUCTION_PATHS[4]: (
+            "openat", "mkdirat", "fstatat", "unlinkat", "renameatx_np",
+            "fclonefileat", "O_NOFOLLOW", "createAnonymousFile",
+            "cleanupDescriptorAllocation", "recoverDescriptorAllocation",
+            "F_SETPROTECTIONCLASS", "fsetxattr", "UF_APPEND", "UF_IMMUTABLE",
+            "F_GETPROTECTIONCLASS", "ReportExportDarwinProtectionClass.complete.rawValue",
+            "st_nlink", "RENAME_EXCL", "ReportExportNamespaceAuthority",
+            "ReportExportRootNamespaceRegistry", "originalFlags", "maximumEntries",
+            "maximumAttempts",
+        ),
+        TASK7_PRODUCTION_PATHS[5]: (
+            "photosRequireZIP", "fetchExportSnapshot", "json/export.json",
+            "csv/", "manifest.json", "photos/", ".allocation-id",
+            "applyCompleteFileProtection", "excludeFromBackup", "cleanup",
+            "ReportExportArtifactWorker", "ReportExportFileIdentity", "cleanupID",
+            "validateCurrentOwnership", "ReportExportLifecycleWorker",
+            "maximumRetryAttempts", "terminalRecovery",
+            "reserve(cleanupID:", "maximumRecoveryRecords",
+        ),
+        TASK7_PRODUCTION_PATHS[6]: (
+            "@Observable", "400_000_000", "activeGenerationID", "progressTask",
+            "shareDidFinish", "viewDidDisappear", "includesPhotos = false",
+        ),
+        TASK7_PRODUCTION_PATHS[7]: (
+            "ForEach(ExportModuleV1.allCases", "reports.export.photos",
+            "reports.export.action", "accessibilityIdentifier",
+        ),
+    }
+    for relative, tokens in required_tokens.items():
+        code = sources[relative]
+        if any(token not in code for token in tokens):
+            raise ValueError(f"Task 7 production contract is incomplete: {relative}")
+
+    coordinator_code = swift_code_without_comments_and_literals(sources[TASK7_PRODUCTION_PATHS[5]])
+    if any(private in coordinator_code for private in ("imageRef", "image_ref", "progress_photo_note")):
+        raise ValueError("Task 7 coordinator must never inspect private photo references or notes")
+    if "pendingCleanupTokens" in sources[TASK7_PRODUCTION_PATHS[6]]:
+        raise ValueError("Task 7 ViewModel must hand failed cleanup to the bounded registry")
+
+    localization_path = root / "Packages/HealthTrackingModules/Sources/ReportsKit/Resources/Localizable.xcstrings"
+    try:
+        localization = json.loads(localization_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("Task 7 localization catalog must remain valid JSON") from error
+    strings = localization.get("strings", {})
+    missing_keys = sorted(TASK7_LOCALIZATION_KEYS - set(strings))
+    if missing_keys:
+        raise ValueError(f"Task 7 Turkish localization keys are missing: {missing_keys}")
+    for key in TASK7_LOCALIZATION_KEYS:
+        value = (
+            strings.get(key, {}).get("localizations", {}).get("tr", {})
+            .get("stringUnit", {}).get("value")
+        )
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"Task 7 localization must provide non-empty Turkish text: {key}")
+
+    if TASK7_PRODUCTION_ASSET_SHA256:
+        if set(TASK7_PRODUCTION_ASSET_SHA256) != set(TASK7_PRODUCTION_PATHS):
+            raise ValueError("Task 7 production digest inventory must bind every owned source")
+        for relative in TASK7_PRODUCTION_PATHS:
+            actual_digest = hashlib.sha256((root / relative).read_bytes()).hexdigest()
+            if TASK7_PRODUCTION_ASSET_SHA256[relative] != actual_digest:
+                raise ValueError(f"Task 7 production asset digest mismatch: {relative}")
+
+
+def task7_real_asset_self_test(source_root: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="m4-task7-real-assets-") as directory:
+        fixture = Path(directory)
+        for relative in TASK7_TEST_SUITES:
+            destination = fixture / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_root / relative, destination)
+        verify_task7_test_contracts(fixture)
+
+        localization_relative = (
+            "Packages/HealthTrackingModules/Sources/ReportsKit/Resources/Localizable.xcstrings"
+        )
+        for relative in (*TASK7_PRODUCTION_PATHS, localization_relative):
+            destination = fixture / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_root / relative, destination)
+        verify_task7_assets(fixture)
+
+        production_tokens = {
+            TASK7_PRODUCTION_PATHS[0]: (".withoutEscapingSlashes",),
+            TASK7_PRODUCTION_PATHS[1]: ("0xedb88320",),
+            TASK7_PRODUCTION_PATHS[2]: (
+                "0x08074b50", "O_NOFOLLOW", "createAnonymousFile",
+                "ReportExportDescriptorIO.clone", "acquireNamespaceLease",
+            ),
+            TASK7_PRODUCTION_PATHS[3]: ("case corrupt",),
+            TASK7_PRODUCTION_PATHS[4]: (
+                "fclonefileat", "cleanupDescriptorAllocation", "openat",
+                "F_SETPROTECTIONCLASS", "F_GETPROTECTIONCLASS",
+                "ReportExportDarwinProtectionClass.complete.rawValue",
+                "fsetxattr", "UF_APPEND", "UF_IMMUTABLE",
+                "st_nlink", "renameatx_np", "RENAME_EXCL",
+                "ReportExportRootNamespaceRegistry", "originalFlags", "maximumEntries",
+            ),
+            TASK7_PRODUCTION_PATHS[5]: (
+                '".allocation-id"', "ReportExportArtifactWorker",
+                "ReportExportFileIdentity", "cleanupID", "reserve(cleanupID:",
+            ),
+            TASK7_PRODUCTION_PATHS[6]: ("400_000_000",),
+            TASK7_PRODUCTION_PATHS[7]: ("ForEach(ExportModuleV1.allCases",),
+        }
+        for relative, tokens in production_tokens.items():
+            path = fixture / relative
+            original = path.read_text(encoding="utf-8")
+            for token in tokens:
+                if token not in original:
+                    raise SystemExit(f"Task 7 production mutation source is missing: {token}")
+                path.write_text(original.replace(token, "removedTask7Token"), encoding="utf-8")
+                try:
+                    verify_task7_assets(fixture)
+                except ValueError as error:
+                    if "Task 7 production contract is incomplete" not in str(error):
+                        raise SystemExit(f"Task 7 production-token mutation failed incorrectly: {error}") from error
+                else:
+                    raise SystemExit("Task 7 production-token mutation escaped")
+                path.write_text(original, encoding="utf-8")
+
+        coordinator = fixture / TASK7_PRODUCTION_PATHS[5]
+        original_coordinator = coordinator.read_text(encoding="utf-8")
+        coordinator.write_text(original_coordinator + "\nimport ProgressPhotosKit\n", encoding="utf-8")
+        try:
+            verify_task7_assets(fixture)
+        except ValueError as error:
+            if "persistence and photo-module neutral" not in str(error):
+                raise SystemExit(f"Task 7 import mutation failed incorrectly: {error}") from error
+        else:
+            raise SystemExit("Task 7 import mutation escaped")
+        coordinator.write_text(original_coordinator, encoding="utf-8")
+
+        localization_path = fixture / localization_relative
+        original_localization = localization_path.read_text(encoding="utf-8")
+        localization = json.loads(original_localization)
+        del localization["strings"][sorted(TASK7_LOCALIZATION_KEYS)[0]]
+        localization_path.write_text(json.dumps(localization), encoding="utf-8")
+        try:
+            verify_task7_assets(fixture)
+        except ValueError as error:
+            if "Turkish localization keys are missing" not in str(error):
+                raise SystemExit(f"Task 7 localization mutation failed incorrectly: {error}") from error
+        else:
+            raise SystemExit("Task 7 localization mutation escaped")
+        localization_path.write_text(original_localization, encoding="utf-8")
+
+        for relative in TASK7_PRODUCTION_PATHS:
+            path = fixture / relative
+            original = path.read_text(encoding="utf-8")
+            path.write_text(original + "\nprivate let task7DigestMutation = true\n", encoding="utf-8")
+            try:
+                verify_task7_assets(fixture)
+            except ValueError as error:
+                if "Task 7 production asset digest mismatch" not in str(error):
+                    raise SystemExit(f"Task 7 production-digest mutation failed incorrectly: {error}") from error
+            else:
+                raise SystemExit("Task 7 production-digest mutation escaped")
+            path.write_text(original, encoding="utf-8")
+
+        verify_task7_assets(fixture)
+
+        for relative in TASK7_TEST_SUITES:
+            path = fixture / relative
+            original = path.read_text(encoding="utf-8")
+            path.unlink()
+            try:
+                verify_task7_test_contracts(fixture)
+            except ValueError as error:
+                if "Task 7 test contract is missing" not in str(error):
+                    raise SystemExit(f"Task 7 missing-test mutation failed incorrectly: {error}") from error
+            else:
+                raise SystemExit("Task 7 missing-test mutation escaped")
+            path.write_text(original, encoding="utf-8")
+
+        for relative, (_, _, methods, production_token) in TASK7_TEST_SUITES.items():
+            path = fixture / relative
+            original = path.read_text(encoding="utf-8")
+            method = sorted(methods)[0]
+
+            for label, prefix, suffix in (
+                (
+                    "empty array whole-method wrapper",
+                    "\n        for _ in [] {\n",
+                    "\n        }\n",
+                ),
+                (
+                    "empty range whole-method wrapper",
+                    "\n        for _ in 0..<0 {\n",
+                    "\n        }\n",
+                ),
+                (
+                    "nonthrowing do-catch whole-method wrapper",
+                    "\n        do { XCTAssertTrue(true) } catch {\n",
+                    "\n        }\n",
+                ),
+                (
+                    "try-optional do-catch whole-method wrapper",
+                    "\n        do { try? Task.checkCancellation() } catch {\n",
+                    "\n        }\n",
+                ),
+                (
+                    "try-forced do-catch whole-method wrapper",
+                    "\n        do { try! Task.checkCancellation() } catch {\n",
+                    "\n        }\n",
+                ),
+                (
+                    "constant optional switch whole-method wrapper",
+                    "\n        switch Optional<Int>.none {\n        case .some:\n",
+                    "\n        case .none:\n            break\n        }\n",
+                ),
+            ):
+                mutated = wrap_named_test_body(original, method, prefix, suffix)
+                path.write_text(mutated, encoding="utf-8")
+                canonical_digest = TASK7_TEST_ASSET_SHA256[relative]
+                TASK7_TEST_ASSET_SHA256[relative] = hashlib.sha256(
+                    path.read_bytes()
+                ).hexdigest()
+                try:
+                    verify_task7_test_contracts(fixture)
+                except ValueError as error:
+                    if "reachable direct behavior" not in str(error):
+                        raise SystemExit(
+                            f"Task 7 rebound-digest {label} mutation failed incorrectly: {error}"
+                        ) from error
+                else:
+                    raise SystemExit(
+                        f"Task 7 rebound-digest {label} mutation escaped"
+                    )
+                finally:
+                    TASK7_TEST_ASSET_SHA256[relative] = canonical_digest
+                    path.write_text(original, encoding="utf-8")
+
+            path.write_text(original.replace(f"func {method}", f"func removed{method}", 1), encoding="utf-8")
+            try:
+                verify_task7_test_contracts(fixture, enforce_test_asset_digests=False)
+            except ValueError as error:
+                if "retain every exact behavior test" not in str(error):
+                    raise SystemExit(f"Task 7 behavior mutation failed incorrectly: {error}") from error
+            else:
+                raise SystemExit("Task 7 behavior mutation escaped")
+            path.write_text(original, encoding="utf-8")
+
+            method_start = original.index(f"func {method}")
+            method_opening = original.index("{", method_start)
+            for label, inserted in (
+                ("XCTSkip", "\n        throw XCTSkip()\n"),
+                ("XCTExpectFailure", "\n        XCTExpectFailure()\n"),
+                ("direct return", "\n        return\n"),
+                ("direct throw", "\n        throw CancellationError()\n"),
+                ("dead conditional", "\n        if false { XCTAssertTrue(true) }\n"),
+                ("constant true return", "\n        if true { return }\n"),
+                ("unconditional do return", "\n        do { return }\n"),
+                ("constant while return", "\n        while true { return }\n"),
+                ("constant guard return", "\n        guard false else { return }\n"),
+                ("repeat return", "\n        repeat { return } while false\n"),
+                (
+                    "constant switch return",
+                    "\n        switch true { case true: return; case false: break }\n",
+                ),
+                ("nested if do return", "\n        if true { do { return } }\n"),
+                ("nested do if return", "\n        do { if true { return } }\n"),
+                ("constant equality return", "\n        if 1 == 1 { return }\n"),
+                ("single iteration for return", "\n        for _ in [0] { return }\n"),
+                ("constant switch default return", "\n        switch true { default: return }\n"),
+                (
+                    "nested repeat guard return",
+                    "\n        do { repeat { guard false else { return } } while false }\n",
+                ),
+                (
+                    "nested switch break does not exit infinite while",
+                    "\n        while true {\n"
+                    "            switch Bool.random() { default: break }\n"
+                    "        }\n",
+                ),
+            ):
+                mutated = original[: method_opening + 1] + inserted + original[method_opening + 1 :]
+                path.write_text(mutated, encoding="utf-8")
+                try:
+                    verify_task7_test_contracts(fixture, enforce_test_asset_digests=False)
+                except ValueError as error:
+                    if "reachable direct behavior" not in str(error):
+                        raise SystemExit(
+                            f"Task 7 {label} mutation failed incorrectly: {error}"
+                        ) from error
+                else:
+                    raise SystemExit(f"Task 7 {label} mutation escaped")
+
+            method_code = swift_code_without_comments_and_literals(original)
+            declaration = method_code.index(f"func {method}")
+            opening = method_code.index("{", declaration)
+            closing = balanced_brace_end(method_code, opening, f"Task 7 self-test {method}")
+            for label, replacement in (
+                (
+                    "unused assertion closure",
+                    "\n        let hiddenBehavior = {\n"
+                    f"            _ = {production_token}()\n"
+                    "            XCTAssertTrue(true)\n"
+                    "        }\n",
+                ),
+                (
+                    "unused local assertion function",
+                    "\n        func hiddenBehavior() {\n"
+                    f"            _ = {production_token}()\n"
+                    "            XCTAssertTrue(true)\n"
+                    "        }\n",
+                ),
+                (
+                    "unused anonymous assertion closure array",
+                    "\n        let hiddenBehaviors = [{\n"
+                    f"            _ = {production_token}()\n"
+                    "            XCTAssertTrue(true)\n"
+                    "        }]\n"
+                    "        _ = hiddenBehaviors.count\n",
+                ),
+                (
+                    "discarded anonymous assertion closure array",
+                    "\n        _ = [{\n"
+                    f"            _ = {production_token}()\n"
+                    "            XCTAssertTrue(true)\n"
+                    "        }]\n",
+                ),
+                (
+                    "bare unused anonymous assertion closure array",
+                    "\n        [{\n"
+                    f"            _ = {production_token}()\n"
+                    "            XCTAssertTrue(true)\n"
+                    "        }]\n",
+                ),
+            ):
+                mutated = original[: opening + 1] + replacement + original[closing:]
+                path.write_text(mutated, encoding="utf-8")
+                try:
+                    verify_task7_test_contracts(fixture, enforce_test_asset_digests=False)
+                except ValueError as error:
+                    if "reachable direct behavior" not in str(error):
+                        raise SystemExit(
+                            f"Task 7 {label} mutation failed incorrectly: {error}"
+                        ) from error
+                else:
+                    raise SystemExit(f"Task 7 {label} mutation escaped")
+            path.write_text(original, encoding="utf-8")
+
+            reachable_loop = (
+                original[: method_opening + 1]
+                + "\n        var task7LoopReached = false\n"
+                + "        while true {\n"
+                + "            task7LoopReached = true\n"
+                + "            break\n"
+                + "        }\n"
+                + "        XCTAssertTrue(task7LoopReached)\n"
+                + original[method_opening + 1 :]
+            )
+            path.write_text(reachable_loop, encoding="utf-8")
+            try:
+                verify_task7_test_contracts(fixture, enforce_test_asset_digests=False)
+            except ValueError as error:
+                raise SystemExit(
+                    f"Task 7 reachable while-break mutation was falsely rejected: {error}"
+                ) from error
+            path.write_text(original, encoding="utf-8")
+
+            path.write_text(
+                re.sub(
+                    rf"\b{re.escape(production_token)}(?=\s*\()",
+                    "RemovedProductionToken",
+                    original,
+                ),
+                encoding="utf-8",
+            )
+            try:
+                verify_task7_test_contracts(fixture, enforce_test_asset_digests=False)
+            except ValueError as error:
+                if f"must exercise {production_token}" not in str(error):
+                    raise SystemExit(f"Task 7 production-token mutation failed incorrectly: {error}") from error
+            else:
+                raise SystemExit("Task 7 production-token mutation escaped")
+            path.write_text(original + "\n// Task 7 copied-real digest mutation.\n", encoding="utf-8")
+            try:
+                verify_task7_test_contracts(fixture)
+            except ValueError as error:
+                if "Task 7 test asset digest mismatch" not in str(error):
+                    raise SystemExit(f"Task 7 digest mutation failed incorrectly: {error}") from error
+            else:
+                raise SystemExit("Task 7 digest mutation escaped")
+            path.write_text(original, encoding="utf-8")
+
+        verify_task7_test_contracts(fixture)
+
+
 def expect_failure(root: Path, expected: str) -> None:
     try:
         verify(root)
@@ -5387,6 +6459,9 @@ def replace_nth_once(path: Path, before: str, after: str, occurrence: int) -> st
 
 def fixture_workflow() -> str:
     run = "\n".join("          " + line for line in ROUTED_RUN.splitlines())
+    device_run = "\n".join(
+        "          " + line for line in TASK7_DEVICE_BUILD_RUN.splitlines()
+    )
     return f"""name: iOS
 jobs:
   test:
@@ -5404,6 +6479,10 @@ jobs:
       - name: Focused M4 routed static gates and tests
         run: |
 {run}
+      - name: Compile Task 7 device filesystem branch
+        if: {TASK7_DEVICE_BUILD_GUARD}
+        run: |
+{device_run}
 """
 
 
@@ -5443,6 +6522,7 @@ def self_test(source_root: Path) -> None:
             ("      - uses: actions/checkout@v4\n", "      - uses: actions/checkout@v4\n        \"\\x63ontinue-on-error\": true\n", "canonical direct mapping syntax"),
             ("scripts/test-ios.sh --focused-testing ReportsKitTests", "scripts/test-ios.sh --only-testing ReportsKitTests", "every exact executable M4 selector"),
             ("set -euo pipefail", "echo 'scripts/test-ios.sh --focused-testing HealthTrackingAppTests'", "every exact executable M4 selector"),
+            ("-destination 'generic/platform=iOS'", "-destination 'platform=iOS Simulator'", "exact Task 7 device-only branch"),
         )
         for before, after, expected in mutations:
             original = replace_once(workflow, before, after)
@@ -5487,12 +6567,14 @@ if mode == "--self-test":
     task4_real_asset_self_test(root)
     task5_real_asset_self_test(root)
     task6_real_asset_self_test(root)
+    task7_real_asset_self_test(root)
     print("M4 focused CI verifier self-tests passed.")
 elif mode == "":
     verify(root)
     verify_reports_architecture(root)
     verify_task5_assets(root)
     verify_task6_assets(root)
+    verify_task7_assets(root)
     print("M4 reports verification passed.")
 else:
     raise SystemExit("Usage: scripts/verify-m4-reports.sh [--self-test]")
