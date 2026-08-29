@@ -378,6 +378,240 @@ def swift_imported_modules(source: str) -> set[str]:
     return modules
 
 
+def balanced_brace_end(code: str, opening: int, label: str) -> int:
+    depth = 1
+    cursor = opening + 1
+    while cursor < len(code) and depth:
+        if code[cursor] == "{":
+            depth += 1
+        elif code[cursor] == "}":
+            depth -= 1
+        cursor += 1
+    if depth:
+        raise ValueError(f"{label} must have a complete body")
+    return cursor - 1
+
+
+def swift_xctest_suite_methods(
+    source: str,
+    suite_name: str,
+    require_main_actor: bool,
+) -> dict[str, str]:
+    code = swift_code_without_comments_and_literals(source)
+    identifier = r"[A-Za-z_][A-Za-z0-9_]*"
+    attribute = rf"@{identifier}(?:[ \t\f\v]*\([^()\r\n]*\))?"
+    named_suite = re.compile(
+        rf"\b(?:final[ \t\f\v\r\n]+)?class[ \t\f\v\r\n]+"
+        rf"{re.escape(suite_name)}\b"
+    )
+    exact_suite = re.compile(
+        rf"(?P<attributes>(?:{attribute}[ \t\f\v\r\n]+)*)"
+        rf"\bfinal[ \t\f\v\r\n]+class[ \t\f\v\r\n]+"
+        rf"{re.escape(suite_name)}[ \t\f\v\r\n]*"
+        rf":[ \t\f\v\r\n]*XCTestCase\b[^{{}}]*\{{"
+    )
+    named_matches = list(named_suite.finditer(code))
+    exact_matches = list(exact_suite.finditer(code))
+    if len(named_matches) != 1 or len(exact_matches) != 1:
+        raise ValueError(f"{suite_name} must define one expected concrete XCTestCase suite")
+    suite = exact_matches[0]
+    if require_main_actor and re.search(r"@MainActor\b", suite.group("attributes")) is None:
+        raise ValueError(f"{suite_name} must define one expected concrete XCTestCase suite")
+    opening = suite.end() - 1
+    closing = balanced_brace_end(code, opening, f"Task 3 suite {suite_name}")
+    suite_body = code[opening + 1 : closing]
+
+    depths: list[int] = []
+    depth = 0
+    for character in suite_body:
+        depths.append(depth)
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+
+    declaration = re.compile(
+        r"\bfunc[ \t\f\v\r\n]+(test[A-Za-z0-9_]*)[ \t\f\v]*"
+        r"\([^)]*\)[^{]*\{",
+        re.MULTILINE,
+    )
+    methods: dict[str, str] = {}
+    for match in declaration.finditer(suite_body):
+        if depths[match.start()] != 0:
+            continue
+        name = match.group(1)
+        if name in methods:
+            raise ValueError(f"Task 3 tests must not duplicate test method {name}")
+        opening = match.end() - 1
+        closing = balanced_brace_end(
+            suite_body,
+            opening,
+            f"Task 3 test method {name}",
+        )
+        methods[name] = suite_body[opening + 1 : closing]
+    return methods
+
+
+TASK3_BUILDER_TEST_BEHAVIORS = {
+    "testEmptyLogIsMissingWhileActualZeroProteinEntryIsAnObservedMiss": (
+        "ProteinAdherenceBuilder.build(days:",
+        "entryCount: 0, proteinTotalG: 0, proteinTargetG: 100",
+        "entryCount: 1, proteinTotalG: 0, proteinTargetG: 100",
+        "XCTAssertEqual(report.observedDayCount, 1)",
+        "XCTAssertEqual(report.targetDayCount, 1)",
+        "XCTAssertEqual(report.hitDayCount, 0)",
+        "XCTAssertEqual(report.excludedTargetlessDayCount, 0)",
+        "XCTAssertEqual(report.adherencePercent, 0)",
+    ),
+    "testInvalidAndMissingTargetsAreExcludedAndZeroDenominatorIsNil": (
+        "ProteinAdherenceBuilder.build(days:",
+        "proteinTargetG: nil",
+        "proteinTargetG: 0",
+        "proteinTargetG: -1",
+        "proteinTargetG: .nan",
+        "proteinTargetG: .infinity",
+        "XCTAssertEqual(report.observedDayCount, 5)",
+        "XCTAssertEqual(report.targetDayCount, 0)",
+        "XCTAssertEqual(report.hitDayCount, 0)",
+        "XCTAssertEqual(report.excludedTargetlessDayCount, 5)",
+        "XCTAssertNil(report.adherencePercent)",
+        "XCTAssertEqual(report.provenance, .currentProfileAppliedToObservedDays)",
+    ),
+    "testAdherenceUsesOnlyObservedDaysWithValidCurrentProfileTarget": (
+        "ProteinAdherenceBuilder.build(days:",
+        "proteinTotalG: 99.999, proteinTargetG: 100",
+        "proteinTotalG: 100, proteinTargetG: 100",
+        "proteinTotalG: 150, proteinTargetG: 100",
+        "entryCount: 0, proteinTotalG: 0, proteinTargetG: 100",
+        "XCTAssertEqual(report.observedDayCount, 3)",
+        "XCTAssertEqual(report.targetDayCount, 3)",
+        "XCTAssertEqual(report.hitDayCount, 2)",
+        "XCTUnwrap(report.adherencePercent)",
+        "200.0 / 3.0",
+        "accuracy: 0.000_000_000_001",
+        "XCTAssertEqual(report.provenance, .currentProfileAppliedToObservedDays)",
+    ),
+    "testDuplicateObservedDayFailsWithStableIDsRegardlessOfInputOrder": (
+        "ProteinAdherenceBuilder.build(days: records)",
+        "for records in [[higher, lower], [lower, higher]]",
+        "XCTAssertThrowsError",
+        ".duplicateObservedDay(",
+        "date: lower.date",
+        "recordIDs: [lower.id, higher.id]",
+    ),
+    "testInvalidObservedDayFailureSelectsLowestStableID": (
+        "proteinTotalG: -.infinity",
+        "proteinTotalG: .nan",
+        "ProteinAdherenceBuilder.build(days: records)",
+        "for records in [[higher, lower], [lower, higher]]",
+        "XCTAssertThrowsError",
+        ".invalidObservedDay(id: lower.id)",
+    ),
+    "testProteinReportContractsAreEquatableAndSendable": (
+        "assertEquatableSendable(ProteinTargetProvenance.self)",
+        "assertEquatableSendable(ProteinAdherenceBuilderError.self)",
+        "assertEquatableSendable(ProteinAdherenceReport.self)",
+    ),
+}
+
+TASK3_REPOSITORY_TEST_BEHAVIORS = {
+    "testNutritionProjectionUsesActualEntriesLocalDaysSnapshotsAndCurrentProfileWithoutMutation": (
+        "UserProfile(",
+        "proteinTargetG: 100",
+        "mealEntry(",
+        "proteinG: 0",
+        "proteinG: 40",
+        "proteinG: 70",
+        "proteinG: 50",
+        "SwiftDataReportsRepository(modelContext: reader, calendar: calendar)",
+        "repository.fetchDashboardSource(in: interval)",
+        "XCTAssertEqual(first, second)",
+        r"XCTAssertEqual(first.nutritionDayRecords.map(\.id), [zeroDay.id, hitDay.id, missDay.id])",
+        r"XCTAssertEqual(first.nutritionDayRecords.map(\.entryCount), [1, 2, 1])",
+        r"XCTAssertEqual(first.nutritionDayRecords.map(\.proteinTotalG), [0, 110, 50])",
+        r"XCTAssertEqual(first.nutritionDayRecords.map(\.proteinTargetG), [100, 100, 100])",
+        "XCTAssertEqual(first.coverage.observedCount, 3)",
+        "XCTAssertFalse(reader.hasChanges)",
+        "XCTAssertEqual(try nutritionFieldSnapshot(in: container), before)",
+    ),
+    "testMissingOrInvalidCurrentProfileTargetProducesTargetlessObservedDays": (
+        "let targets: [Double?] = [nil, .nan, 0, -1, .infinity]",
+        "mealEntry(",
+        "if let target",
+        "UserProfile(proteinTargetG: target)",
+        "fetchDashboardSource(in: broadInterval())",
+        "XCTAssertEqual(source.nutritionDayRecords.count, 1)",
+        "XCTAssertNil(source.nutritionDayRecords.first?.proteinTargetG)",
+    ),
+    "testNutritionDuplicateLogicalDayAndProfileAmbiguityFailDeterministically": (
+        "duplicateDayInterval",
+        "for reverse in [false, true]",
+        "fetchDashboardSource(in: duplicateDayInterval)",
+        ".duplicateNutritionDay(",
+        "calendar.startOfDay(for: logs[0].date)",
+        "nutritionLogIDs: [lowerLogID, higherLogID]",
+        ".ambiguousUserProfiles(profileIDs: [lowerProfileID, higherProfileID])",
+    ),
+    "testSelectedNutritionEntryCorruptionAndMissingRelationshipFailWithStableTypedErrors": (
+        "for reverse in [false, true]",
+        "proteinG: -.infinity",
+        "proteinG: .nan",
+        "fetchDashboardSource(in: broadInterval())",
+        ".invalidMealEntry(id: lowerID)",
+        "log: nil",
+        ".mealEntryMissingNutritionLog(id: orphanID)",
+        "XCTAssertFalse(orphanReader.hasChanges)",
+    ),
+    "testSelectedNutritionIdentityCollisionsFailWithoutRebindingRows": (
+        "sharedLogID",
+        "fetchDashboardSource(in: broadInterval())",
+        ".duplicateNutritionLogIDs(id: sharedLogID, count: 2)",
+        "sharedEntryID",
+        ".duplicateMealEntryIDs(id: sharedEntryID, count: 2)",
+    ),
+}
+
+
+def compact_swift_tokens(source: str) -> str:
+    return re.sub(r"[ \t\f\v\r\n]+", "", source)
+
+
+def verify_meaningful_task3_tests(
+    path: Path,
+    suite_name: str,
+    require_main_actor: bool,
+    behavior_contracts: dict[str, tuple[str, ...]],
+) -> None:
+    methods = swift_xctest_suite_methods(
+        path.read_text(encoding="utf-8"),
+        suite_name,
+        require_main_actor,
+    )
+    required_names = set(behavior_contracts)
+    if len(methods) < len(required_names) or not required_names.issubset(methods):
+        raise ValueError(
+            f"{path.name} must retain a nonzero suite of meaningful Task 3 tests"
+        )
+    assertion = re.compile(r"\b(?:XCTAssert|assert)[A-Z][A-Za-z0-9_]*\s*\(")
+    assertionless = sorted(name for name in required_names if assertion.search(methods[name]) is None)
+    if assertionless:
+        raise ValueError(
+            f"{path.name} must retain meaningful Task 3 tests with assertions: {assertionless}"
+        )
+    for name, required_fragments in behavior_contracts.items():
+        body = compact_swift_tokens(methods[name])
+        missing = [
+            fragment
+            for fragment in required_fragments
+            if compact_swift_tokens(fragment) not in body
+        ]
+        if missing:
+            raise ValueError(
+                f"{path.name} must retain behavioral Task 3 test contracts in {name}: "
+                f"{missing}"
+            )
+
+
 def verify_reports_architecture(root: Path) -> None:
     required_sources = (
         "DateRange/ReportDateRange.swift",
@@ -443,6 +677,104 @@ def verify_reports_architecture(root: Path) -> None:
     if re.search(r'\.\s*(?:insert|delete|save|rollback)\s*\(', repository_code):
         raise ValueError("SwiftDataReportsRepository must remain read-only")
 
+    task3_sources = (
+        reports_root / "Domain/ProteinAdherenceReport.swift",
+        reports_root / "Builders/ProteinAdherenceBuilder.swift",
+    )
+    missing_task3 = [str(path.relative_to(root)) for path in task3_sources if not path.is_file()]
+    if missing_task3:
+        raise ValueError(f"Reports Task 3 production contracts are missing: {missing_task3}")
+
+    protein_report_code = swift_code_without_comments_and_literals(
+        task3_sources[0].read_text(encoding="utf-8")
+    )
+    if (
+        re.search(r'\bcase\s+currentProfileAppliedToObservedDays\b', protein_report_code) is None
+        or re.search(r'\badherencePercent\s*:\s*Double\s*\?', protein_report_code) is None
+    ):
+        raise ValueError("Protein report must preserve optional adherence and exact current-profile provenance")
+
+    protein_builder_code = swift_code_without_comments_and_literals(
+        task3_sources[1].read_text(encoding="utf-8")
+    )
+    observed_filter = re.search(
+        r'\blet\s+observedDays\s*=\s*days\s*\.\s*filter\s*\{[^}]*'
+        r'entryCount\s*>\s*0[^}]*\}',
+        protein_builder_code,
+    )
+    target_filter = re.search(
+        r'\blet\s+targetDays\s*=\s*observedDays\s*\.\s*filter\s*\{',
+        protein_builder_code,
+    )
+    valid_target = re.search(
+        r'\bproteinTargetG\s*\.\s*map\s*\{\s*\$0\s*\.\s*isFinite\s*'
+        r'&&\s*\$0\s*>\s*0(?:\.0*)?\s*\}\s*==\s*true\b',
+        protein_builder_code,
+    )
+    hit_comparison = re.search(
+        r'\bproteinTotalG\s*>=\s*target\b',
+        protein_builder_code,
+    )
+    target_denominator = re.search(
+        r'Double\s*\(\s*hitDays\s*\.\s*count\s*\)\s*/\s*'
+        r'Double\s*\(\s*targetDays\s*\.\s*count\s*\)',
+        protein_builder_code,
+    )
+    scaled_percentage = re.search(
+        r'Double\s*\(\s*hitDays\s*\.\s*count\s*\)\s*/\s*'
+        r'Double\s*\(\s*targetDays\s*\.\s*count\s*\)\s*\*\s*100(?:\.0*)?\b',
+        protein_builder_code,
+    )
+    if observed_filter is None or target_filter is None:
+        raise ValueError("Protein adherence denominator must use actual observed entry days with valid targets")
+    if valid_target is None:
+        raise ValueError("Protein adherence target must be finite and greater than zero")
+    if hit_comparison is None:
+        raise ValueError("Protein adherence protein hit must include equality")
+    if target_denominator is None:
+        raise ValueError("Protein adherence denominator must use actual observed entry days")
+    if scaled_percentage is None:
+        raise ValueError("Protein adherence percentage scale must multiply by 100")
+
+    task3_tests = (
+        root
+        / "Packages/HealthTrackingModules/Tests/ReportsKitTests/ProteinAdherenceBuilderTests.swift",
+        root
+        / "Packages/HealthTrackingModules/Tests/PersistenceKitTests/ReportsRepositoryTests.swift",
+    )
+    missing_task3_tests = [
+        str(path.relative_to(root)) for path in task3_tests if not path.is_file()
+    ]
+    if missing_task3_tests:
+        raise ValueError(f"Task 3 test contracts are missing: {missing_task3_tests}")
+    verify_meaningful_task3_tests(
+        task3_tests[0],
+        "ProteinAdherenceBuilderTests",
+        False,
+        TASK3_BUILDER_TEST_BEHAVIORS,
+    )
+    verify_meaningful_task3_tests(
+        task3_tests[1],
+        "ReportsRepositoryTests",
+        True,
+        TASK3_REPOSITORY_TEST_BEHAVIORS,
+    )
+
+    if re.search(r'\bCalendar\s*\.\s*current\b', repository_code):
+        raise ValueError("SwiftDataReportsRepository must use its injected calendar")
+    if (
+        re.search(r'\bcalendar\s*:\s*Calendar\b', repository_code) is None
+        or re.search(r'\bguard\s*!\s*entries\s*\.\s*isEmpty\s*else\s*\{\s*continue\s*\}', repository_code) is None
+    ):
+        raise ValueError("Nutrition projection must inject Calendar and skip empty nutrition logs")
+
+    for source in (task3_sources[1], task2_sources[2]):
+        code = swift_code_without_comments_and_literals(source.read_text(encoding="utf-8"))
+        if nil_to_zero.search(code):
+            raise ValueError(
+                f"Reports Task 3 must not coerce missing protein targets to zero: {source.relative_to(root)}"
+            )
+
     forbidden_imports = {"CloudKit", "PersistenceKit", "PhotosUI", "SwiftData"}
     for source in reports_root.rglob("*.swift"):
         text = source.read_text(encoding="utf-8")
@@ -489,6 +821,8 @@ def reports_architecture_self_test(source_root: Path) -> None:
             "Presentation/ReportsDashboardViewModel.swift",
             "Domain/BodyStrengthReport.swift",
             "Builders/BodyStrengthDatasetBuilder.swift",
+            "Domain/ProteinAdherenceReport.swift",
+            "Builders/ProteinAdherenceBuilder.swift",
         ):
             path = reports_root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -501,14 +835,47 @@ def reports_architecture_self_test(source_root: Path) -> None:
                     "let eligible = relevant.filter { !$0.isWarmup }\n"
                     "let estimate = EpleyEstimate.calculate(weightKg: weight, reps: reps)\n"
                 )
+            if relative == "Domain/ProteinAdherenceReport.swift":
+                contents += (
+                    "enum ProteinTargetProvenance { case currentProfileAppliedToObservedDays }\n"
+                    "struct ProteinAdherenceReport { let adherencePercent: Double? }\n"
+                )
+            if relative == "Builders/ProteinAdherenceBuilder.swift":
+                contents += (
+                    "let observedDays = days.filter { $0.entryCount > 0 }\n"
+                    "let targetDays = observedDays.filter { "
+                    "$0.proteinTargetG.map { $0.isFinite && $0 > 0 } == true }\n"
+                    "let hitDays = targetDays.filter { day in "
+                    "let target = day.proteinTargetG!; return day.proteinTotalG >= target }\n"
+                    "let adherencePercent = targetDays.isEmpty ? nil : "
+                    "Double(hitDays.count) / Double(targetDays.count) * 100\n"
+                )
             path.write_text(contents, encoding="utf-8")
 
+        task3_repository_contents = (
+            "import Foundation\n"
+            "struct RepositoryFixture {\n"
+            "let calendar: Calendar\n"
+            "init(calendar: Calendar) { self.calendar = calendar }\n"
+            "func project() { for entries in allEntries { "
+            "guard !entries.isEmpty else { continue } } }\n"
+            "}\n"
+        )
         task2_repository = (
             fixture
             / "Packages/HealthTrackingModules/Sources/PersistenceKit/Repositories/SwiftDataReportsRepository.swift"
         )
         task2_repository.parent.mkdir(parents=True, exist_ok=True)
-        task2_repository.write_text("import Foundation\n", encoding="utf-8")
+        task2_repository.write_text(task3_repository_contents, encoding="utf-8")
+
+        for relative in (
+            "Tests/ReportsKitTests/ProteinAdherenceBuilderTests.swift",
+            "Tests/PersistenceKitTests/ReportsRepositoryTests.swift",
+        ):
+            source = source_root / "Packages/HealthTrackingModules" / relative
+            destination = fixture / "Packages/HealthTrackingModules" / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
 
         verify_reports_architecture(fixture)
 
@@ -635,7 +1002,7 @@ import PhotosUI
 
         task2_repository.unlink()
         expect_architecture_failure(fixture, "Task 2 production contracts are missing")
-        task2_repository.write_text("import Foundation\n", encoding="utf-8")
+        task2_repository.write_text(task3_repository_contents, encoding="utf-8")
 
         task2_builder.write_text(
             original_builder.replace("EpleyEstimate.calculate", "LocalEstimate.calculate"),
@@ -684,11 +1051,47 @@ import PhotosUI
             source.write_text(original, encoding="utf-8")
 
         task2_repository.write_text(
-            "import Foundation\nfunc mutate() { let alias = modelContext; try alias.save() }\n",
+            task3_repository_contents
+            + "func mutate() { let alias = modelContext; try alias.save() }\n",
             encoding="utf-8",
         )
         expect_architecture_failure(fixture, "must remain read-only")
-        task2_repository.write_text("import Foundation\n", encoding="utf-8")
+        task2_repository.write_text(task3_repository_contents, encoding="utf-8")
+
+        task3_report = reports_root / "Domain/ProteinAdherenceReport.swift"
+        original_task3_report = task3_report.read_text(encoding="utf-8")
+        task3_report.unlink()
+        expect_architecture_failure(fixture, "Task 3 production contracts are missing")
+        task3_report.write_text(original_task3_report, encoding="utf-8")
+
+        task3_builder = reports_root / "Builders/ProteinAdherenceBuilder.swift"
+        original_task3_builder = task3_builder.read_text(encoding="utf-8")
+        task3_builder.write_text(
+            original_task3_builder.replace(
+                "Double(hitDays.count) / Double(targetDays.count)",
+                "Double(hitDays.count) / Double(calendarDayCount)",
+            ),
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "denominator must use actual observed entry days")
+        task3_builder.write_text(original_task3_builder, encoding="utf-8")
+
+        task2_repository.write_text(
+            task3_repository_contents.replace(
+                "guard !entries.isEmpty else { continue }",
+                "if entries.isEmpty { appendSyntheticZeroDay() }",
+            ),
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "skip empty nutrition logs")
+        task2_repository.write_text(task3_repository_contents, encoding="utf-8")
+
+        task3_builder.write_text(
+            original_task3_builder + "let coercedTarget = missingTarget ?? 0\n",
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "must not coerce missing protein targets to zero")
+        task3_builder.write_text(original_task3_builder, encoding="utf-8")
 
         original_package = package.read_text(encoding="utf-8")
         package.write_text(
@@ -706,6 +1109,278 @@ import PhotosUI
             encoding="utf-8",
         )
         expect_architecture_failure(fixture, "PersistenceKit must depend on ReportsKit")
+
+
+def replace_named_test_bodies(
+    source: str,
+    names: set[str],
+    replacement: str,
+) -> str:
+    code = swift_code_without_comments_and_literals(source)
+    declaration = re.compile(
+        r"\bfunc[ \t\f\v\r\n]+(test[A-Za-z0-9_]*)[ \t\f\v]*"
+        r"\([^)]*\)[^{]*\{",
+        re.MULTILINE,
+    )
+    replacements: list[tuple[int, int]] = []
+    found: set[str] = set()
+    for match in declaration.finditer(code):
+        name = match.group(1)
+        if name not in names:
+            continue
+        opening = match.end() - 1
+        depth = 1
+        cursor = opening + 1
+        while cursor < len(code) and depth:
+            if code[cursor] == "{":
+                depth += 1
+            elif code[cursor] == "}":
+                depth -= 1
+            cursor += 1
+        if depth:
+            raise SystemExit(f"Task 3 mutation method {name} has an incomplete body")
+        replacements.append((opening + 1, cursor - 1))
+        found.add(name)
+    if found != names:
+        raise SystemExit(f"Task 3 mutation methods are missing: {sorted(names - found)}")
+    mutated = source
+    for start, end in sorted(replacements, reverse=True):
+        mutated = mutated[:start] + replacement + mutated[end:]
+    return mutated
+
+
+def task3_real_asset_self_test(source_root: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="m4-task3-real-assets-verifier-") as directory:
+        fixture = Path(directory)
+        shutil.copytree(
+            source_root / "Packages/HealthTrackingModules",
+            fixture / "Packages/HealthTrackingModules",
+        )
+        verify_reports_architecture(fixture)
+
+        builder_test = (
+            fixture
+            / "Packages/HealthTrackingModules/Tests/ReportsKitTests/ProteinAdherenceBuilderTests.swift"
+        )
+        repository_test = (
+            fixture
+            / "Packages/HealthTrackingModules/Tests/PersistenceKitTests/ReportsRepositoryTests.swift"
+        )
+        builder = (
+            fixture
+            / "Packages/HealthTrackingModules/Sources/ReportsKit/Builders/ProteinAdherenceBuilder.swift"
+        )
+
+        original_builder_test = builder_test.read_text(encoding="utf-8")
+        builder_test_names = set(TASK3_BUILDER_TEST_BEHAVIORS)
+        repository_test_names = set(TASK3_REPOSITORY_TEST_BEHAVIORS)
+        builder_test.unlink()
+        expect_architecture_failure(fixture, "Task 3 test contracts are missing")
+        builder_test.write_text(original_builder_test, encoding="utf-8")
+
+        builder_test.write_text("", encoding="utf-8")
+        expect_architecture_failure(fixture, "expected concrete XCTestCase suite")
+        builder_test.write_text(original_builder_test, encoding="utf-8")
+
+        builder_test.write_text(
+            re.sub(r"\bfunc\s+test", "func renamed", original_builder_test),
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "meaningful Task 3 tests")
+        builder_test.write_text(original_builder_test, encoding="utf-8")
+
+        builder_test.write_text(
+            re.sub(r"\bXCTAssert", "disabledAssert", original_builder_test),
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "meaningful Task 3 tests")
+        builder_test.write_text(original_builder_test, encoding="utf-8")
+
+        builder_test.write_text(
+            original_builder_test.replace(
+                "final class ProteinAdherenceBuilderTests: XCTestCase",
+                "final class ProteinAdherenceBuilderTests",
+            ),
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "expected concrete XCTestCase suite")
+        builder_test.write_text(original_builder_test, encoding="utf-8")
+
+        builder_test.write_text(
+            original_builder_test
+            + "\nfinal class ProteinAdherenceBuilderTests: XCTestCase {}\n",
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "expected concrete XCTestCase suite")
+        builder_test.write_text(original_builder_test, encoding="utf-8")
+
+        builder_test.write_text(
+            replace_named_test_bodies(
+                original_builder_test,
+                builder_test_names,
+                "\n        XCTAssertTrue(true)\n    ",
+            ),
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "behavioral Task 3 test contracts")
+        builder_test.write_text(original_builder_test, encoding="utf-8")
+
+        global_builder_decoys = "\n".join(
+            f"func {name}() {{ XCTAssertTrue(true) }}"
+            for name in sorted(builder_test_names)
+        )
+        builder_test.write_text(
+            re.sub(r"\bfunc\s+test", "func renamed", original_builder_test)
+            + "\n"
+            + global_builder_decoys
+            + "\n",
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "nonzero suite of meaningful Task 3 tests")
+        builder_test.write_text(original_builder_test, encoding="utf-8")
+
+        original_repository_test = repository_test.read_text(encoding="utf-8")
+        repository_test.unlink()
+        expect_architecture_failure(fixture, "Task 3 test contracts are missing")
+        repository_test.write_text(original_repository_test, encoding="utf-8")
+
+        repository_test.write_text(
+            original_repository_test.replace(
+                "final class ReportsRepositoryTests: XCTestCase",
+                "final class ReportsRepositoryTests",
+            ),
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "expected concrete XCTestCase suite")
+        repository_test.write_text(original_repository_test, encoding="utf-8")
+
+        repository_test.write_text(
+            original_repository_test.replace("@MainActor\n", "", 1),
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "expected concrete XCTestCase suite")
+        repository_test.write_text(original_repository_test, encoding="utf-8")
+
+        repository_test.write_text(
+            original_repository_test
+            + "\n@MainActor\nfinal class ReportsRepositoryTests: XCTestCase {}\n",
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "expected concrete XCTestCase suite")
+        repository_test.write_text(original_repository_test, encoding="utf-8")
+
+        repository_test.write_text(
+            replace_named_test_bodies(
+                original_repository_test,
+                repository_test_names,
+                "\n        XCTAssertTrue(true)\n    ",
+            ),
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "behavioral Task 3 test contracts")
+        repository_test.write_text(original_repository_test, encoding="utf-8")
+
+        global_repository_decoys = "\n".join(
+            f"func {name}() {{ XCTAssertTrue(true) }}"
+            for name in sorted(repository_test_names)
+        )
+        repository_test.write_text(
+            re.sub(r"\bfunc\s+test", "func renamed", original_repository_test)
+            + "\n"
+            + global_repository_decoys
+            + "\n",
+            encoding="utf-8",
+        )
+        expect_architecture_failure(fixture, "nonzero suite of meaningful Task 3 tests")
+        repository_test.write_text(original_repository_test, encoding="utf-8")
+
+        behavior_mutations = (
+            (
+                builder_test,
+                "XCTAssertEqual(report.observedDayCount, 1)",
+                "XCTAssertEqual(report.observedDayCount, 999)",
+            ),
+            (
+                builder_test,
+                "XCTAssertNil(report.adherencePercent)",
+                "XCTAssertNotNil(report.adherencePercent)",
+            ),
+            (builder_test, "200.0 / 3.0", "20.0 / 3.0"),
+            (builder_test, ".duplicateObservedDay(", ".removedDuplicateObservedDay("),
+            (
+                builder_test,
+                ".invalidObservedDay(id: lower.id)",
+                ".invalidObservedDay(id: higher.id)",
+            ),
+            (
+                builder_test,
+                "assertEquatableSendable(ProteinAdherenceReport.self)",
+                "assertEquatableSendable(String.self)",
+            ),
+            (
+                repository_test,
+                "XCTAssertEqual(first.nutritionDayRecords.map(\\.proteinTotalG), [0, 110, 50])",
+                "XCTAssertEqual(first.nutritionDayRecords.map(\\.proteinTotalG), [0, 0, 0])",
+            ),
+            (
+                repository_test,
+                "XCTAssertEqual(first, second)",
+                "XCTAssertNotEqual(first, second)",
+            ),
+            (
+                repository_test,
+                "XCTAssertEqual(try nutritionFieldSnapshot(in: container), before)",
+                "XCTAssertNotEqual(try nutritionFieldSnapshot(in: container), before)",
+            ),
+            (
+                repository_test,
+                "XCTAssertNil(source.nutritionDayRecords.first?.proteinTargetG)",
+                "XCTAssertNotNil(source.nutritionDayRecords.first?.proteinTargetG)",
+            ),
+            (
+                repository_test,
+                ".ambiguousUserProfiles(profileIDs: [lowerProfileID, higherProfileID])",
+                ".removedAmbiguousProfiles(profileIDs: [lowerProfileID, higherProfileID])",
+            ),
+            (
+                repository_test,
+                ".mealEntryMissingNutritionLog(id: orphanID)",
+                ".removedMissingNutritionLog(id: orphanID)",
+            ),
+            (
+                repository_test,
+                ".duplicateMealEntryIDs(id: sharedEntryID, count: 2)",
+                ".duplicateMealEntryIDs(id: sharedEntryID, count: 3)",
+            ),
+        )
+        for path, before, after in behavior_mutations:
+            original = replace_once(path, before, after)
+            expect_architecture_failure(fixture, "behavioral Task 3 test contracts")
+            path.write_text(original, encoding="utf-8")
+
+        original_builder = replace_once(
+            builder,
+            "$0.isFinite && $0 > 0",
+            "$0 != 0",
+        )
+        expect_architecture_failure(fixture, "finite and greater than zero")
+        builder.write_text(original_builder, encoding="utf-8")
+
+        original_builder = replace_once(
+            builder,
+            "day.proteinTotalG >= target",
+            "day.proteinTotalG > target",
+        )
+        expect_architecture_failure(fixture, "protein hit must include equality")
+        builder.write_text(original_builder, encoding="utf-8")
+
+        original_builder = replace_once(
+            builder,
+            "Double(hitDays.count) / Double(targetDays.count) * 100",
+            "Double(hitDays.count) / Double(targetDays.count)",
+        )
+        expect_architecture_failure(fixture, "percentage scale must multiply by 100")
+        builder.write_text(original_builder, encoding="utf-8")
 
 
 def expect_failure(root: Path, expected: str) -> None:
@@ -824,6 +1499,7 @@ mode = sys.argv[2]
 if mode == "--self-test":
     self_test(root)
     reports_architecture_self_test(root)
+    task3_real_asset_self_test(root)
     print("M4 focused CI verifier self-tests passed.")
 elif mode == "":
     verify(root)

@@ -6,6 +6,322 @@ import XCTest
 
 @MainActor
 final class ReportsRepositoryTests: XCTestCase {
+    func testNutritionProjectionUsesActualEntriesLocalDaysSnapshotsAndCurrentProfileWithoutMutation() async throws {
+        let container = try ModelContainerFactory.make(for: .inMemory)
+        let writer = ModelContext(container)
+        let calendar = istanbulCalendar()
+        let interval = ReportDateInterval(
+            start: try date("2024-03-30T21:00:00Z"),
+            endExclusive: try date("2024-04-03T21:00:00Z")
+        )
+        writer.insert(UserProfile(
+            id: uuid("00000000-0000-4000-8000-000000002001"),
+            proteinTargetG: 100
+        ))
+
+        let zeroDay = nutritionLog(
+            id: uuid("00000000-0000-4000-8000-000000002101"),
+            date: try date("2024-03-31T10:00:00Z")
+        )
+        let hitDay = nutritionLog(
+            id: uuid("00000000-0000-4000-8000-000000002102"),
+            date: try date("2024-03-31T21:00:00Z")
+        )
+        let missDay = nutritionLog(
+            id: uuid("00000000-0000-4000-8000-000000002103"),
+            date: try date("2024-04-02T20:59:59Z")
+        )
+        let emptyDay = nutritionLog(
+            id: uuid("00000000-0000-4000-8000-000000002104"),
+            date: try date("2024-04-02T21:00:00Z")
+        )
+        let outsideDay = nutritionLog(
+            id: uuid("00000000-0000-4000-8000-000000002105"),
+            date: interval.endExclusive
+        )
+        let entries = [
+            mealEntry(
+                id: uuid("00000000-0000-4000-8000-000000002201"),
+                proteinG: 0,
+                loggedAt: interval.endExclusive.addingTimeInterval(10_000),
+                log: zeroDay
+            ),
+            mealEntry(
+                id: uuid("00000000-0000-4000-8000-000000002202"),
+                proteinG: 40,
+                loggedAt: interval.start.addingTimeInterval(-10_000),
+                log: hitDay
+            ),
+            mealEntry(
+                id: uuid("00000000-0000-4000-8000-000000002203"),
+                proteinG: 70,
+                loggedAt: interval.start.addingTimeInterval(-9_000),
+                log: hitDay
+            ),
+            mealEntry(
+                id: uuid("00000000-0000-4000-8000-000000002204"),
+                proteinG: 50,
+                loggedAt: interval.start.addingTimeInterval(1_000),
+                log: missDay
+            ),
+            mealEntry(
+                id: uuid("00000000-0000-4000-8000-000000002205"),
+                proteinG: .nan,
+                loggedAt: interval.endExclusive,
+                log: outsideDay
+            ),
+        ]
+        zeroDay.mealEntries = [entries[0]]
+        hitDay.mealEntries = [entries[2], entries[1]]
+        missDay.mealEntries = [entries[3]]
+        outsideDay.mealEntries = [entries[4]]
+        for log in [outsideDay, emptyDay, missDay, hitDay, zeroDay] { writer.insert(log) }
+        for entry in entries.reversed() { writer.insert(entry) }
+        try writer.save()
+
+        let reader = ModelContext(container)
+        let repository = SwiftDataReportsRepository(modelContext: reader, calendar: calendar)
+        let before = try nutritionFieldSnapshot(in: container)
+        XCTAssertFalse(reader.hasChanges)
+
+        let first = try await repository.fetchDashboardSource(in: interval)
+        let second = try await repository.fetchDashboardSource(in: interval)
+
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first.nutritionDayRecords.map(\.id), [zeroDay.id, hitDay.id, missDay.id])
+        XCTAssertEqual(first.nutritionDayRecords.map(\.date), [
+            calendar.startOfDay(for: zeroDay.date),
+            calendar.startOfDay(for: hitDay.date),
+            calendar.startOfDay(for: missDay.date),
+        ])
+        XCTAssertEqual(first.nutritionDayRecords.map(\.entryCount), [1, 2, 1])
+        XCTAssertEqual(first.nutritionDayRecords.map(\.proteinTotalG), [0, 110, 50])
+        XCTAssertEqual(first.nutritionDayRecords.map(\.proteinTargetG), [100, 100, 100])
+        XCTAssertEqual(first.coverage.observedCount, 3)
+        XCTAssertFalse(reader.hasChanges)
+        XCTAssertEqual(try nutritionFieldSnapshot(in: container), before)
+    }
+
+    func testMissingOrInvalidCurrentProfileTargetProducesTargetlessObservedDays() async throws {
+        let targets: [Double?] = [nil, .nan, 0, -1, .infinity]
+        for target in targets {
+            let container = try ModelContainerFactory.make(for: .inMemory)
+            let writer = ModelContext(container)
+            let log = nutritionLog(
+                id: uuid("00000000-0000-4000-8000-000000002301"),
+                date: Date(timeIntervalSinceReferenceDate: 1_000)
+            )
+            let entry = mealEntry(
+                id: uuid("00000000-0000-4000-8000-000000002302"),
+                proteinG: 80,
+                loggedAt: log.date,
+                log: log
+            )
+            log.mealEntries = [entry]
+            if let target {
+                writer.insert(UserProfile(proteinTargetG: target))
+            }
+            writer.insert(log)
+            writer.insert(entry)
+            try writer.save()
+
+            let source = try await reportsRepository(in: ModelContext(container))
+                .fetchDashboardSource(in: broadInterval())
+
+            XCTAssertEqual(source.nutritionDayRecords.count, 1)
+            XCTAssertNil(source.nutritionDayRecords.first?.proteinTargetG)
+        }
+    }
+
+    func testNutritionDuplicateLogicalDayAndProfileAmbiguityFailDeterministically() async throws {
+        let calendar = istanbulCalendar()
+        let duplicateDayInterval = ReportDateInterval(
+            start: try date("2024-03-31T21:00:00Z"),
+            endExclusive: try date("2024-04-01T21:00:00Z")
+        )
+        let lowerLogID = uuid("00000000-0000-4000-8000-000000002401")
+        let higherLogID = uuid("00000000-0000-4000-8000-000000002402")
+        for reverse in [false, true] {
+            let container = try ModelContainerFactory.make(for: .inMemory)
+            let writer = ModelContext(container)
+            let logs = [
+                nutritionLog(id: lowerLogID, date: try date("2024-04-01T01:00:00Z")),
+                nutritionLog(id: higherLogID, date: try date("2024-04-01T20:00:00Z")),
+            ]
+            let orderedLogs = reverse ? Array(logs.reversed()) : logs
+            for log in orderedLogs { writer.insert(log) }
+            try writer.save()
+
+            do {
+                _ = try await SwiftDataReportsRepository(
+                    modelContext: ModelContext(container),
+                    calendar: calendar
+                ).fetchDashboardSource(in: duplicateDayInterval)
+                XCTFail("Expected duplicate local nutrition day integrity failure.")
+            } catch {
+                XCTAssertEqual(
+                    error as? ReportsRepositoryIntegrityError,
+                    .duplicateNutritionDay(
+                        localDay: calendar.startOfDay(for: logs[0].date),
+                        nutritionLogIDs: [lowerLogID, higherLogID]
+                    )
+                )
+            }
+        }
+
+        let container = try ModelContainerFactory.make(for: .inMemory)
+        let writer = ModelContext(container)
+        let log = nutritionLog(
+            id: uuid("00000000-0000-4000-8000-000000002403"),
+            date: Date(timeIntervalSinceReferenceDate: 1_000)
+        )
+        let entry = mealEntry(
+            id: uuid("00000000-0000-4000-8000-000000002404"),
+            proteinG: 80,
+            loggedAt: log.date,
+            log: log
+        )
+        log.mealEntries = [entry]
+        let lowerProfileID = uuid("00000000-0000-4000-8000-000000002405")
+        let higherProfileID = uuid("00000000-0000-4000-8000-000000002406")
+        writer.insert(UserProfile(id: higherProfileID, proteinTargetG: 90))
+        writer.insert(UserProfile(id: lowerProfileID, proteinTargetG: 100))
+        writer.insert(log)
+        writer.insert(entry)
+        try writer.save()
+
+        do {
+            _ = try await reportsRepository(in: ModelContext(container))
+                .fetchDashboardSource(in: broadInterval())
+            XCTFail("Expected ambiguous current profile integrity failure.")
+        } catch {
+            XCTAssertEqual(
+                error as? ReportsRepositoryIntegrityError,
+                .ambiguousUserProfiles(profileIDs: [lowerProfileID, higherProfileID])
+            )
+        }
+    }
+
+    func testSelectedNutritionEntryCorruptionAndMissingRelationshipFailWithStableTypedErrors() async throws {
+        let lowerID = uuid("00000000-0000-4000-8000-000000002501")
+        let higherID = uuid("00000000-0000-4000-8000-000000002502")
+        for reverse in [false, true] {
+            let container = try ModelContainerFactory.make(for: .inMemory)
+            let writer = ModelContext(container)
+            let log = nutritionLog(
+                id: uuid("00000000-0000-4000-8000-000000002503"),
+                date: Date(timeIntervalSinceReferenceDate: 1_000)
+            )
+            let entries = [
+                mealEntry(id: lowerID, proteinG: -.infinity, loggedAt: log.date, log: log),
+                mealEntry(id: higherID, proteinG: .nan, loggedAt: log.date, log: log),
+            ]
+            log.mealEntries = entries
+            writer.insert(log)
+            let orderedEntries = reverse ? Array(entries.reversed()) : entries
+            for entry in orderedEntries { writer.insert(entry) }
+            try writer.save()
+
+            do {
+                _ = try await reportsRepository(in: ModelContext(container))
+                    .fetchDashboardSource(in: broadInterval())
+                XCTFail("Expected invalid resolved nutrition snapshot.")
+            } catch {
+                XCTAssertEqual(
+                    error as? ReportsRepositoryIntegrityError,
+                    .invalidMealEntry(id: lowerID)
+                )
+            }
+        }
+
+        let orphanContainer = try ModelContainerFactory.make(for: .inMemory)
+        let orphanWriter = ModelContext(orphanContainer)
+        let orphanID = uuid("00000000-0000-4000-8000-000000002504")
+        orphanWriter.insert(mealEntry(
+            id: orphanID,
+            proteinG: 20,
+            loggedAt: Date(timeIntervalSinceReferenceDate: 1_000),
+            log: nil
+        ))
+        try orphanWriter.save()
+        let orphanReader = ModelContext(orphanContainer)
+
+        do {
+            _ = try await reportsRepository(in: orphanReader)
+                .fetchDashboardSource(in: broadInterval())
+            XCTFail("Expected missing nutrition-day relationship.")
+        } catch {
+            XCTAssertEqual(
+                error as? ReportsRepositoryIntegrityError,
+                .mealEntryMissingNutritionLog(id: orphanID)
+            )
+        }
+        XCTAssertFalse(orphanReader.hasChanges)
+    }
+
+    func testSelectedNutritionIdentityCollisionsFailWithoutRebindingRows() async throws {
+        let sharedLogID = uuid("00000000-0000-4000-8000-000000002601")
+        let logContainer = try ModelContainerFactory.make(for: .inMemory)
+        let logWriter = ModelContext(logContainer)
+        let selectedLog = nutritionLog(
+            id: sharedLogID,
+            date: Date(timeIntervalSinceReferenceDate: 1_000)
+        )
+        let collidingOutsideLog = nutritionLog(
+            id: sharedLogID,
+            date: Date(timeIntervalSinceReferenceDate: 20_000)
+        )
+        let selectedEntry = mealEntry(
+            id: uuid("00000000-0000-4000-8000-000000002602"),
+            proteinG: 20,
+            loggedAt: selectedLog.date,
+            log: selectedLog
+        )
+        selectedLog.mealEntries = [selectedEntry]
+        logWriter.insert(selectedLog)
+        logWriter.insert(collidingOutsideLog)
+        logWriter.insert(selectedEntry)
+        try logWriter.save()
+
+        do {
+            _ = try await reportsRepository(in: ModelContext(logContainer))
+                .fetchDashboardSource(in: broadInterval())
+            XCTFail("Expected selected nutrition-log identity collision.")
+        } catch {
+            XCTAssertEqual(
+                error as? ReportsRepositoryIntegrityError,
+                .duplicateNutritionLogIDs(id: sharedLogID, count: 2)
+            )
+        }
+
+        let entryContainer = try ModelContainerFactory.make(for: .inMemory)
+        let entryWriter = ModelContext(entryContainer)
+        let log = nutritionLog(
+            id: uuid("00000000-0000-4000-8000-000000002603"),
+            date: Date(timeIntervalSinceReferenceDate: 1_000)
+        )
+        let sharedEntryID = uuid("00000000-0000-4000-8000-000000002604")
+        let entries = [
+            mealEntry(id: sharedEntryID, proteinG: 20, loggedAt: log.date, log: log),
+            mealEntry(id: sharedEntryID, proteinG: 30, loggedAt: log.date, log: log),
+        ]
+        log.mealEntries = entries
+        entryWriter.insert(log)
+        for entry in entries { entryWriter.insert(entry) }
+        try entryWriter.save()
+
+        do {
+            _ = try await reportsRepository(in: ModelContext(entryContainer))
+                .fetchDashboardSource(in: broadInterval())
+            XCTFail("Expected selected meal-entry identity collision.")
+        } catch {
+            XCTAssertEqual(
+                error as? ReportsRepositoryIntegrityError,
+                .duplicateMealEntryIDs(id: sharedEntryID, count: 2)
+            )
+        }
+    }
+
     func testFetchPreservesEveryValidInRangeRowWithDeterministicMappingsAndNoMutation() async throws {
         let container = try ModelContainerFactory.make(for: .inMemory)
         let writer = ModelContext(container)
@@ -126,7 +442,7 @@ final class ReportsRepositoryTests: XCTestCase {
         try writer.save()
 
         let reader = ModelContext(container)
-        let repository = SwiftDataReportsRepository(modelContext: reader)
+        let repository = reportsRepository(in: reader)
         let countsBefore = try persistedCounts(in: container)
         let fieldsBefore = try persistedFieldSnapshot(in: container)
         XCTAssertFalse(reader.hasChanges)
@@ -183,7 +499,7 @@ final class ReportsRepositoryTests: XCTestCase {
             writer.insert(fixture.1)
             try writer.save()
             let reader = ModelContext(container)
-            let repository = SwiftDataReportsRepository(modelContext: reader)
+            let repository = reportsRepository(in: reader)
 
             do {
                 _ = try await repository.fetchDashboardSource(in: broadInterval())
@@ -228,7 +544,7 @@ final class ReportsRepositoryTests: XCTestCase {
             writer.insert(invalid)
             try writer.save()
             let reader = ModelContext(container)
-            let repository = SwiftDataReportsRepository(modelContext: reader)
+            let repository = reportsRepository(in: reader)
 
             do {
                 _ = try await repository.fetchDashboardSource(in: broadInterval())
@@ -258,7 +574,7 @@ final class ReportsRepositoryTests: XCTestCase {
         ))
         try orphanWriter.save()
         let orphanReader = ModelContext(orphanContainer)
-        let orphanRepository = SwiftDataReportsRepository(modelContext: orphanReader)
+        let orphanRepository = reportsRepository(in: orphanReader)
 
         do {
             _ = try await orphanRepository.fetchDashboardSource(in: broadInterval())
@@ -293,7 +609,7 @@ final class ReportsRepositoryTests: XCTestCase {
         mappingWriter.insert(mappedSet)
         try mappingWriter.save()
         let mappingReader = ModelContext(mappingContainer)
-        let mappingRepository = SwiftDataReportsRepository(modelContext: mappingReader)
+        let mappingRepository = reportsRepository(in: mappingReader)
 
         do {
             _ = try await mappingRepository.fetchDashboardSource(in: broadInterval())
@@ -331,7 +647,7 @@ final class ReportsRepositoryTests: XCTestCase {
         writer.insert(extreme)
         try writer.save()
         let reader = ModelContext(container)
-        let repository = SwiftDataReportsRepository(modelContext: reader)
+        let repository = reportsRepository(in: reader)
 
         do {
             _ = try await repository.fetchDashboardSource(in: broadInterval())
@@ -373,7 +689,7 @@ final class ReportsRepositoryTests: XCTestCase {
         for set in sets { writer.insert(set) }
         try writer.save()
         let reader = ModelContext(container)
-        let repository = SwiftDataReportsRepository(modelContext: reader)
+        let repository = reportsRepository(in: reader)
         let before = try persistedFieldSnapshot(in: container)
 
         do {
@@ -467,7 +783,7 @@ final class ReportsRepositoryTests: XCTestCase {
         ))
         try writer.save()
         let reader = ModelContext(container)
-        let repository = SwiftDataReportsRepository(modelContext: reader)
+        let repository = reportsRepository(in: reader)
         let before = try persistedFieldSnapshot(in: container)
 
         let source = try await repository.fetchDashboardSource(in: interval)
@@ -510,7 +826,7 @@ final class ReportsRepositoryTests: XCTestCase {
         writer.insert(set)
         try writer.save()
         let reader = ModelContext(container)
-        let repository = SwiftDataReportsRepository(modelContext: reader)
+        let repository = reportsRepository(in: reader)
 
         do {
             _ = try await repository.fetchDashboardSource(in: interval)
@@ -538,7 +854,7 @@ final class ReportsRepositoryTests: XCTestCase {
             let orderedModels = reverse ? Array(models.reversed()) : models
             for model in orderedModels { writer.insert(model) }
             try writer.save()
-            let repository = SwiftDataReportsRepository(modelContext: ModelContext(container))
+            let repository = reportsRepository(in: ModelContext(container))
 
             do {
                 _ = try await repository.fetchDashboardSource(in: broadInterval())
@@ -583,7 +899,7 @@ final class ReportsRepositoryTests: XCTestCase {
             XCTAssertTrue(persistedCandidates.allSatisfy {
                 !$0.createdAt.timeIntervalSinceReferenceDate.isFinite
             })
-            let repository = SwiftDataReportsRepository(modelContext: reader)
+            let repository = reportsRepository(in: reader)
 
             do {
                 _ = try await repository.fetchDashboardSource(in: broadInterval())
@@ -633,7 +949,7 @@ final class ReportsRepositoryTests: XCTestCase {
             let orderedModels = reverse ? Array(models.reversed()) : models
             for model in orderedModels { writer.insert(model) }
             try writer.save()
-            let repository = SwiftDataReportsRepository(modelContext: ModelContext(container))
+            let repository = reportsRepository(in: ModelContext(container))
 
             do {
                 _ = try await repository.fetchDashboardSource(in: broadInterval())
@@ -685,7 +1001,7 @@ final class ReportsRepositoryTests: XCTestCase {
             writer.insert(higherExerciseSet)
             writer.insert(lowerExerciseSet)
             try writer.save()
-            let repository = SwiftDataReportsRepository(modelContext: ModelContext(container))
+            let repository = reportsRepository(in: ModelContext(container))
 
             do {
                 _ = try await repository.fetchDashboardSource(in: broadInterval())
@@ -697,6 +1013,69 @@ final class ReportsRepositoryTests: XCTestCase {
                 )
             }
         }
+    }
+
+    private func reportsRepository(in context: ModelContext) -> SwiftDataReportsRepository {
+        SwiftDataReportsRepository(modelContext: context, calendar: istanbulCalendar())
+    }
+
+    private func istanbulCalendar() -> Calendar {
+        guard let timeZone = TimeZone(identifier: "Europe/Istanbul") else {
+            preconditionFailure("Istanbul timezone must exist in Foundation.")
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "en_US_POSIX")
+        calendar.timeZone = timeZone
+        return calendar
+    }
+
+    private func nutritionLog(id: UUID, date: Date) -> DailyNutritionLog {
+        DailyNutritionLog(
+            id: id,
+            createdAt: date.addingTimeInterval(1),
+            updatedAt: date.addingTimeInterval(2),
+            date: date
+        )
+    }
+
+    private func mealEntry(
+        id: UUID,
+        proteinG: Double,
+        loggedAt: Date,
+        log: DailyNutritionLog?
+    ) -> MealEntry {
+        MealEntry(
+            id: id,
+            createdAt: loggedAt.addingTimeInterval(1),
+            updatedAt: loggedAt.addingTimeInterval(2),
+            category: .defaultValue,
+            adhocName: "Fixture",
+            quantity: 1,
+            caloriesResolved: 100,
+            proteinResolved: proteinG,
+            carbResolved: 10,
+            fatResolved: 5,
+            loggedAt: loggedAt,
+            dailyNutritionLog: log
+        )
+    }
+
+    private func nutritionFieldSnapshot(in container: ModelContainer) throws -> [String] {
+        let context = ModelContext(container)
+        var rows = try context.fetch(FetchDescriptor<UserProfile>()).map {
+            "profile|\($0.id.uuidString)|\($0.proteinTargetG)"
+        }
+        rows += try context.fetch(FetchDescriptor<DailyNutritionLog>()).map {
+            let entryIDs = ($0.mealEntries ?? [])
+                .map(\.id.uuidString)
+                .sorted()
+                .joined(separator: ",")
+            return "nutrition-day|\($0.id.uuidString)|\($0.createdAt.timeIntervalSinceReferenceDate)|\($0.updatedAt.timeIntervalSinceReferenceDate)|\($0.date.timeIntervalSinceReferenceDate)|\(entryIDs)"
+        }
+        rows += try context.fetch(FetchDescriptor<MealEntry>()).map {
+            "meal|\($0.id.uuidString)|\($0.createdAt.timeIntervalSinceReferenceDate)|\($0.updatedAt.timeIntervalSinceReferenceDate)|\($0.quantity)|\($0.caloriesResolved)|\($0.proteinResolved)|\($0.carbResolved)|\($0.fatResolved)|\($0.loggedAt.timeIntervalSinceReferenceDate)|\(String(describing: $0.dailyNutritionLog?.id))"
+        }
+        return rows.sorted()
     }
 
     private func bodyMetric(id: UUID, date: Date, value: Double) -> BodyMetric {

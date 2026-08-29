@@ -1,6 +1,7 @@
 import CoreModels
 import Foundation
 import MetricsKit
+import NutritionKit
 import ReportsKit
 import SwiftData
 
@@ -23,14 +24,26 @@ public enum ReportsRepositoryIntegrityError: Error, Equatable, Sendable {
     case missingExerciseTemplate(setLogID: UUID, exerciseTemplateID: UUID)
     case invalidExerciseSet(id: UUID)
     case invalidExerciseRepetitionRange(id: UUID, reps: Int)
+    case duplicateNutritionLogIDs(id: UUID, count: Int)
+    case invalidNutritionLog(id: UUID)
+    case duplicateNutritionDay(localDay: Date, nutritionLogIDs: [UUID])
+    case duplicateMealEntryIDs(id: UUID, count: Int)
+    case mealEntryMissingNutritionLog(id: UUID)
+    case mealEntryReferencesMissingNutritionLog(mealEntryID: UUID, nutritionLogID: UUID)
+    case invalidMealEntry(id: UUID)
+    case nonFiniteProteinTotal(nutritionLogID: UUID)
+    case duplicateUserProfileIDs(id: UUID, count: Int)
+    case ambiguousUserProfiles(profileIDs: [UUID])
 }
 
 @MainActor
 public final class SwiftDataReportsRepository: ReportsRepository {
     private let modelContext: ModelContext
+    private let calendar: Calendar
 
-    public init(modelContext: ModelContext) {
+    public init(modelContext: ModelContext, calendar: Calendar) {
         self.modelContext = modelContext
+        self.calendar = calendar
     }
 
     public func fetchDashboardSource(
@@ -141,15 +154,200 @@ public final class SwiftDataReportsRepository: ReportsRepository {
             )
         }
         exerciseSetRecords.sort(by: exerciseSetOrderedBefore)
+        let nutritionDayRecords = try nutritionDayRecords(in: interval)
 
         return ReportsDashboardSource(
             coverage: ReportCoverage(
                 observationDates: bodyMetricRecords.map(\.date)
                     + exerciseSetRecords.map(\.sessionDate)
+                    + nutritionDayRecords.map(\.date)
             ),
             bodyMetricRecords: bodyMetricRecords,
-            exerciseSetRecords: exerciseSetRecords
+            exerciseSetRecords: exerciseSetRecords,
+            nutritionDayRecords: nutritionDayRecords
         )
+    }
+
+    private func nutritionDayRecords(
+        in interval: ReportDateInterval
+    ) throws -> [ReportNutritionDayRecord] {
+        let allLogs = try modelContext.fetch(FetchDescriptor<DailyNutritionLog>())
+            .sorted { $0.id.uuidString < $1.id.uuidString }
+        let selectedLogs = allLogs.filter { interval.contains($0.date) }
+        let selectedLogIDs = Set(selectedLogs.map(\.id))
+        try rejectDuplicateIDs(
+            allLogs.filter { selectedLogIDs.contains($0.id) },
+            id: \.id,
+            makeError: ReportsRepositoryIntegrityError.duplicateNutritionLogIDs
+        )
+
+        if let invalidLog = selectedLogs
+            .filter({ !Self.validDate($0.date) || !Self.validDate($0.createdAt) })
+            .min(by: { $0.id.uuidString < $1.id.uuidString }) {
+            throw ReportsRepositoryIntegrityError.invalidNutritionLog(id: invalidLog.id)
+        }
+        try rejectDuplicateNutritionDays(selectedLogs)
+
+        let allEntries = try modelContext.fetch(FetchDescriptor<MealEntry>())
+            .sorted { $0.id.uuidString < $1.id.uuidString }
+        if let orphan = allEntries
+            .filter({ entry in
+                entry.dailyNutritionLog == nil
+                    && Self.validDate(entry.loggedAt)
+                    && interval.contains(entry.loggedAt)
+            })
+            .min(by: { $0.id.uuidString < $1.id.uuidString }) {
+            throw ReportsRepositoryIntegrityError.mealEntryMissingNutritionLog(id: orphan.id)
+        }
+
+        var selectedEntries: [MealEntry] = []
+        for entry in allEntries {
+            guard let relatedLog = entry.dailyNutritionLog,
+                  selectedLogIDs.contains(relatedLog.id) else {
+                continue
+            }
+            guard selectedLogs.contains(where: { $0 === relatedLog }) else {
+                throw ReportsRepositoryIntegrityError.mealEntryReferencesMissingNutritionLog(
+                    mealEntryID: entry.id,
+                    nutritionLogID: relatedLog.id
+                )
+            }
+            selectedEntries.append(entry)
+        }
+
+        let selectedEntryIDs = Set(selectedEntries.map(\.id))
+        try rejectDuplicateIDs(
+            allEntries.filter { selectedEntryIDs.contains($0.id) },
+            id: \.id,
+            makeError: ReportsRepositoryIntegrityError.duplicateMealEntryIDs
+        )
+        for entry in selectedEntries {
+            try validateMealEntry(entry)
+        }
+
+        var projected: [ReportNutritionDayRecord] = []
+        for log in selectedLogs.sorted(by: nutritionLogOrderedBefore) {
+            let entries = selectedEntries.filter { $0.dailyNutritionLog === log }
+            guard !entries.isEmpty else { continue }
+            var proteinTotalG = 0.0
+            for entry in entries {
+                let accumulated = proteinTotalG + entry.proteinResolved
+                guard accumulated.isFinite else {
+                    throw ReportsRepositoryIntegrityError.nonFiniteProteinTotal(
+                        nutritionLogID: log.id
+                    )
+                }
+                proteinTotalG = accumulated
+            }
+            projected.append(ReportNutritionDayRecord(
+                id: log.id,
+                date: calendar.startOfDay(for: log.date),
+                createdAt: log.createdAt,
+                entryCount: entries.count,
+                proteinTotalG: proteinTotalG,
+                proteinTargetG: nil
+            ))
+        }
+
+        guard !projected.isEmpty else { return [] }
+        let proteinTargetG = try currentProteinTarget()
+        return projected.map { day in
+            ReportNutritionDayRecord(
+                id: day.id,
+                date: day.date,
+                createdAt: day.createdAt,
+                entryCount: day.entryCount,
+                proteinTotalG: day.proteinTotalG,
+                proteinTargetG: proteinTargetG
+            )
+        }
+        .sorted(by: nutritionDayOrderedBefore)
+    }
+
+    private func rejectDuplicateNutritionDays(
+        _ logs: [DailyNutritionLog]
+    ) throws {
+        let grouped = Dictionary(grouping: logs) { calendar.startOfDay(for: $0.date) }
+        guard let duplicate = grouped
+            .filter({ $0.value.count > 1 })
+            .sorted(by: { $0.key < $1.key })
+            .first else {
+            return
+        }
+        throw ReportsRepositoryIntegrityError.duplicateNutritionDay(
+            localDay: duplicate.key,
+            nutritionLogIDs: duplicate.value
+                .map(\.id)
+                .sorted { $0.uuidString < $1.uuidString }
+        )
+    }
+
+    private func validateMealEntry(_ entry: MealEntry) throws {
+        do {
+            guard Self.validDate(entry.createdAt), Self.validDate(entry.loggedAt) else {
+                throw ReportsRepositoryIntegrityError.invalidMealEntry(id: entry.id)
+            }
+            let values = [
+                entry.quantity,
+                entry.caloriesResolved,
+                entry.proteinResolved,
+                entry.carbResolved,
+                entry.fatResolved,
+            ]
+            guard values.allSatisfy(\.isFinite) else {
+                throw ReportsRepositoryIntegrityError.invalidMealEntry(id: entry.id)
+            }
+            _ = try NutritionQuantity(Decimal(entry.quantity))
+            _ = try NutritionMacros(
+                calories: Decimal(entry.caloriesResolved),
+                proteinG: Decimal(entry.proteinResolved),
+                carbG: Decimal(entry.carbResolved),
+                fatG: Decimal(entry.fatResolved)
+            )
+            _ = try MealCategory(
+                kind: entry.category.kind,
+                customName: entry.category.customName
+            )
+            let sourceCount = [
+                entry.recipeId != nil,
+                entry.foodId != nil,
+                entry.adhocName != nil,
+            ].filter { $0 }.count
+            guard sourceCount == 1 else {
+                throw ReportsRepositoryIntegrityError.invalidMealEntry(id: entry.id)
+            }
+            if let adhocName = entry.adhocName {
+                let normalized = adhocName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !normalized.isEmpty, normalized == adhocName else {
+                    throw ReportsRepositoryIntegrityError.invalidMealEntry(id: entry.id)
+                }
+            }
+        } catch let error as ReportsRepositoryIntegrityError {
+            throw error
+        } catch {
+            throw ReportsRepositoryIntegrityError.invalidMealEntry(id: entry.id)
+        }
+    }
+
+    private func currentProteinTarget() throws -> Double? {
+        let profiles = try modelContext.fetch(FetchDescriptor<UserProfile>())
+            .sorted { $0.id.uuidString < $1.id.uuidString }
+        try rejectDuplicateIDs(
+            profiles,
+            id: \.id,
+            makeError: ReportsRepositoryIntegrityError.duplicateUserProfileIDs
+        )
+        guard profiles.count <= 1 else {
+            throw ReportsRepositoryIntegrityError.ambiguousUserProfiles(
+                profileIDs: profiles.map(\.id)
+            )
+        }
+        guard let target = profiles.first?.proteinTargetG,
+              target.isFinite,
+              target > 0 else {
+            return nil
+        }
+        return target
     }
 
     private func validatedBodyMetricRecord(
@@ -342,6 +540,24 @@ public final class SwiftDataReportsRepository: ReportsRepository {
             return lhs.exerciseTemplateID.uuidString < rhs.exerciseTemplateID.uuidString
         }
         if lhs.setIndex != rhs.setIndex { return lhs.setIndex < rhs.setIndex }
+        if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private func nutritionLogOrderedBefore(
+        _ lhs: DailyNutritionLog,
+        _ rhs: DailyNutritionLog
+    ) -> Bool {
+        if lhs.date != rhs.date { return lhs.date < rhs.date }
+        if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private func nutritionDayOrderedBefore(
+        _ lhs: ReportNutritionDayRecord,
+        _ rhs: ReportNutritionDayRecord
+    ) -> Bool {
+        if lhs.date != rhs.date { return lhs.date < rhs.date }
         if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
         return lhs.id.uuidString < rhs.id.uuidString
     }
