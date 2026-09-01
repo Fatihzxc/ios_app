@@ -6,6 +6,48 @@ final class M3AcceptanceUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testReportDashboardFetchLifecycleAcrossRootSheetDismissals() {
+        let app = launch(storeIdentifier: UUID())
+        defer { app.terminate() }
+        let progressMetricsAction = ["progress", "metrics", "action"]
+            .joined(separator: ".")
+
+        require(identified("root.today.content", in: app))
+        assertReportFetchCountRemains(0, in: app)
+
+        openAndCloseSheet(
+            action: "today.metrics.action",
+            content: "metrics.entry.weight",
+            close: "metrics.entry.close",
+            in: app
+        )
+        assertReportFetchCountRemains(0, in: app)
+
+        openProgress(in: app)
+        assertReportFetchCountEventually(1, in: app)
+
+        openAndCloseSheet(
+            action: progressMetricsAction,
+            content: "metrics.entry.weight",
+            close: "metrics.entry.close",
+            in: app
+        )
+        assertReportFetchCountEventually(2, in: app)
+
+        openAndSwipeDismissSheet(
+            action: progressMetricsAction,
+            content: "metrics.entry.weight",
+            in: app
+        )
+        assertReportFetchCountEventually(3, in: app)
+
+        require(identified("tab.today", in: app)).tap()
+        require(identified("root.today.content", in: app))
+        openProgress(in: app)
+        assertReportFetchCountEventually(4, in: app)
+        assertReportFetchCountRemains(4, in: app)
+    }
+
     func testTodayAndProgressExposeEveryM3TrackerEntryThroughOneLazyRouter() {
         let probe = launch(storeIdentifier: UUID())
         openProgress(in: probe)
@@ -175,6 +217,83 @@ final class M3AcceptanceUITests: XCTestCase {
         waitForDisappearance(
             of: contentElement,
             message: "The explicit close action must dismiss \(content)."
+        )
+    }
+
+    private func openAndSwipeDismissSheet(
+        action: String,
+        content: String,
+        in app: XCUIApplication
+    ) {
+        let actionElement = require(identified(action, in: app), "Missing route action: \(action)")
+        makeHittable(actionElement, in: app)
+        actionElement.tap()
+        let contentElement = require(
+            identified(content, in: app),
+            "Missing routed content: \(content)"
+        )
+        let sheet = app.sheets.firstMatch
+        if sheet.waitForExistence(timeout: 2) {
+            dragDownToDismiss(sheet)
+        } else {
+            dragDownToDismiss(app)
+        }
+        waitForDisappearance(
+            of: contentElement,
+            message: "The interactive swipe must dismiss \(content)."
+        )
+    }
+
+    private func dragDownToDismiss(_ surface: XCUIElement) {
+        let start = surface.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)
+        )
+        let end = surface.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92)
+        )
+        start.press(forDuration: 0.1, thenDragTo: end)
+    }
+
+    private func assertReportFetchCountEventually(
+        _ expected: Int,
+        in app: XCUIApplication
+    ) {
+        let evidence = reportFetchEvidence(in: app)
+        let value = String(expected)
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", value),
+            object: evidence
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation], timeout: 8),
+            .completed,
+            "Expected report fetch count \(value); found \(String(describing: evidence.value))."
+        )
+        XCTAssertEqual(evidence.value as? String, value)
+    }
+
+    private func assertReportFetchCountRemains(
+        _ expected: Int,
+        in app: XCUIApplication
+    ) {
+        let evidence = reportFetchEvidence(in: app)
+        let value = String(expected)
+        let changed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value != %@", value),
+            object: evidence
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [changed], timeout: 1),
+            .timedOut,
+            "Report fetch count must remain \(value); found \(String(describing: evidence.value))."
+        )
+        XCTAssertEqual(evidence.value as? String, value)
+    }
+
+    private func reportFetchEvidence(in app: XCUIApplication) -> XCUIElement {
+        require(
+            identified("m4.reports.dashboard-fetch-count", in: app),
+            "M4.8 acceptance must expose DEBUG-only dashboard-fetch evidence."
         )
     }
 

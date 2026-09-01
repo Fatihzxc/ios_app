@@ -33,7 +33,11 @@ ROUTES = {
         "ReportsKitTests/StoredZIPWriterTests",
         "ReportsKitTests/ReportExportCoordinatorTests",
     ),
-    "m4.8": ("ReportsKitTests", "HealthTrackingAppTests/ReportsCompositionTests"),
+    "m4.8": (
+        "ReportsKitTests",
+        "HealthTrackingAppTests/ReportsCompositionTests",
+        "HealthTrackingAppUITests/M3AcceptanceUITests/testReportDashboardFetchLifecycleAcrossRootSheetDismissals",
+    ),
 }
 
 

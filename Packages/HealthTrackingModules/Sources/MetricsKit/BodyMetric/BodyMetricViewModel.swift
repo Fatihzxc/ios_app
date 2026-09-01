@@ -34,6 +34,8 @@ public final class BodyMetricViewModel {
     @ObservationIgnored
     private let makeRequestID: @MainActor () -> UUID
     @ObservationIgnored
+    private let onCommittedEdit: @MainActor () async -> Void
+    @ObservationIgnored
     private var mutationMachine =
         QuickEntryMutationStateMachine<BodyMetricCreationUndoToken>()
     @ObservationIgnored
@@ -45,10 +47,12 @@ public final class BodyMetricViewModel {
 
     public init(
         repository: any MetricsRepository,
-        makeRequestID: @escaping @MainActor () -> UUID = { UUID() }
+        makeRequestID: @escaping @MainActor () -> UUID = { UUID() },
+        onCommittedEdit: @escaping @MainActor () async -> Void = {}
     ) {
         self.repository = repository
         self.makeRequestID = makeRequestID
+        self.onCommittedEdit = onCommittedEdit
     }
 
     public func setCustomMetric(_ metric: BodyMetricValueInput?) {
@@ -179,6 +183,7 @@ public final class BodyMetricViewModel {
             guard generation == editGeneration else { return }
             replaceSnapshot(updated)
             editPhase = .saved
+            await onCommittedEdit()
         } catch {
             guard generation == editGeneration else { return }
             editPhase = .failed
@@ -197,6 +202,7 @@ public final class BodyMetricViewModel {
             guard generation == editGeneration else { return }
             snapshots.removeAll { $0.id == snapshot.id }
             editPhase = .saved
+            await onCommittedEdit()
         } catch {
             guard generation == editGeneration else { return }
             editPhase = .failed

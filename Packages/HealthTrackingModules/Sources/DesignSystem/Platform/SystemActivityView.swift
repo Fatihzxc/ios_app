@@ -4,7 +4,8 @@ import UIKit
 
 @MainActor
 public struct SystemActivityView: UIViewControllerRepresentable {
-    private let activityItemURL: URL
+    private let activityItemURL: URL?
+    private let additionalActivityItemURLs: [URL]
     private let artifactID: UUID
     private let accessibilityIdentifier: String
     private let onCompletion: @MainActor (UUID, Bool, Error?) -> Void
@@ -18,10 +19,31 @@ public struct SystemActivityView: UIViewControllerRepresentable {
         onPresentationFailure: @escaping @MainActor (UUID) -> Void
     ) {
         self.activityItemURL = activityItemURL
+        additionalActivityItemURLs = []
         self.artifactID = artifactID
         self.accessibilityIdentifier = accessibilityIdentifier
         self.onCompletion = onCompletion
         self.onPresentationFailure = onPresentationFailure
+    }
+
+    public init(
+        activityItemURLs: [URL],
+        artifactID: UUID,
+        accessibilityIdentifier: String,
+        onCompletion: @escaping @MainActor (UUID, Bool, Error?) -> Void,
+        onPresentationFailure: @escaping @MainActor (UUID) -> Void
+    ) {
+        activityItemURL = activityItemURLs.first
+        additionalActivityItemURLs = Array(activityItemURLs.dropFirst())
+        self.artifactID = artifactID
+        self.accessibilityIdentifier = accessibilityIdentifier
+        self.onCompletion = onCompletion
+        self.onPresentationFailure = onPresentationFailure
+    }
+
+    var activityItemURLs: [URL] {
+        guard let activityItemURL else { return [] }
+        return [activityItemURL] + additionalActivityItemURLs
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -35,17 +57,26 @@ public struct SystemActivityView: UIViewControllerRepresentable {
     public func makeUIViewController(
         context: Context
     ) -> UIActivityViewController {
-        let controller = UIActivityViewController(
-            activityItems: [activityItemURL],
-            applicationActivities: nil
-        )
+        let controller: UIActivityViewController
+        if let activityItemURL, additionalActivityItemURLs.isEmpty {
+            controller = UIActivityViewController(
+                activityItems: [activityItemURL],
+                applicationActivities: nil
+            )
+        } else {
+            controller = UIActivityViewController(
+                activityItems: activityItemURLs,
+                applicationActivities: nil
+            )
+        }
         controller.view.accessibilityIdentifier = accessibilityIdentifier
         controller.completionWithItemsHandler = {
             [weak coordinator = context.coordinator] _, completed, _, error in
             coordinator?.complete(completed: completed, error: error)
         }
-        if !activityItemURL.isFileURL
-            || !FileManager.default.fileExists(atPath: activityItemURL.path) {
+        if activityItemURLs.isEmpty || activityItemURLs.contains(where: {
+            !$0.isFileURL || !FileManager.default.fileExists(atPath: $0.path)
+        }) {
             context.coordinator.presentationFailed()
         }
         return controller

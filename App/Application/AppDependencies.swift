@@ -3,6 +3,7 @@ import Foundation
 import NotificationsKit
 import NutritionKit
 import PersistenceKit
+import ReportsKit
 import SettingsKit
 import SwiftData
 import TrainingKit
@@ -133,6 +134,7 @@ final class AppDependencies: AppDependencyLoading {
         makeTrackerFeatureBundle: (
             @MainActor (ModelContext) -> any TrackerFeatureRouting
         )? = nil,
+        makeReportsRepository: TrackerReportsRepositoryFactory? = nil,
         reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent: (
             @MainActor () async throws -> Void
         )? = nil,
@@ -149,6 +151,7 @@ final class AppDependencies: AppDependencyLoading {
             modelContainer: modelContainer,
             hapticClient: hapticClient,
             makeTrackerFeatureBundle: makeTrackerFeatureBundle,
+            makeReportsRepository: makeReportsRepository,
             reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent:
                 reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent,
             healthCheckNotificationCenter: healthCheckNotificationCenter,
@@ -164,6 +167,7 @@ final class AppDependencies: AppDependencyLoading {
         makeTrackerFeatureBundle: (
             @MainActor (ModelContext) -> any TrackerFeatureRouting
         )?,
+        makeReportsRepository: TrackerReportsRepositoryFactory?,
         reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent: (
             @MainActor () async throws -> Void
         )?,
@@ -206,14 +210,29 @@ final class AppDependencies: AppDependencyLoading {
             reconcile: launchReconciliation
         )
         self.notificationLaunchGate = notificationLaunchGate
-        trackerFeatureBundleFactory = makeTrackerFeatureBundle ?? { modelContext in
-            DefaultTrackerFeatureFactory.make(
-                environment: environment,
-                modelContext: modelContext,
-                healthCheckNotificationCenter: healthCheckNotificationCenter,
-                healthCheckNotificationComposition:
-                    resolvedHealthCheckNotificationComposition
-            )
+        if let makeTrackerFeatureBundle {
+            trackerFeatureBundleFactory = makeTrackerFeatureBundle
+        } else if let makeReportsRepository {
+            trackerFeatureBundleFactory = { modelContext in
+                DefaultTrackerFeatureFactory.make(
+                    environment: environment,
+                    modelContext: modelContext,
+                    makeReportsRepository: makeReportsRepository,
+                    healthCheckNotificationCenter: healthCheckNotificationCenter,
+                    healthCheckNotificationComposition:
+                        resolvedHealthCheckNotificationComposition
+                )
+            }
+        } else {
+            trackerFeatureBundleFactory = { modelContext in
+                DefaultTrackerFeatureFactory.make(
+                    environment: environment,
+                    modelContext: modelContext,
+                    healthCheckNotificationCenter: healthCheckNotificationCenter,
+                    healthCheckNotificationComposition:
+                        resolvedHealthCheckNotificationComposition
+                )
+            }
         }
         seedLoader = SwiftDataSeedLoader(modelContext: mainContext)
         let repository = SwiftDataTrainingRepository(modelContext: mainContext)
@@ -492,6 +511,7 @@ final class AppDependencyPrewarmer {
             modelContainer: modelContainer,
             hapticClient: nil,
             makeTrackerFeatureBundle: nil,
+            makeReportsRepository: nil,
             reconcileHealthCheckNotificationsAfterFirstMeaningfulTodayContent: nil,
             healthCheckNotificationCenter: healthCheckNotificationCenter,
             healthCheckNotificationComposition: healthCheckNotificationComposition

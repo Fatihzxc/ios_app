@@ -12,6 +12,15 @@ final class NotificationAuthorizationUITestEvidence: ObservableObject {
     }
 }
 
+@MainActor
+final class ReportsDashboardFetchUITestEvidence: ObservableObject {
+    @Published private(set) var fetchCount = 0
+
+    func recordFetch() {
+        fetchCount += 1
+    }
+}
+
 enum AppUITestScenario: String {
     case seeded
     case emptyOnce = "empty-once"
@@ -65,6 +74,8 @@ struct AppUITestLaunchConfiguration {
     static let fixedNowFlag = "-ui-test-now"
     @MainActor static let notificationAuthorizationEvidence =
         NotificationAuthorizationUITestEvidence()
+    @MainActor static let reportsDashboardFetchEvidence =
+        ReportsDashboardFetchUITestEvidence()
     @MainActor static var notificationAuthorizationRequestCount: Int {
         notificationAuthorizationEvidence.requestCount
     }
@@ -72,6 +83,11 @@ struct AppUITestLaunchConfiguration {
     @MainActor
     static func recordNotificationAuthorizationRequest() {
         notificationAuthorizationEvidence.recordRequest()
+    }
+
+    @MainActor
+    static func recordReportsDashboardFetch() {
+        reportsDashboardFetchEvidence.recordFetch()
     }
 
     enum Appearance: String {

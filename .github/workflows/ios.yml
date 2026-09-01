@@ -650,6 +650,7 @@ jobs:
             test/m4.8-*)
               scripts/test-ios.sh --focused-testing ReportsKitTests
               scripts/test-ios.sh --focused-testing HealthTrackingAppTests/ReportsCompositionTests
+              scripts/test-ios.sh --focused-testing HealthTrackingAppUITests/M3AcceptanceUITests/testReportDashboardFetchLifecycleAcrossRootSheetDismissals
               ;;
             *)
               echo "Unknown focused M4 branch: $GITHUB_REF_NAME" >&2
