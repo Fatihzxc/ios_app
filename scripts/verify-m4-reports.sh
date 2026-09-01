@@ -5406,6 +5406,7 @@ TASK7_TEST_SUITES = {
             "testPublicationNeverFollowsDestinationParentSwapOutsideHeldDirectory",
             "testStageUnlinkFailureStopsBeforeSensitiveWriteAndAutomaticallyCleansZeroBytePartial",
             "testStageHardLinkBeforeUnlinkFailsBeforeBytesAndCleansExactZeroByteInode",
+            "testHardLinkEarlyFailureSynchronouslyRestoresPrivateParentFlagsBeforeReturning",
             "testStageMoveBetweenOpenAndUnlinkIsRejectedBeforePrivateBytesAreWritten",
             "testPublicationDoesNotExposeBytesWhenParentMovesAfterFinalValidationBeforeClone",
             "testPublicationCreateWindowKeepsParentAppendOnlyThroughDescriptorClone",
@@ -5476,7 +5477,7 @@ TASK7_TEST_ASSET_SHA256 = {
         "d232fb5a4ef7a4b70b81d2d563913d7688fa9c54c2081f3a3737b893ddee0bfc"
     ),
     "Packages/HealthTrackingModules/Tests/ReportsKitTests/StoredZIPWriterTests.swift": (
-        "11357cce6ba96996605366e0b867b791dc148e12ec36bd3e378f82abc1e319b2"
+        "861e2554ec075586706fd008690d2777055818cdeb2f897e4e89513931fba48b"
     ),
     "Packages/HealthTrackingModules/Tests/ReportsKitTests/ReportExportCoordinatorTests.swift": (
         "f4ed898e4aed79d631c4cbdf1d8a3b8b675e950d611c3c31b777567eb3111045"

@@ -370,6 +370,86 @@ final class StoredZIPWriterTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: linkedResidue.path))
     }
 
+    func testHardLinkEarlyFailureSynchronouslyRestoresPrivateParentFlagsBeforeReturning() async throws {
+        let parent = temporaryDirectory.appendingPathComponent(
+            "synchronous-stage-parent-restore",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false)
+        let entry = try ReportExportDescriptorIO.makeEntry(at: parent, createIfMissing: false)
+        let namespaceLease = try ReportExportVisibleDirectoryLease(
+            descriptor: entry.descriptor
+        )
+        let baseline = try ReportExportDescriptorIO.metadata(for: entry.descriptor.rawValue)
+        let scheduler = ZIPManualCleanupScheduler()
+        let registry = ReportExportStageResidueRegistry(scheduler: scheduler)
+        let visibleName = ".synchronous-stage.00000000-0000-4000-8000-000000000007.partial"
+        let visibleStage = parent.appendingPathComponent(visibleName)
+        let linkedResidue = parent.appendingPathComponent("synchronous-linked-zero-stage")
+        defer {
+            try? namespaceLease.release()
+            _ = Darwin.chflags(parent.path, 0)
+            try? FileManager.default.removeItem(at: linkedResidue)
+            try? FileManager.default.removeItem(at: visibleStage)
+            try? FileManager.default.removeItem(at: parent)
+        }
+
+        XCTAssertTrue(baseline.hasNoUnlink)
+        XCTAssertThrowsError(
+            try ReportExportDescriptorIO.createAnonymousFile(
+                in: entry.descriptor.rawValue,
+                parentURL: parent,
+                visibleName: visibleName,
+                privateParent: true,
+                registry: registry,
+                beforeUnlink: {
+                    try createHardLink(from: visibleStage, to: linkedResidue)
+                }
+            )
+        )
+
+        let returned = try ReportExportDescriptorIO.metadata(for: entry.descriptor.rawValue)
+        XCTAssertEqual(returned.identity, baseline.identity)
+        XCTAssertEqual(returned.permissionMode, baseline.permissionMode)
+        XCTAssertEqual(
+            returned.flags,
+            baseline.flags,
+            "The throwing call must restore the exact private-parent baseline before returning"
+        )
+        XCTAssertTrue(returned.hasNoUnlink)
+        XCTAssertEqual(try Data(contentsOf: linkedResidue), Data())
+        XCTAssertEqual(registry.retainedCount, 1)
+        XCTAssertEqual(scheduler.pendingCount, 1)
+
+        for _ in 0..<8 {
+            await scheduler.runNextBatch()
+        }
+        XCTAssertEqual(registry.retainedCount, 1)
+        XCTAssertEqual(scheduler.pendingCount, 0)
+        let afterRetries = try ReportExportDescriptorIO.metadata(
+            for: entry.descriptor.rawValue
+        )
+        XCTAssertEqual(afterRetries.flags, baseline.flags)
+
+        try ReportExportNamespaceAuthority.shared.transaction {
+            try ReportExportDescriptorIO.withRemovalAllowed(
+                in: entry.descriptor.rawValue
+            ) {
+                let result = linkedResidue.lastPathComponent.withCString {
+                    Darwin.unlinkat(entry.descriptor.rawValue, $0, 0)
+                }
+                guard result == 0 else {
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
+            }
+        }
+        let trigger = try registry.reserve()
+        registry.release(trigger)
+        XCTAssertEqual(registry.retainedCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: visibleStage.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: linkedResidue.path))
+    }
+
     func testStageMoveBetweenOpenAndUnlinkIsRejectedBeforePrivateBytesAreWritten() async throws {
         let sourceBytes = Data("stage-move-private-source".utf8)
         let source = try self.source("stage-move-source.bin", bytes: sourceBytes)
