@@ -4,7 +4,12 @@ enum AppDomainContext {
     static func makeCalendar() -> Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.locale = .autoupdatingCurrent
+        #if DEBUG
+        calendar.timeZone = AppUITestLaunchConfiguration.resolve()?.fixedTimeZone
+            ?? .autoupdatingCurrent
+        #else
         calendar.timeZone = .autoupdatingCurrent
+        #endif
         return calendar
     }
 

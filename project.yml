@@ -103,6 +103,7 @@ schemes:
         - package: HealthTrackingModules/ReportsKitTests
       environmentVariables:
         M3_SMALL_PHONE_GATE: "$(M3_SMALL_PHONE_GATE)"
+        M4_SMALL_PHONE_GATE: "$(M4_SMALL_PHONE_GATE)"
     archive:
       config: Release
   HealthTrackingApp-Cloud:

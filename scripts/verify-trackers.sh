@@ -5962,7 +5962,7 @@ def canonical_test_job_steps(source: str) -> list[dict[str, object]]:
         set(job_keys) != {"if", "runs-on", "timeout-minutes", "steps"}
         or [value for value, _ in job_keys["if"]] != [M4_SAFE_FULL_JOB_GUARD]
         or [value for value, _ in job_keys["runs-on"]] != ["macos-15"]
-        or [value for value, _ in job_keys["timeout-minutes"]] != ["300"]
+        or [value for value, _ in job_keys["timeout-minutes"]] != ["360"]
         or [value for value, _ in job_keys["steps"]] != [""]
     ):
         raise SystemExit(
@@ -10766,7 +10766,7 @@ with tempfile.TemporaryDirectory() as temporary:
 
     m311_workflow.write_text(
         original_m311_workflow.replace(
-            "    timeout-minutes: 300\n",
+            "    timeout-minutes: 360\n",
             "    timeout-minutes: 180\n",
             1,
         ),
