@@ -65,6 +65,11 @@ xcodebuild build \\
 CANONICAL_KEY = r"[A-Za-z][A-Za-z0-9_-]*"
 YAML_KEY = rf"(?:{CANONICAL_KEY}|'{CANONICAL_KEY}'|\"{CANONICAL_KEY}\")"
 RUNNER_SHA256 = "98065cbe584b6041011b52a253c05ed799467a4d5fe82611517ce13b29ec400c"
+TASK9_ACCEPTANCE_STEP_NAME = "Targeted M4.9 report acceptance"
+TASK9_ACCEPTANCE_SELECTOR = (
+    "scripts/test-ios.sh --focused-testing "
+    "HealthTrackingAppUITests/M4ReportsAcceptanceUITests"
+)
 
 
 def normalize_key(raw: str) -> str:
@@ -240,6 +245,115 @@ def verify(root: Path) -> None:
     } or block_run(device[0][1]) != TASK7_DEVICE_BUILD_RUN:
         raise ValueError("Focused M4 workflow must compile the exact Task 7 device-only branch")
     verify_focused_runner(runner)
+
+
+def verify_task9_red_contract(root: Path) -> None:
+    workflow = (root / ".github/workflows/ios.yml").read_text(encoding="utf-8")
+    full_job = job_block(workflow, "test")
+    canonical_step = (
+        f"      - name: {TASK9_ACCEPTANCE_STEP_NAME}\n"
+        "        timeout-minutes: 30\n"
+        f"        run: {TASK9_ACCEPTANCE_SELECTOR}\n"
+    )
+    if full_job.count(canonical_step) != 1:
+        raise ValueError("M4.9 acceptance step must use the exact fail-closed selector")
+    acceptance_header = f"      - name: {TASK9_ACCEPTANCE_STEP_NAME}\n"
+    if full_job.count(acceptance_header) != 1:
+        raise ValueError("M4.9 full workflow must run one exact acceptance step")
+    if TASK9_ACCEPTANCE_SELECTOR in job_block(workflow, "test-m4-focused"):
+        raise ValueError("M4.9 acceptance must never route through the focused M4 job")
+
+    source = (
+        root / "HealthTrackingAppUITests/M4ReportsAcceptanceUITests.swift"
+    ).read_text(encoding="utf-8")
+    required = (
+        "final class M4ReportsAcceptanceUITests: XCTestCase",
+        "func testUS7DashboardUsesEveryRangeAndShowsHonestObservedEvidence()",
+        '"-ui-test-scenario", "m4-reports"',
+        '"reports.chart.body.kg.segment.1"',
+        '"reports.chart.body.cm.segment.1"',
+        '"reports.protein"',
+        '"reports.export.share.sheet"',
+        '"m4.reports.export-workspace-count"',
+    )
+    missing = [token for token in required if token not in source]
+    if missing:
+        raise ValueError(
+            "M4.9 acceptance source is missing exact real-app witnesses: "
+            + ", ".join(missing)
+        )
+
+
+def task9_red_self_test(source_root: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="m4-task9-red-verifier-") as directory:
+        fixture = Path(directory)
+        (fixture / ".github/workflows").mkdir(parents=True)
+        (fixture / "HealthTrackingAppUITests").mkdir(parents=True)
+        workflow = fixture / ".github/workflows/ios.yml"
+        acceptance = fixture / "HealthTrackingAppUITests/M4ReportsAcceptanceUITests.swift"
+        shutil.copy2(source_root / ".github/workflows/ios.yml", workflow)
+        shutil.copy2(
+            source_root / "HealthTrackingAppUITests/M4ReportsAcceptanceUITests.swift",
+            acceptance,
+        )
+        verify_task9_red_contract(fixture)
+
+        original_workflow = workflow.read_text(encoding="utf-8")
+        workflow.write_text(
+            original_workflow.replace(
+                TASK9_ACCEPTANCE_SELECTOR,
+                "scripts/test-ios.sh --only-testing HealthTrackingAppUITests",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        try:
+            verify_task9_red_contract(fixture)
+        except ValueError as error:
+            if "exact fail-closed selector" not in str(error):
+                raise SystemExit(
+                    f"M4.9 selector mutation failed incorrectly: {error}"
+                ) from error
+        else:
+            raise SystemExit("M4.9 broad-selector mutation escaped")
+
+        workflow.write_text(
+            original_workflow.replace(
+                f"      - name: {TASK9_ACCEPTANCE_STEP_NAME}\n",
+                f"      - name: {TASK9_ACCEPTANCE_STEP_NAME}\n"
+                "        continue-on-error: true\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        try:
+            verify_task9_red_contract(fixture)
+        except ValueError as error:
+            if "exact fail-closed selector" not in str(error):
+                raise SystemExit(
+                    f"M4.9 continue-on-error mutation failed incorrectly: {error}"
+                ) from error
+        else:
+            raise SystemExit("M4.9 continue-on-error mutation escaped")
+
+        workflow.write_text(original_workflow, encoding="utf-8")
+        original_source = acceptance.read_text(encoding="utf-8")
+        acceptance.write_text(
+            original_source.replace(
+                '"reports.chart.body.kg.segment.1"',
+                '"reports.chart.body.removed.segment.1"',
+            ),
+            encoding="utf-8",
+        )
+        try:
+            verify_task9_red_contract(fixture)
+        except ValueError as error:
+            if "real-app witnesses" not in str(error):
+                raise SystemExit(
+                    f"M4.9 real-app witness mutation failed incorrectly: {error}"
+                ) from error
+        else:
+            raise SystemExit("M4.9 real-app witness mutation escaped")
 
 
 def target_dependencies(package: str, name: str) -> list[str]:
@@ -6974,6 +7088,7 @@ root = Path(sys.argv[1])
 mode = sys.argv[2]
 if mode == "--self-test":
     self_test(root)
+    task9_red_self_test(root)
     reports_architecture_self_test(root)
     task3_real_asset_self_test(root)
     task4_real_asset_self_test(root)
@@ -6983,6 +7098,7 @@ if mode == "--self-test":
     print("M4 focused CI verifier self-tests passed.")
 elif mode == "":
     verify(root)
+    verify_task9_red_contract(root)
     verify_reports_architecture(root)
     verify_task5_assets(root)
     verify_task6_assets(root)
