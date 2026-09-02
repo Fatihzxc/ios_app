@@ -133,6 +133,7 @@ public struct ReportsDashboardView: View {
             stateContent
             exportButton
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("reports.dashboard")
         .task {
             guard loadsOnPresentation else { return }
@@ -296,6 +297,7 @@ public struct ReportsDashboardView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("reports.summary")
     }
 
@@ -357,6 +359,7 @@ public struct ReportsDashboardView: View {
                     }
                 }
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("reports.strength")
         }
     }
@@ -377,9 +380,15 @@ public struct ReportsDashboardView: View {
                         AppColors.color(.inkSecondary, scheme: colorScheme)
                     )
                     .fixedSize(horizontal: false, vertical: true)
+                Text(proteinProvenance(report.proteinAdherence.provenance))
+                    .font(AppTypography.caption)
+                    .foregroundStyle(
+                        AppColors.color(.inkSecondary, scheme: colorScheme)
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier(proteinIdentifier(presentation.state))
     }
 
@@ -455,6 +464,7 @@ public struct ReportsDashboardView: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("reports.phase")
     }
 
@@ -699,6 +709,13 @@ public struct ReportsDashboardView: View {
         switch state {
         case .computed: "reports.protein"
         case .noObservations, .noEligibleTarget: "reports.protein.missing"
+        }
+    }
+
+    private func proteinProvenance(_ provenance: ProteinTargetProvenance) -> String {
+        switch provenance {
+        case .currentProfileAppliedToObservedDays:
+            localized("reports.protein.provenance.current_profile")
         }
     }
 

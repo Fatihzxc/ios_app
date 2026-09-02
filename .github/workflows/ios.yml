@@ -58,6 +58,22 @@ jobs:
           fi
           printf '%s\n' "$version_output"
 
+      - name: Targeted M4.9 report acceptance
+        timeout-minutes: 30
+        run: scripts/test-ios.sh --focused-testing HealthTrackingAppUITests/M4ReportsAcceptanceUITests
+
+      - name: Targeted M4.9 accessibility matrix
+        timeout-minutes: 60
+        run: scripts/test-ios.sh --focused-testing HealthTrackingAppUITests/M4ReportsAccessibilityUITests
+
+      - name: Targeted M4.9 export round trip
+        timeout-minutes: 30
+        run: scripts/test-ios.sh --focused-testing HealthTrackingAppTests/M4ExportRoundTripTests
+
+      - name: Targeted M4.9 large dataset audit
+        timeout-minutes: 30
+        run: scripts/test-ios.sh --focused-testing ReportsKitTests/ReportsLargeDatasetTests
+
       - name: Qualifying M3.11 behavior RED
         timeout-minutes: 20
         run: scripts/test-ios.sh --m311-red-only
@@ -298,6 +314,19 @@ jobs:
           progress_photo_gallery_expected = {
               "m3-photo-gallery-light",
           }
+          m4_acceptance_expected = {
+              "m4-reports-us7",
+              "m4-reports-photo-share",
+              "m4-reports-export-both",
+          }
+          m4_accessibility_expected = {
+              f"m4-reports-{appearance}-{size}"
+              for appearance in ["light", "dark"]
+              for size in ["default", "xxl", "ax3", "ax5"]
+          } | {
+              "m4-reports-reduce-motion",
+              "m4-reports-high-contrast",
+          }
           expected = (
               shell_expected
               | gallery_expected
@@ -319,6 +348,8 @@ jobs:
               | m3_accessibility_expected
               | progress_photo_lifecycle_expected
               | progress_photo_gallery_expected
+              | m4_acceptance_expected
+              | m4_accessibility_expected
           )
 
           owners = {
@@ -401,6 +432,14 @@ jobs:
               "ProgressPhotoGalleryUITests": {
                   "module": "HealthTrackingAppUITests",
                   "expected": progress_photo_gallery_expected,
+              },
+              "M4ReportsAcceptanceUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": m4_acceptance_expected,
+              },
+              "M4ReportsAccessibilityUITests": {
+                  "module": "HealthTrackingAppUITests",
+                  "expected": m4_accessibility_expected,
               },
           }
 
@@ -507,6 +546,179 @@ jobs:
           PY
           find "$export_directory" -maxdepth 1 -type f -print | sort
 
+      - name: Audit attached M4 export ZIP
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          attachment_directory=".build/gallery-screenshots"
+          evidence_directory=".build/m4-export-evidence"
+          archive_path="$evidence_directory/m4-round-trip-export.zip"
+          rm -rf "$evidence_directory"
+          mkdir -p "$evidence_directory"
+
+          python3 - "$attachment_directory" "$archive_path" <<'PY'
+          import json
+          import shutil
+          import sys
+          from pathlib import Path
+
+          attachment_directory = Path(sys.argv[1])
+          archive_path = Path(sys.argv[2])
+          manifest_path = attachment_directory / "manifest.json"
+          try:
+              records = json.loads(manifest_path.read_text(encoding="utf-8"))
+          except (OSError, UnicodeError, json.JSONDecodeError) as error:
+              raise SystemExit(f"Invalid exported attachment manifest: {error}") from error
+          if not isinstance(records, list):
+              raise SystemExit("Exported attachment manifest must contain test records.")
+
+          method = "testGeneratedZIPPassesPureInspectorManifestHashesAndAttachesHostedArtifact"
+          matches = []
+          for record in records:
+              if not isinstance(record, dict):
+                  raise SystemExit("Exported attachment record must be an object.")
+              identifier = record.get("testIdentifier")
+              if not isinstance(identifier, str):
+                  raise SystemExit("Exported attachment record has no test identifier.")
+              segments = identifier.split("/")
+              owned = (
+                  len(segments) == 2
+                  and segments[0] in {
+                      "M4ExportRoundTripTests",
+                      "HealthTrackingAppTests.M4ExportRoundTripTests",
+                  }
+                  and segments[1].startswith(method)
+              ) or (
+                  len(segments) == 3
+                  and segments[0] == "HealthTrackingAppTests"
+                  and segments[1] == "M4ExportRoundTripTests"
+                  and segments[2].startswith(method)
+              )
+              if not owned:
+                  continue
+              attachments = record.get("attachments")
+              if not isinstance(attachments, list):
+                  raise SystemExit("M4 round-trip attachment record is malformed.")
+              for attachment in attachments:
+                  if not isinstance(attachment, dict):
+                      raise SystemExit("M4 round-trip attachment entry is malformed.")
+                  suggested = attachment.get("suggestedHumanReadableName")
+                  exported = attachment.get("exportedFileName")
+                  if not isinstance(suggested, str) or not isinstance(exported, str):
+                      raise SystemExit("M4 round-trip attachment metadata is malformed.")
+                  normalized = suggested.lower()
+                  canonical = "m4-round-trip-export.zip"
+                  if normalized == canonical or normalized.startswith(f"{canonical}_"):
+                      matches.append(attachment_directory / exported)
+
+          if len(matches) != 1:
+              raise SystemExit(f"Expected one owned M4 round-trip ZIP attachment; found {len(matches)}.")
+          source = matches[0]
+          if not source.is_file() or source.suffix.lower() != ".zip":
+              raise SystemExit("Owned M4 round-trip attachment is not an exported ZIP file.")
+          shutil.copyfile(source, archive_path)
+          PY
+
+          /usr/bin/unzip -t "$archive_path" > "$evidence_directory/unzip-test.txt"
+
+          python3 - "$archive_path" "$evidence_directory/audit-summary.json" <<'PY'
+          import hashlib
+          import json
+          import re
+          import sys
+          import zipfile
+          from pathlib import Path, PurePosixPath
+
+          archive_path = Path(sys.argv[1])
+          summary_path = Path(sys.argv[2])
+          archive = archive_path.read_bytes()
+          with zipfile.ZipFile(archive_path) as stored_zip:
+              infos = stored_zip.infolist()
+              names = [info.filename for info in infos]
+              if len(names) != len(set(names)):
+                  raise SystemExit("M4 export ZIP contains duplicate entry names.")
+              for info in infos:
+                  name = info.filename
+                  path = PurePosixPath(name)
+                  if (
+                      not name
+                      or "\\" in name
+                      or path.is_absolute()
+                      or str(path) != name
+                      or any(part in {"", ".", ".."} for part in path.parts)
+                      or info.is_dir()
+                      or info.flag_bits & 0x1
+                  ):
+                      raise SystemExit("M4 export ZIP contains an unsafe entry.")
+              entries = {info.filename: stored_zip.read(info) for info in infos}
+
+          try:
+              manifest_bytes = entries["manifest.json"]
+              manifest = json.loads(manifest_bytes)
+          except (KeyError, UnicodeError, json.JSONDecodeError) as error:
+              raise SystemExit(f"M4 export ZIP has no valid manifest: {error}") from error
+          if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 1:
+              raise SystemExit("M4 export manifest must use schema version 1.")
+          payloads = manifest.get("payloads")
+          if not isinstance(payloads, list) or not payloads:
+              raise SystemExit("M4 export manifest must list payloads.")
+
+          payload_paths = []
+          verified = 0
+          for payload in payloads:
+              if not isinstance(payload, dict):
+                  raise SystemExit("M4 export manifest payload must be an object.")
+              relative_path = payload.get("relativePath")
+              byte_size = payload.get("byteSize")
+              expected_hash = payload.get("sha256")
+              if (
+                  not isinstance(relative_path, str)
+                  or isinstance(byte_size, bool)
+                  or not isinstance(byte_size, int)
+                  or byte_size < 0
+                  or not isinstance(expected_hash, str)
+                  or re.fullmatch(r"[0-9a-f]{64}", expected_hash) is None
+              ):
+                  raise SystemExit("M4 export manifest payload metadata is invalid.")
+              if relative_path in payload_paths:
+                  raise SystemExit("M4 export manifest repeats a payload path.")
+              payload_paths.append(relative_path)
+              try:
+                  payload_bytes = entries[relative_path]
+              except KeyError as error:
+                  raise SystemExit("M4 export manifest references a missing payload.") from error
+              if len(payload_bytes) != byte_size:
+                  raise SystemExit("M4 export payload byte size does not match its manifest.")
+              if hashlib.sha256(payload_bytes).hexdigest() != expected_hash:
+                  raise SystemExit("M4 export payload checksum does not match its manifest.")
+              verified += 1
+
+          if set(entries) != set(payload_paths) | {"manifest.json"}:
+              raise SystemExit("M4 export ZIP contains missing or unmanifested entries.")
+          summary = {
+              "archiveByteSize": len(archive),
+              "archiveEntryCount": len(entries),
+              "archiveSHA256": hashlib.sha256(archive).hexdigest(),
+              "manifestSHA256": hashlib.sha256(manifest_bytes).hexdigest(),
+              "payloadChecksumsVerified": verified,
+              "schemaVersion": 1,
+          }
+          summary_path.write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          cat "$evidence_directory/audit-summary.json"
+
+      - name: Upload M4 export audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: M4-export-round-trip-evidence
+          path: .build/m4-export-evidence/**
+          include-hidden-files: true
+          if-no-files-found: warn
+
       - name: Cloud scheme compile-only
         timeout-minutes: 20
         run: scripts/test-ios.sh --cloud-compile-only
@@ -562,6 +774,7 @@ jobs:
           path: |
             .build/**/*.xcresult
             .build/gallery-screenshots/**
+            .build/m4-export-evidence/**
           include-hidden-files: true
           if-no-files-found: warn
 
@@ -732,6 +945,8 @@ jobs:
   test-small-phone:
     runs-on: macos-15
     timeout-minutes: 30
+    env:
+      M4_SMALL_PHONE_GATE: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -779,6 +994,8 @@ jobs:
             -resultBundlePath "$result_bundle" \
             -only-testing:HealthTrackingAppUITests/TrainingAccessibilityUITests/testSmallPhoneAX5SessionRemainsOperable \
             -only-testing:HealthTrackingAppUITests/M3AccessibilityUITests/testSmallPhoneAX5TrackerRoutesRemainOperable \
+            -only-testing:HealthTrackingAppUITests/M4ReportsAccessibilityUITests/testSmallPhoneAX5DashboardAndExportRemainOperable \
+            M4_SMALL_PHONE_GATE=1 \
             M3_SMALL_PHONE_GATE=1 \
             CODE_SIGNING_ALLOWED=NO
 
@@ -804,6 +1021,7 @@ jobs:
           expected = {
               "m1-session-small-ax5": "TrainingAccessibilityUITests",
               "m3-progress-small-ax5": "M3AccessibilityUITests",
+              "m4-reports-small-ax5": "M4ReportsAccessibilityUITests",
           }
           matches = {canonical: [] for canonical in expected}
           for record in manifest:

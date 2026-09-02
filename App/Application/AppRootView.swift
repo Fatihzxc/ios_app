@@ -179,7 +179,7 @@ struct AppRootView: View {
                     )
                     .allowsHitTesting(false)
             }
-            if exposesTrackerFeatureRouterEvidence {
+            if exposesTrackerFeatureRouterEvidence || exposesM4ReportsEvidence {
                 Text(String(reportsDashboardFetchEvidence.fetchCount))
                     .font(.system(size: 1))
                     .foregroundStyle(.clear)
@@ -190,7 +190,7 @@ struct AppRootView: View {
                     )
                     .allowsHitTesting(false)
             }
-            if exposesTrackerFeatureRouterEvidence,
+            if exposesTrackerFeatureRouterEvidence || exposesM4ReportsEvidence,
                AppUITestLaunchConfiguration.resolve()?.fixedNow != nil {
                 let fixedNowEvidence = ISO8601DateFormatter().string(from: AppDomainContext.now())
                 Text(fixedNowEvidence)
@@ -200,6 +200,20 @@ struct AppRootView: View {
                     .accessibilityIdentifier("m3.fixed-now")
                     .accessibilityValue(fixedNowEvidence)
                     .allowsHitTesting(false)
+            }
+            if exposesM4ReportsEvidence {
+                TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                    let count = m4ExportWorkspaceCount
+                    Text(String(count))
+                        .font(.system(size: 1))
+                        .foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .accessibilityIdentifier(
+                            "m4.reports.export-workspace-count"
+                        )
+                        .accessibilityValue(String(count))
+                        .allowsHitTesting(false)
+                }
             }
             #endif
         }
@@ -519,6 +533,31 @@ struct AppRootView: View {
         AppUITestLaunchConfiguration.resolve()?.scenario == .m3HealthChecks
         #else
         false
+        #endif
+    }
+
+    private var exposesM4ReportsEvidence: Bool {
+        #if DEBUG
+        AppUITestLaunchConfiguration.resolve()?.scenario == .m4Reports
+        #else
+        false
+        #endif
+    }
+
+    private var m4ExportWorkspaceCount: Int {
+        #if DEBUG
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FOHealthExports", isDirectory: true)
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsSubdirectoryDescendants]
+        ) else { return 0 }
+        return contents.filter { url in
+            (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        }.count
+        #else
+        return 0
         #endif
     }
 }

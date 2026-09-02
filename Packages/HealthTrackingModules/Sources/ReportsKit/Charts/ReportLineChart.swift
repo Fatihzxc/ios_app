@@ -55,6 +55,7 @@ public struct ReportLineChart: View {
             .chartYAxisLabel(descriptor.model.yAxisTitle)
             .frame(minHeight: 220)
             .accessibilityChartDescriptor(descriptor)
+            .accessibilityLabel(descriptor.model.title)
             .accessibilityIdentifier("reports.chart.\(chartIdentifier)")
 
             ReportTextTable(descriptor: descriptor)

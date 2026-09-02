@@ -827,6 +827,26 @@ enum DefaultTrackerFeatureFactory {
                     now: now
                 )
             }
+            if scenario == .m4Reports,
+               let behavior = AppUITestLaunchConfiguration.resolve()?
+                    .reportsExportBehavior {
+                let photoRepository = UITestProgressPhotoGalleryRepository()
+                return TrackerFeatureBundle(
+                    metricsRepository: metricsRepository,
+                    lifestyleRepository: lifestyleRepository,
+                    healthChecksRepository: healthChecksRepository,
+                    bloodworkRepository: bloodworkRepository,
+                    progressPhotoRepository: photoRepository,
+                    reportsRepository: M4ReportsUITestRepository(
+                        behavior: behavior
+                    ),
+                    reportExportPhotoProvider: M4ReportsUITestPhotoProvider(),
+                    healthCheckNotificationComposition:
+                        resolvedHealthCheckNotificationComposition,
+                    calendar: calendar,
+                    now: now
+                )
+            }
         }
         #endif
         return TrackerFeatureBundle(
@@ -906,6 +926,293 @@ private final class UITestReportsRepository:
             in: interval,
             modules: modules
         )
+    }
+}
+#endif
+
+#if DEBUG
+@MainActor
+private final class M4ReportsUITestRepository:
+    ReportsRepository, ReportsExportRepository {
+    private enum FixtureFailure: Error {
+        case export
+    }
+
+    private let behavior: AppUITestLaunchConfiguration.ReportsExportBehavior
+    private var hasConsumedExportBehavior = false
+
+    init(behavior: AppUITestLaunchConfiguration.ReportsExportBehavior) {
+        self.behavior = behavior
+    }
+
+    func fetchDashboardSource(
+        in interval: ReportDateInterval
+    ) async throws -> ReportsDashboardSource {
+        AppUITestLaunchConfiguration.recordReportsDashboardFetch()
+        let body = Self.bodyMetrics.filter { interval.contains($0.date) }
+        let exercise = Self.exerciseSets.filter { interval.contains($0.sessionDate) }
+        let nutrition = Self.nutritionDays.filter { interval.contains($0.date) }
+        let sleep = Self.sleepRecords.filter { interval.contains($0.date) }
+        let mood = Self.moodRecords.filter { interval.contains($0.date) }
+        let posture = Self.postureRecords.filter { interval.contains($0.date) }
+        let observationDates = body.map(\.date)
+            + exercise.map(\.sessionDate)
+            + nutrition.map(\.date)
+            + sleep.map(\.date)
+            + mood.map(\.date)
+            + posture.map(\.date)
+        return ReportsDashboardSource(
+            coverage: ReportCoverage(observationDates: observationDates),
+            bodyMetricRecords: body,
+            exerciseSetRecords: exercise,
+            nutritionDayRecords: nutrition,
+            sleepRecords: sleep,
+            moodRecords: mood,
+            postureRecords: posture,
+            programPhases: Self.programPhases,
+            currentPhaseState: Self.currentPhaseState,
+            phaseTransitions: []
+        )
+    }
+
+    func fetchExportSnapshot(
+        in interval: ReportDateInterval,
+        modules: Set<ExportModuleV1>
+    ) async throws -> ExportSnapshotV1 {
+        switch behavior {
+        case .failOnce where !hasConsumedExportBehavior:
+            hasConsumedExportBehavior = true
+            throw FixtureFailure.export
+        case .slowOnce where !hasConsumedExportBehavior:
+            hasConsumedExportBehavior = true
+            try await Task.sleep(nanoseconds: 30_000_000_000)
+            try Task.checkCancellation()
+        case .success, .failOnce, .slowOnce:
+            break
+        }
+
+        let tables = try modules.map { module in
+            try ExportTableV1(
+                module: module,
+                columns: ExportSchemaV1.columns(for: module),
+                rows: module == .photos
+                    ? Self.photoRows.filter { interval.contains($0.primaryTimestamp) }
+                    : []
+            )
+        }
+        return try ExportSnapshotV1(
+            interval: interval,
+            selectedModules: modules,
+            tables: tables
+        )
+    }
+
+    private static let bodyMetrics: [ReportBodyMetricRecord] = [
+        bodyMetric("00000000-0000-4000-8000-00000000b401", "2026-02-10T09:00:00Z", .weight, 84.5, "kg"),
+        bodyMetric("00000000-0000-4000-8000-00000000b402", "2026-05-10T09:00:00Z", .weight, 82.0, "kg"),
+        bodyMetric("00000000-0000-4000-8000-00000000b403", "2026-08-05T09:00:00Z", .weight, 79.4, "kg"),
+        bodyMetric("00000000-0000-4000-8000-00000000b404", "2026-08-08T09:00:00Z", .weight, 79.0, "kg"),
+        bodyMetric("00000000-0000-4000-8000-00000000b405", "2026-08-05T09:30:00Z", .waist, 86.0, "cm"),
+        bodyMetric("00000000-0000-4000-8000-00000000b406", "2026-08-08T09:30:00Z", .waist, 85.2, "cm"),
+    ]
+
+    private static let exerciseSets: [ReportExerciseSetRecord] = [
+        exerciseSet("00000000-0000-4000-8000-00000000a501", "00000000-0000-4000-8000-00000000a601", "2026-08-06T08:00:00Z", 0, 80, 8),
+        exerciseSet("00000000-0000-4000-8000-00000000a502", "00000000-0000-4000-8000-00000000a601", "2026-08-06T08:00:00Z", 1, 82.5, 6),
+        exerciseSet("00000000-0000-4000-8000-00000000a503", "00000000-0000-4000-8000-00000000a602", "2026-08-09T08:00:00Z", 0, 85, 7),
+        exerciseSet("00000000-0000-4000-8000-00000000a504", "00000000-0000-4000-8000-00000000a602", "2026-08-09T08:00:00Z", 1, 87.5, 5),
+    ]
+
+    private static let nutritionDays: [ReportNutritionDayRecord] = [
+        nutrition("00000000-0000-4000-8000-00000000c401", "2026-08-08T12:00:00Z", 120, 100),
+        nutrition("00000000-0000-4000-8000-00000000c402", "2026-08-09T12:00:00Z", 70, 100),
+        nutrition("00000000-0000-4000-8000-00000000c403", "2026-08-10T12:00:00Z", 60, nil),
+    ]
+
+    private static let sleepRecords = [
+        ReportSleepRecord(
+            id: uuid("00000000-0000-4000-8000-00000000d401"),
+            date: date("2026-08-04T06:00:00Z"),
+            createdAt: date("2026-08-04T06:00:00Z"),
+            durationHours: 7.5,
+            quality: 8
+        ),
+        ReportSleepRecord(
+            id: uuid("00000000-0000-4000-8000-00000000d402"),
+            date: date("2026-08-08T06:00:00Z"),
+            createdAt: date("2026-08-08T06:00:00Z"),
+            durationHours: 8,
+            quality: 9
+        ),
+    ]
+
+    private static let moodRecords = [
+        ReportMoodRecord(
+            id: uuid("00000000-0000-4000-8000-00000000e401"),
+            date: date("2026-08-04T18:00:00Z"),
+            createdAt: date("2026-08-04T18:00:00Z"),
+            score: 6,
+            energy: 6
+        ),
+        ReportMoodRecord(
+            id: uuid("00000000-0000-4000-8000-00000000e402"),
+            date: date("2026-08-08T18:00:00Z"),
+            createdAt: date("2026-08-08T18:00:00Z"),
+            score: 8,
+            energy: 8
+        ),
+    ]
+
+    private static let postureRecords = [
+        ReportPostureRecord(
+            id: uuid("00000000-0000-4000-8000-00000000f401"),
+            date: date("2026-08-04T17:00:00Z"),
+            createdAt: date("2026-08-04T17:00:00Z"),
+            symptomScore: 5,
+            wallTestPass: false
+        ),
+        ReportPostureRecord(
+            id: uuid("00000000-0000-4000-8000-00000000f402"),
+            date: date("2026-08-08T17:00:00Z"),
+            createdAt: date("2026-08-08T17:00:00Z"),
+            symptomScore: 2,
+            wallTestPass: true
+        ),
+    ]
+
+    private static let phaseID = uuid("00000000-0000-4000-8000-000000009401")
+    private static let programID = uuid("00000000-0000-4000-8000-000000009402")
+    private static let programPhases = [
+        ReportProgramPhaseRecord(id: phaseID, name: "Temel", orderIndex: 0),
+    ]
+    private static let currentPhaseState = ReportCurrentPhaseStateRecord(
+        programID: programID,
+        phaseID: phaseID,
+        phaseStartedAt: date("2026-04-01T09:00:00Z")
+    )
+
+    private static let photoRows: [ExportRowV1] = {
+        do {
+            return try [
+                photoRow("00000000-0000-0000-0000-000000000201", "front"),
+                photoRow("00000000-0000-0000-0000-000000000202", "side"),
+            ]
+        } catch {
+            preconditionFailure("Invalid deterministic M4 photo fixture")
+        }
+    }()
+
+    private static func bodyMetric(
+        _ id: String,
+        _ timestamp: String,
+        _ kind: ReportBodyMetricKind,
+        _ value: Double,
+        _ unit: String
+    ) -> ReportBodyMetricRecord {
+        let observedAt = date(timestamp)
+        return ReportBodyMetricRecord(
+            id: uuid(id),
+            date: observedAt,
+            createdAt: observedAt,
+            kind: kind,
+            customName: nil,
+            value: value,
+            unit: unit
+        )
+    }
+
+    private static func exerciseSet(
+        _ id: String,
+        _ sessionID: String,
+        _ timestamp: String,
+        _ setIndex: Int,
+        _ weightKg: Double,
+        _ reps: Int
+    ) -> ReportExerciseSetRecord {
+        let sessionDate = date(timestamp)
+        return ReportExerciseSetRecord(
+            id: uuid(id),
+            createdAt: sessionDate,
+            sessionID: uuid(sessionID),
+            sessionDate: sessionDate,
+            sessionCreatedAt: sessionDate,
+            exerciseTemplateID: uuid(
+                "00000000-0000-4000-8000-00000000a401"
+            ),
+            exerciseName: "Bench Press",
+            setIndex: setIndex,
+            sessionCompleted: true,
+            isWarmup: false,
+            measurement: .weightedRepetitions,
+            weightKg: weightKg,
+            reps: reps,
+            durationSec: nil,
+            distanceSteps: nil
+        )
+    }
+
+    private static func nutrition(
+        _ id: String,
+        _ timestamp: String,
+        _ protein: Double,
+        _ target: Double?
+    ) -> ReportNutritionDayRecord {
+        let observedAt = date(timestamp)
+        return ReportNutritionDayRecord(
+            id: uuid(id),
+            date: observedAt,
+            createdAt: observedAt,
+            entryCount: 1,
+            proteinTotalG: protein,
+            proteinTargetG: target
+        )
+    }
+
+    private static func photoRow(
+        _ identifier: String,
+        _ pose: String
+    ) throws -> ExportRowV1 {
+        let timestamp = date("2026-08-08T10:00:00Z")
+        let cells = ExportSchemaV1.columns(for: .photos).map { column in
+            let value: ExportCellV1
+            switch column.name {
+            case "record_type": value = .text(ExportRecordTypeV1.progressPhoto.rawValue)
+            case "id": value = .uuid(uuid(identifier))
+            case "created_at", "updated_at", "progress_photo_date":
+                value = .timestamp(timestamp)
+            case "config_scope", "progress_photo_note": value = .null
+            case "progress_photo_image_available": value = .boolean(true)
+            case "progress_photo_pose": value = .text(pose)
+            default: value = .null
+            }
+            return ExportNamedCellV1(columnName: column.name, value: value)
+        }
+        return try ExportRowV1(primaryTimestamp: timestamp, cells: cells)
+    }
+
+    private static func uuid(_ value: String) -> UUID {
+        guard let identifier = UUID(uuidString: value) else {
+            preconditionFailure("Invalid deterministic M4 UUID")
+        }
+        return identifier
+    }
+
+    private static func date(_ value: String) -> Date {
+        guard let date = ISO8601DateFormatter().date(from: value) else {
+            preconditionFailure("Invalid deterministic M4 date")
+        }
+        return date
+    }
+}
+
+private struct M4ReportsUITestPhotoProvider: ReportExportPhotoByteProviding {
+    func jpegData(for photoID: UUID) async throws -> ReportExportPhotoPayloadV1 {
+        let available = [
+            UUID(uuidString: "00000000-0000-0000-0000-000000000201")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000202")!,
+        ]
+        guard available.contains(photoID) else { return .missing }
+        return .available(Data([0xff, 0xd8, 0x01, 0x02, 0xff, 0xd9]))
     }
 }
 #endif

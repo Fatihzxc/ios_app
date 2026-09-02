@@ -65,6 +65,26 @@ xcodebuild build \\
 CANONICAL_KEY = r"[A-Za-z][A-Za-z0-9_-]*"
 YAML_KEY = rf"(?:{CANONICAL_KEY}|'{CANONICAL_KEY}'|\"{CANONICAL_KEY}\")"
 RUNNER_SHA256 = "98065cbe584b6041011b52a253c05ed799467a4d5fe82611517ce13b29ec400c"
+TASK9_ACCEPTANCE_STEP_NAME = "Targeted M4.9 report acceptance"
+TASK9_ACCEPTANCE_SELECTOR = (
+    "scripts/test-ios.sh --focused-testing "
+    "HealthTrackingAppUITests/M4ReportsAcceptanceUITests"
+)
+TASK9_ACCESSIBILITY_STEP_NAME = "Targeted M4.9 accessibility matrix"
+TASK9_ACCESSIBILITY_SELECTOR = (
+    "scripts/test-ios.sh --focused-testing "
+    "HealthTrackingAppUITests/M4ReportsAccessibilityUITests"
+)
+TASK9_ROUND_TRIP_STEP_NAME = "Targeted M4.9 export round trip"
+TASK9_ROUND_TRIP_SELECTOR = (
+    "scripts/test-ios.sh --focused-testing "
+    "HealthTrackingAppTests/M4ExportRoundTripTests"
+)
+TASK9_LARGE_STEP_NAME = "Targeted M4.9 large dataset audit"
+TASK9_LARGE_SELECTOR = (
+    "scripts/test-ios.sh --focused-testing "
+    "ReportsKitTests/ReportsLargeDatasetTests"
+)
 
 
 def normalize_key(raw: str) -> str:
@@ -240,6 +260,591 @@ def verify(root: Path) -> None:
     } or block_run(device[0][1]) != TASK7_DEVICE_BUILD_RUN:
         raise ValueError("Focused M4 workflow must compile the exact Task 7 device-only branch")
     verify_focused_runner(runner)
+
+
+def verify_task9_red_contract(root: Path) -> None:
+    workflow = (root / ".github/workflows/ios.yml").read_text(encoding="utf-8")
+    full_job = job_block(workflow, "test")
+    canonical_step = (
+        f"      - name: {TASK9_ACCEPTANCE_STEP_NAME}\n"
+        "        timeout-minutes: 30\n"
+        f"        run: {TASK9_ACCEPTANCE_SELECTOR}\n"
+    )
+    if full_job.count(canonical_step) != 1:
+        raise ValueError("M4.9 acceptance step must use the exact fail-closed selector")
+    acceptance_header = f"      - name: {TASK9_ACCEPTANCE_STEP_NAME}\n"
+    if full_job.count(acceptance_header) != 1:
+        raise ValueError("M4.9 full workflow must run one exact acceptance step")
+    if TASK9_ACCEPTANCE_SELECTOR in job_block(workflow, "test-m4-focused"):
+        raise ValueError("M4.9 acceptance must never route through the focused M4 job")
+
+    source = (
+        root / "HealthTrackingAppUITests/M4ReportsAcceptanceUITests.swift"
+    ).read_text(encoding="utf-8")
+    required = (
+        "final class M4ReportsAcceptanceUITests: XCTestCase",
+        "func testUS7DashboardUsesEveryRangeAndShowsHonestObservedEvidence()",
+        '"-ui-test-scenario", "m4-reports"',
+        '"reports.chart.body.kg.segment.1"',
+        '"reports.chart.body.cm.segment.1"',
+        '"reports.protein"',
+        '"reports.export.share.sheet"',
+        '"m4.reports.export-workspace-count"',
+    )
+    missing = [token for token in required if token not in source]
+    if missing:
+        raise ValueError(
+            "M4.9 acceptance source is missing exact real-app witnesses: "
+            + ", ".join(missing)
+        )
+
+
+def task9_red_self_test(source_root: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="m4-task9-red-verifier-") as directory:
+        fixture = Path(directory)
+        (fixture / ".github/workflows").mkdir(parents=True)
+        (fixture / "HealthTrackingAppUITests").mkdir(parents=True)
+        workflow = fixture / ".github/workflows/ios.yml"
+        acceptance = fixture / "HealthTrackingAppUITests/M4ReportsAcceptanceUITests.swift"
+        shutil.copy2(source_root / ".github/workflows/ios.yml", workflow)
+        shutil.copy2(
+            source_root / "HealthTrackingAppUITests/M4ReportsAcceptanceUITests.swift",
+            acceptance,
+        )
+        verify_task9_red_contract(fixture)
+
+        original_workflow = workflow.read_text(encoding="utf-8")
+        workflow.write_text(
+            original_workflow.replace(
+                TASK9_ACCEPTANCE_SELECTOR,
+                "scripts/test-ios.sh --only-testing HealthTrackingAppUITests",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        try:
+            verify_task9_red_contract(fixture)
+        except ValueError as error:
+            if "exact fail-closed selector" not in str(error):
+                raise SystemExit(
+                    f"M4.9 selector mutation failed incorrectly: {error}"
+                ) from error
+        else:
+            raise SystemExit("M4.9 broad-selector mutation escaped")
+
+        workflow.write_text(
+            original_workflow.replace(
+                f"      - name: {TASK9_ACCEPTANCE_STEP_NAME}\n",
+                f"      - name: {TASK9_ACCEPTANCE_STEP_NAME}\n"
+                "        continue-on-error: true\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        try:
+            verify_task9_red_contract(fixture)
+        except ValueError as error:
+            if "exact fail-closed selector" not in str(error):
+                raise SystemExit(
+                    f"M4.9 continue-on-error mutation failed incorrectly: {error}"
+                ) from error
+        else:
+            raise SystemExit("M4.9 continue-on-error mutation escaped")
+
+        workflow.write_text(original_workflow, encoding="utf-8")
+        original_source = acceptance.read_text(encoding="utf-8")
+        acceptance.write_text(
+            original_source.replace(
+                '"reports.chart.body.kg.segment.1"',
+                '"reports.chart.body.removed.segment.1"',
+            ),
+            encoding="utf-8",
+        )
+        try:
+            verify_task9_red_contract(fixture)
+        except ValueError as error:
+            if "real-app witnesses" not in str(error):
+                raise SystemExit(
+                    f"M4.9 real-app witness mutation failed incorrectly: {error}"
+                ) from error
+        else:
+            raise SystemExit("M4.9 real-app witness mutation escaped")
+
+
+TASK9_STAGE_A_SWIFT_PATHS = (
+    "HealthTrackingAppTests/M4ExportRoundTripTests.swift",
+    "HealthTrackingAppUITests/M4ReportsAcceptanceUITests.swift",
+    "HealthTrackingAppUITests/M4ReportsAccessibilityUITests.swift",
+    "Packages/HealthTrackingModules/Tests/ReportsKitTests/ReportsLargeDatasetTests.swift",
+    "App/Support/AppUITestLaunchConfiguration.swift",
+    "App/Application/AppDomainContext.swift",
+    "App/Application/AppDependencies.swift",
+    "App/Application/TrackerFeatureBundle.swift",
+    "App/Application/AppRootView.swift",
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Presentation/ReportsDashboardView.swift",
+    "Packages/HealthTrackingModules/Sources/ReportsKit/Charts/ReportLineChart.swift",
+)
+TASK9_STAGE_A_CONFIG_PATHS = ("project.yml",)
+
+
+def require_task9_tokens(source: str, tokens: tuple[str, ...], label: str) -> None:
+    missing = [token for token in tokens if token not in source]
+    if missing:
+        raise ValueError(f"M4.9 {label} is missing: " + ", ".join(missing))
+
+
+def verify_task9_stage_a_contract(root: Path) -> None:
+    workflow = (root / ".github/workflows/ios.yml").read_text(encoding="utf-8")
+    project = (root / "project.yml").read_text(encoding="utf-8")
+    full_job = job_block(workflow, "test")
+    full_keys = direct_mapping(full_job, 4, "M4.9 full workflow job")
+    focused_job = job_block(workflow, "test-m4-focused")
+    focused_keys = direct_mapping(focused_job, 4, "M4.9 focused workflow job")
+    if full_keys.get("if") != FULL_JOB_GUARD or focused_keys.get("if") != FOCUSED_JOB_GUARD:
+        raise ValueError("M4.9 full/focused routing must use the exact full-suite guards")
+    for job_name in ("test-cold-launch", "test-small-phone"):
+        keys = direct_mapping(job_block(workflow, job_name), 4, f"M4.9 {job_name} job")
+        if "if" in keys or "continue-on-error" in keys:
+            raise ValueError("M4.9 full/cold/small routing must never skip or soften audit jobs")
+
+    for step_name, timeout, selector in (
+        (TASK9_ACCEPTANCE_STEP_NAME, 30, TASK9_ACCEPTANCE_SELECTOR),
+        (TASK9_ACCESSIBILITY_STEP_NAME, 60, TASK9_ACCESSIBILITY_SELECTOR),
+        (TASK9_ROUND_TRIP_STEP_NAME, 30, TASK9_ROUND_TRIP_SELECTOR),
+        (TASK9_LARGE_STEP_NAME, 30, TASK9_LARGE_SELECTOR),
+    ):
+        canonical = (
+            f"      - name: {step_name}\n"
+            f"        timeout-minutes: {timeout}\n"
+            f"        run: {selector}\n"
+        )
+        if full_job.count(canonical) != 1 or full_job.count(f"      - name: {step_name}\n") != 1:
+            raise ValueError("M4.9 audit routing must use every exact fail-closed selector")
+        if selector in focused_job:
+            raise ValueError("M4.9 audit routing must never use the focused M4 job")
+
+    require_task9_tokens(
+        workflow,
+        (
+            '"m4-reports-us7"',
+            '"m4-reports-photo-share"',
+            '"m4-reports-export-both"',
+            'f"m4-reports-{appearance}-{size}"',
+            '"m4-reports-reduce-motion"',
+            '"m4-reports-high-contrast"',
+            '"M4ReportsAcceptanceUITests"',
+            '"M4ReportsAccessibilityUITests"',
+            "xcrun xcresulttool export attachments",
+            'method = "testGeneratedZIPPassesPureInspectorManifestHashesAndAttachesHostedArtifact"',
+            'canonical = "m4-round-trip-export.zip"',
+            '/usr/bin/unzip -t "$archive_path"',
+            "zipfile.ZipFile(archive_path)",
+            "hashlib.sha256(payload_bytes).hexdigest()",
+            'set(payload_paths) | {"manifest.json"}',
+            '"payloadChecksumsVerified": verified',
+            "M4-export-round-trip-evidence",
+            ".build/m4-export-evidence/**",
+            "Test M1 and M3 on small iPhone at AX5",
+            'M4_SMALL_PHONE_GATE: "1"',
+            "M4_SMALL_PHONE_GATE=1",
+            "-only-testing:HealthTrackingAppUITests/M4ReportsAccessibilityUITests/testSmallPhoneAX5DashboardAndExportRemainOperable",
+            '"m4-reports-small-ax5": "M4ReportsAccessibilityUITests"',
+        ),
+        "workflow evidence contract",
+    )
+    require_task9_tokens(
+        project,
+        ('M4_SMALL_PHONE_GATE: "$(M4_SMALL_PHONE_GATE)"',),
+        "small-phone XCTest environment forwarding contract",
+    )
+
+    acceptance = (
+        root / "HealthTrackingAppUITests/M4ReportsAcceptanceUITests.swift"
+    ).read_text(encoding="utf-8")
+    require_task9_tokens(
+        acceptance,
+        (
+            "func testUS7DashboardUsesEveryRangeAndShowsHonestObservedEvidence()",
+            "func testTwoReadyPhotosShareOnlyAfterExplicitUserAction()",
+            "func testCSVJSONAndBothExportsUseRealShareAndCleanEveryArtifact()",
+            "func testExportFailureKeepsSelectionAndRetryThenDismissalCleansArtifact()",
+            "func testSlowExportCanCancelAndRetryWithoutLeavingTemporaryFiles()",
+            '"-ui-test-now", "2026-09-02T09:00:00Z"',
+            '"-ui-test-time-zone", "Europe/Istanbul"',
+            '"reports.range.one_month"',
+            '"reports.range.three_months"',
+            '"reports.range.six_months"',
+            '"reports.range.one_year"',
+            'chart("reports.chart.body.kg.segment.1"',
+            'chart("reports.chart.body.cm.segment.1"',
+            '"reports.chart.strength.00000000-0000-4000-8000-00000000a401.volume.segment.1"',
+            '"uygun hedef günü"',
+            '"Güncel profil hedefi"',
+            '"reports.chart.sleep.segment.1"',
+            '"reports.chart.mood.segment.1"',
+            '"reports.chart.posture.segment.1"',
+            '"kayıt boşluğu"',
+            '"Kısmi geçmiş"',
+            '"00000000-0000-0000-0000-000000000201"',
+            '"00000000-0000-0000-0000-000000000202"',
+            "[(0, false), (1, false), (2, true)]",
+            'case failOnce = "fail-once"',
+            'case slowOnce = "slow-once"',
+            'app.buttons["header.closeButton"]',
+            '"m4.reports.export-workspace-count"',
+            "coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()",
+            "for _ in 0..<40",
+            "for searchesDown in [true, false]",
+            "app.otherElements[identifier]",
+        ),
+        "real-app acceptance contract",
+    )
+
+    accessibility = (
+        root / "HealthTrackingAppUITests/M4ReportsAccessibilityUITests.swift"
+    ).read_text(encoding="utf-8")
+    require_task9_tokens(
+        accessibility,
+        (
+            "func testDashboardLightDarkDefaultXXLAX3AX5Matrix()",
+            "case light",
+            "case dark",
+            "case xxl",
+            "case ax3",
+            "case ax5",
+            '"UICTContentSizeCategoryXXL"',
+            '"UICTContentSizeCategoryAccessibilityXL"',
+            '"UICTContentSizeCategoryAccessibilityXXXL"',
+            "func testReduceMotionAndHighContrastDashboardRemainOperable()",
+            '"-UIAccessibilityReduceMotionEnabled", "YES"',
+            '"-UIAccessibilityDarkerSystemColorsEnabled", "YES"',
+            "func testSmallPhoneAX5DashboardAndExportRemainOperable() throws",
+            'ProcessInfo.processInfo.environment["M4_SMALL_PHONE_GATE"] == "1"',
+            'elementType: .other',
+            'elementType: .segmentedControl',
+            'XCTAssertTrue(format.isHittable)',
+            'XCTAssertFalse(format.label.isEmpty)',
+            'XCTAssertGreaterThanOrEqual(format.frame.height + 0.01, 32)',
+            "XCTAssertFalse(chart.label.isEmpty)",
+            "for _ in 0..<40",
+            "for searchesDown in [true, false]",
+        ),
+        "accessibility matrix contract",
+    )
+
+    launch = (root / "App/Support/AppUITestLaunchConfiguration.swift").read_text(
+        encoding="utf-8"
+    )
+    require_task9_tokens(
+        launch,
+        (
+            'case m4Reports = "m4-reports"',
+            'static let fixedNowFlag = "-ui-test-now"',
+            'static let fixedTimeZoneFlag = "-ui-test-time-zone"',
+            'static let reportsExportBehaviorFlag = "-ui-test-reports-export-behavior"',
+            'case failOnce = "fail-once"',
+            'case slowOnce = "slow-once"',
+            "if scenario == .m4Reports,",
+            "(fixedNow == nil || fixedTimeZone == nil || reportsExportBehavior == nil)",
+            "return nil",
+        ),
+        "fail-closed launch fixture contract",
+    )
+
+    domain = (root / "App/Application/AppDomainContext.swift").read_text(encoding="utf-8")
+    dependencies = (root / "App/Application/AppDependencies.swift").read_text(encoding="utf-8")
+    bundle = (root / "App/Application/TrackerFeatureBundle.swift").read_text(encoding="utf-8")
+    app_root = (root / "App/Application/AppRootView.swift").read_text(encoding="utf-8")
+    dashboard = (
+        root
+        / "Packages/HealthTrackingModules/Sources/ReportsKit/Presentation/ReportsDashboardView.swift"
+    ).read_text(encoding="utf-8")
+    chart = (
+        root / "Packages/HealthTrackingModules/Sources/ReportsKit/Charts/ReportLineChart.swift"
+    ).read_text(encoding="utf-8")
+    require_task9_tokens(
+        domain,
+        (
+            "AppUITestLaunchConfiguration.resolve()?.fixedTimeZone",
+            "let fixedNow = configuration.fixedNow",
+            "return fixedNow",
+        ),
+        "fixed clock contract",
+    )
+    require_task9_tokens(
+        dependencies,
+        (".m3PhotoGallery, .m4Reports:", ".m4Reports:", "return"),
+        "real root dependency contract",
+    )
+    require_task9_tokens(
+        bundle,
+        (
+            "if scenario == .m4Reports,",
+            "M4ReportsUITestRepository(",
+            "M4ReportsUITestPhotoProvider()",
+            "ReportExportCoordinator(",
+            "SystemActivityView(",
+            'accessibilityIdentifier: "reports.export.share.sheet"',
+            "case .failOnce where !hasConsumedExportBehavior:",
+            "case .slowOnce where !hasConsumedExportBehavior:",
+            "try await Task.sleep(nanoseconds: 30_000_000_000)",
+            "try Task.checkCancellation()",
+        ),
+        "real repository/export/share wiring contract",
+    )
+    require_task9_tokens(
+        app_root,
+        (
+            "if exposesM4ReportsEvidence",
+            '"m4.reports.dashboard-fetch-count"',
+            '"m4.reports.export-workspace-count"',
+            "AppUITestLaunchConfiguration.resolve()?.scenario == .m4Reports",
+        ),
+        "root evidence contract",
+    )
+    require_task9_tokens(
+        dashboard,
+        (
+            '"reports.dashboard"',
+            '"reports.export.open"',
+            ".accessibilityElement(children: .contain)",
+        ),
+        "shipped dashboard containment contract",
+    )
+    require_task9_tokens(
+        chart,
+        (
+            ".accessibilityChartDescriptor(descriptor)",
+            ".accessibilityLabel(descriptor.model.title)",
+            '.accessibilityIdentifier("reports.chart.\\(chartIdentifier)")',
+        ),
+        "chart descriptor and label contract",
+    )
+
+    round_trip = (root / "HealthTrackingAppTests/M4ExportRoundTripTests.swift").read_text(
+        encoding="utf-8"
+    )
+    require_task9_tokens(
+        round_trip,
+        (
+            "func testJSONNativeCellsRoundTripEveryRecordTypeToExactTables()",
+            "JSONSerialization.jsonObject",
+            "CFBooleanGetTypeID()",
+            "XCTAssertEqual(decoded, snapshot.tables)",
+            "Set(ExportRecordTypeV1.allCases)",
+            "func testCustomRFC4180DecoderRoundTripsAllTablesIncludingNullEmptyAndFormulaText()",
+            "decodeCSVTable(",
+            "let scalars = Array(text.unicodeScalars)",
+            "value.unicodeScalars.append(scalar)",
+            "scalar.value == 0x0D",
+            "scalars[index + 1].value == 0x0A",
+            "XCTAssertEqual(Array(encoded.suffix(2)), [0x0D, 0x0A])",
+            'XCTAssertEqual(embeddedCRLF.value, "satır 1\\r\\nsatır 2")',
+            '$0.hasPrefix("=")',
+            "$0.value == .null",
+            "func testGeneratedZIPPassesPureInspectorManifestHashesAndAttachesHostedArtifact()",
+            "M4StoredZIPInspector.inspect(archive)",
+            "ExportManifestV1.self",
+            "SHA256.hash(data: bytes)",
+            'uniformTypeIdentifier: "public.zip-archive"',
+            'attachment.name = "m4-round-trip-export.zip"',
+        ),
+        "round-trip contract",
+    )
+    if round_trip.count("Set(ExportRecordTypeV1.allCases)") != 2:
+        raise ValueError("M4.9 round-trip contract must cover all record types in JSON and CSV")
+
+    large = (
+        root
+        / "Packages/HealthTrackingModules/Tests/ReportsKitTests/ReportsLargeDatasetTests.swift"
+    ).read_text(encoding="utf-8")
+    require_task9_tokens(
+        large,
+        (
+            "XCTAssertEqual(records.count, 10_000)",
+            "XCTAssertEqual(rows.count, 500)",
+            "XCTAssertLessThanOrEqual(forward.bodyMetricPoints.count, 366)",
+            "XCTAssertEqual(forward, reverse)",
+            "XCTAssertEqual(first, second)",
+            "generation.cancel()",
+            "catch is CancellationError",
+            "XCTAssertLessThan(elapsed, 8)",
+            "XCTAssertLessThan(elapsed, 20)",
+            "contentsOfDirectory(atPath: root.path)",
+        ),
+        "large-dataset contract",
+    )
+
+    logging_pattern = re.compile(r"\b(?:print|debugPrint|dump|NSLog|os_log|Logger)\s*\(")
+    for relative_path in TASK9_STAGE_A_SWIFT_PATHS:
+        source = (root / relative_path).read_text(encoding="utf-8")
+        if logging_pattern.search(swift_code_without_comments_and_literals(source)):
+            raise ValueError("M4.9 privacy scan forbids Stage-A payload logging")
+
+
+def task9_stage_a_self_test(source_root: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="m4-task9-stage-a-verifier-") as directory:
+        fixture = Path(directory)
+        relative_paths = (
+            (".github/workflows/ios.yml",)
+            + TASK9_STAGE_A_CONFIG_PATHS
+            + TASK9_STAGE_A_SWIFT_PATHS
+        )
+        for relative_path in relative_paths:
+            source = source_root / relative_path
+            destination = fixture / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+        verify_task9_stage_a_contract(fixture)
+
+        mutations = (
+            (
+                "project.yml",
+                'M4_SMALL_PHONE_GATE: "$(M4_SMALL_PHONE_GATE)"',
+                'M4_SMALL_PHONE_GATE: "0"',
+                "small-phone XCTest environment forwarding contract",
+            ),
+            (
+                ".github/workflows/ios.yml",
+                "Test M1 and M3 on small iPhone at AX5",
+                "Test M1, M3, and M4 on small iPhone at AX5",
+                "workflow evidence contract",
+            ),
+            (
+                ".github/workflows/ios.yml",
+                TASK9_ACCESSIBILITY_SELECTOR,
+                "scripts/test-ios.sh --only-testing HealthTrackingAppUITests/M4ReportsAccessibilityUITests",
+                "audit routing",
+            ),
+            (
+                ".github/workflows/ios.yml",
+                TASK9_ROUND_TRIP_SELECTOR,
+                "scripts/test-ios.sh --only-testing HealthTrackingAppTests",
+                "audit routing",
+            ),
+            (
+                ".github/workflows/ios.yml",
+                f"      - name: {TASK9_LARGE_STEP_NAME}\n",
+                f"      - name: {TASK9_LARGE_STEP_NAME}\n        continue-on-error: true\n",
+                "audit routing",
+            ),
+            (
+                ".github/workflows/ios.yml",
+                "startsWith(github.ref_name, 'test/m4.9-')",
+                "false",
+                "full/focused routing",
+            ),
+            (
+                ".github/workflows/ios.yml",
+                "-only-testing:HealthTrackingAppUITests/M4ReportsAccessibilityUITests/testSmallPhoneAX5DashboardAndExportRemainOperable",
+                "-only-testing:HealthTrackingAppUITests/M3AccessibilityUITests/testSmallPhoneAX5TrackerRoutesRemainOperable",
+                "workflow evidence contract",
+            ),
+            (
+                ".github/workflows/ios.yml",
+                '"m4-reports-high-contrast"',
+                '"m4-reports-removed-contrast"',
+                "workflow evidence contract",
+            ),
+            (
+                ".github/workflows/ios.yml",
+                '/usr/bin/unzip -t "$archive_path"',
+                '/usr/bin/unzip -l "$archive_path"',
+                "workflow evidence contract",
+            ),
+            (
+                ".github/workflows/ios.yml",
+                "hashlib.sha256(payload_bytes).hexdigest()",
+                "expected_hash",
+                "workflow evidence contract",
+            ),
+            (
+                "HealthTrackingAppUITests/M4ReportsAcceptanceUITests.swift",
+                'app.buttons["header.closeButton"]',
+                'app.buttons["removed.closeButton"]',
+                "real-app acceptance contract",
+            ),
+            (
+                "HealthTrackingAppUITests/M4ReportsAcceptanceUITests.swift",
+                "for _ in 0..<40",
+                "for _ in 0..<4",
+                "real-app acceptance contract",
+            ),
+            (
+                "HealthTrackingAppUITests/M4ReportsAccessibilityUITests.swift",
+                '"-UIAccessibilityReduceMotionEnabled", "YES"',
+                '"-UIAccessibilityReduceMotionEnabled", "NO"',
+                "accessibility matrix contract",
+            ),
+            (
+                "HealthTrackingAppUITests/M4ReportsAccessibilityUITests.swift",
+                '''let format = requireByScrolling(
+            "reports.export.format",
+            in: app,
+            elementType: .segmentedControl
+        )''',
+                'let format = require(app.segmentedControls["reports.export.format"])',
+                "accessibility matrix contract",
+            ),
+            (
+                "App/Support/AppUITestLaunchConfiguration.swift",
+                "(fixedNow == nil || fixedTimeZone == nil || reportsExportBehavior == nil)",
+                "false",
+                "fail-closed launch fixture contract",
+            ),
+            (
+                "HealthTrackingAppTests/M4ExportRoundTripTests.swift",
+                "Set(ExportRecordTypeV1.allCases)",
+                "Set<ExportRecordTypeV1>()",
+                "round-trip contract",
+            ),
+            (
+                "HealthTrackingAppTests/M4ExportRoundTripTests.swift",
+                "let scalars = Array(text.unicodeScalars)",
+                "let scalars = Array(text)",
+                "round-trip contract",
+            ),
+            (
+                "Packages/HealthTrackingModules/Tests/ReportsKitTests/ReportsLargeDatasetTests.swift",
+                "XCTAssertEqual(records.count, 10_000)",
+                "XCTAssertEqual(records.count, 9_999)",
+                "large-dataset contract",
+            ),
+            (
+                "Packages/HealthTrackingModules/Tests/ReportsKitTests/ReportsLargeDatasetTests.swift",
+                "XCTAssertEqual(rows.count, 500)",
+                "XCTAssertEqual(rows.count, 499)",
+                "large-dataset contract",
+            ),
+        )
+
+        for relative_path, before, after, expected in mutations:
+            path = fixture / relative_path
+            original = path.read_text(encoding="utf-8")
+            if before not in original:
+                raise SystemExit(f"M4.9 self-test mutation source is missing: {before}")
+            path.write_text(original.replace(before, after, 1), encoding="utf-8")
+            try:
+                verify_task9_stage_a_contract(fixture)
+            except ValueError as error:
+                if expected not in str(error):
+                    raise SystemExit(
+                        f"M4.9 Stage-A mutation failed incorrectly: {error}"
+                    ) from error
+            else:
+                raise SystemExit(f"M4.9 Stage-A mutation escaped: {before}")
+            path.write_text(original, encoding="utf-8")
+
+        acceptance = fixture / "HealthTrackingAppUITests/M4ReportsAcceptanceUITests.swift"
+        original = acceptance.read_text(encoding="utf-8")
+        acceptance.write_text(original + '\nprivate func leaked() { print("health payload") }\n')
+        try:
+            verify_task9_stage_a_contract(fixture)
+        except ValueError as error:
+            if "privacy scan" not in str(error):
+                raise SystemExit(f"M4.9 privacy mutation failed incorrectly: {error}") from error
+        else:
+            raise SystemExit("M4.9 Stage-A payload logging mutation escaped")
 
 
 def target_dependencies(package: str, name: str) -> list[str]:
@@ -6974,6 +7579,8 @@ root = Path(sys.argv[1])
 mode = sys.argv[2]
 if mode == "--self-test":
     self_test(root)
+    task9_red_self_test(root)
+    task9_stage_a_self_test(root)
     reports_architecture_self_test(root)
     task3_real_asset_self_test(root)
     task4_real_asset_self_test(root)
@@ -6983,6 +7590,8 @@ if mode == "--self-test":
     print("M4 focused CI verifier self-tests passed.")
 elif mode == "":
     verify(root)
+    verify_task9_red_contract(root)
+    verify_task9_stage_a_contract(root)
     verify_reports_architecture(root)
     verify_task5_assets(root)
     verify_task6_assets(root)
