@@ -2,19 +2,28 @@
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 import json
+import math
 from pathlib import Path
 import re
 import subprocess
+import sys
 
 
 CASE = "-[HealthTrackingAppUITests.NutritionQuickAddUITests testCategoryRecipeAndDefaultConfirmAreExactlyThreeTapsAndPersistAfterRelaunch]"
+PREFIX_CASES = [
+    "-[HealthTrackingAppUITests.NutritionDayUITests testContentExposesCalendarNavigationTotalsStableCategoriesAndVoiceOverOrder]",
+    "-[HealthTrackingAppUITests.NutritionDayUITests testDarkAX5ReduceMotionAndIncreaseContrastProduceCanonicalEvidence]",
+    "-[HealthTrackingAppUITests.NutritionDayUITests testDeleteFailureRollsBackAndRetryPublishesRepositoryTotals]",
+    "-[HealthTrackingAppUITests.NutritionDayUITests testEmptyAndRecoverableErrorStatesRemainDistinctAndRetrySameDay]",
+    CASE,
+]
 
 
-def parse_iterations(console):
+def parse_iterations(console, case=CASE):
     iterations = []
     active = None
     for line in console.splitlines():
-        started = re.fullmatch(re.escape(f"Test Case '{CASE}' started")
+        started = re.fullmatch(re.escape(f"Test Case '{case}' started")
                                + r"(?: \(Iteration ([1-9][0-9]*) of ([1-9][0-9]*)\))?\.", line.strip())
         if started:
             if active is not None:
@@ -44,8 +53,8 @@ def parse_iterations(console):
             active["terminations"].append({"offset": float(match[1]), "pid": int(match[2])})
         elif active is not None and "Requesting snapshot of accessibility hierarchy for app with pid " in line:
             active["snapshotProcessID"] = int(line.rsplit(" ", 1)[1])
-        elif line.startswith(f"Test Case '{CASE}' "):
-            match = re.fullmatch(re.escape(f"Test Case '{CASE}' ") + r"(passed|failed) \(([0-9.]+) seconds\)\.", line)
+        elif line.startswith(f"Test Case '{case}' "):
+            match = re.fullmatch(re.escape(f"Test Case '{case}' ") + r"(passed|failed) \(([0-9.]+) seconds\)\.", line)
             if not match or active is None or "start" not in active:
                 raise ValueError("Unmatched result or missing case timestamp")
             active["outcome"] = match[1]
@@ -58,6 +67,54 @@ def parse_iterations(console):
     if active is not None or not iterations:
         raise ValueError("Missing or incomplete repetition evidence")
     return iterations
+
+
+def validate_ordered_prefix(console, records):
+    """Validate this one observed invocation, not an arbitrary XCTest schema."""
+    markers = re.findall(r"^Test Case '([^']+)' (.*)$", console, re.MULTILINE)
+    if len(markers) != 10:
+        raise ValueError("Missing, duplicated, or extra ordered-prefix case markers")
+    parsed = []
+    for index, case in enumerate(PREFIX_CASES):
+        start, result = markers[index * 2:index * 2 + 2]
+        if start != (case, "started.") or result[0] != case:
+            raise ValueError("Unexpected ordered-prefix execution order or overlap")
+        attempts = parse_iterations(console, case)
+        if len(attempts) != 1:
+            raise ValueError("Expected one attempt per ordered-prefix case")
+        attempt = attempts[0]
+        if parsed and attempt["start"] < parsed[-1]["end"]:
+            raise ValueError("Overlapping predecessor/target time windows")
+        if index < 4 and attempt["outcome"] != "passed":
+            raise ValueError("Failed predecessor: target context is inconclusive")
+        parsed.append(attempt)
+    runners = list(re.finditer(r"^.*HealthTrackingAppUITests-Runner\[(\d+):\d+\].*Running tests\.\.\.$",
+                               console, re.MULTILINE))
+    if len(runners) != 1 or runners[0].start() >= console.index("Test Case '"):
+        raise ValueError("Missing or multiple observed test-runner starts")
+    if len(records) != 5:
+        raise ValueError("Expected exactly five native test metadata records")
+    references = set()
+    for case, attempt in zip(PREFIX_CASES, parsed):
+        suite, method = case.removeprefix("-[HealthTrackingAppUITests.").removesuffix("]").split(" ")
+        identity = f"test://com.apple.xcode/HealthTrackingApp/HealthTrackingAppUITests/{suite}/{method}"
+        matches = [record for record in records if record["identifierURL"]["_value"] == identity]
+        if len(matches) != 1:
+            raise ValueError("Missing or duplicate native case identity")
+        record = matches[0]
+        expected = "Success" if attempt["outcome"] == "passed" else "Failure"
+        if record["testStatus"]["_value"] != expected:
+            raise ValueError("Native/console outcome mismatch")
+        duration = float(record["duration"]["_value"])
+        if not math.isfinite(duration) or abs(duration - attempt["duration"]) > 0.001:
+            raise ValueError("Native/console duration mismatch")
+        references.add(record["summaryRef"]["id"]["_value"])
+    if len(references) != 5:
+        raise ValueError("Native case summary references are not distinct")
+    return {"orderedPrefix": "four passing predecessors then target",
+            "observedRunnerPID": int(runners[0][1]),
+            "targetOutcome": parsed[-1]["outcome"],
+            "limitation": "Fresh runner invocation; original full-suite worker history is not reproduced"}
 
 
 def correlate(iterations, traces, destinations):
@@ -121,7 +178,7 @@ def correlate_roots(results):
             raise ValueError("Failure snapshot PID does not match correlated app process")
 
 
-def main():
+def main(ordered_prefix=False):
     output = Path(".build/nutrition-replay")
     result_path = ".build/NutritionWarm.xcresult"
     base = ["xcrun", "xcresulttool", "get", "object", "--legacy", "--format", "json", "--path", result_path]
@@ -129,11 +186,14 @@ def main():
     (output / "result-root.json").write_text(json.dumps(root, indent=2))
     destinations = set()
     statuses = []
+    records = []
+    summaries = []
 
     def metadata(node):
         if isinstance(node, dict):
             if node.get("_type", {}).get("_name") == "ActionTestMetadata":
                 statuses.append(node["testStatus"]["_value"].lower())
+                records.append(node)
             for value in node.values():
                 metadata(value)
         elif isinstance(node, list):
@@ -171,6 +231,7 @@ def main():
         reference = action["actionResult"].get("testsRef")
         if reference:
             summary = command_json(base + ["--id", reference["id"]["_value"]])
+            summaries.append(summary)
             (output / f"test-summary-{index}.json").write_text(json.dumps(summary, indent=2))
             metadata(summary)
     iterations = parse_iterations((output / "xcodebuild.log").read_text())
@@ -178,6 +239,19 @@ def main():
     (output / "iterations.json").write_text(json.dumps(results, indent=2, default=str))
     correlate_roots(results)
     (output / "iterations.json").write_text(json.dumps(results, indent=2, default=str))
+    if ordered_prefix:
+        # Raw events, console, bundle and target correlation are already retained.
+        # Multiple action/testable destinations cannot establish this ordered context.
+        if len(destinations) != 1 or len(root["actions"]["_values"]) != 1 or len(summaries) != 1:
+            raise ValueError("Ordered prefix requires one native action/destination/summary")
+        plan_runs = summaries[0]["summaries"]["_values"]
+        if len(plan_runs) != 1 or len(plan_runs[0]["testableSummaries"]["_values"]) != 1:
+            raise ValueError("Ordered prefix requires one native testable run")
+        validation = validate_ordered_prefix((output / "xcodebuild.log").read_text(), records)
+        validation["simulator"] = next(iter(destinations))
+        (output / "validation.json").write_text(json.dumps(validation, indent=2))
+        print("One ordered-prefix experiment correlated:", validation, "Not acceptance.")
+        return
     expected = Counter("success" if item["outcome"] == "passed" else "failure" for item in iterations)
     (output / "validation.json").write_text(json.dumps({
         "consoleAppCorrelation": "positive for each parsed iteration",
@@ -197,4 +271,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] not in ([], ["--ordered-prefix"]):
+        raise SystemExit("Only optional --ordered-prefix is supported")
+    main(ordered_prefix=sys.argv[1:] == ["--ordered-prefix"])

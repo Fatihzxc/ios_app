@@ -109,7 +109,7 @@ jobs:
           xcrun xcresulttool export attachments \
             --path .build/HealthTrackingApp.xcresult \
             --output-path .build/nutrition-diagnostic/attachments
-      - name: Replay the unchanged first case up to ten times, stopping on failure
+      - name: Run one unchanged predecessor prefix then the three-tap case
         timeout-minutes: 25
         run: |
           set -euo pipefail
@@ -124,13 +124,16 @@ jobs:
             -scheme HealthTrackingApp-Local \
             -destination "$destination" \
             -resultBundlePath .build/NutritionWarm.xcresult \
+            -only-testing:HealthTrackingAppUITests/NutritionDayUITests/testContentExposesCalendarNavigationTotalsStableCategoriesAndVoiceOverOrder \
+            -only-testing:HealthTrackingAppUITests/NutritionDayUITests/testDarkAX5ReduceMotionAndIncreaseContrastProduceCanonicalEvidence \
+            -only-testing:HealthTrackingAppUITests/NutritionDayUITests/testDeleteFailureRollsBackAndRetryPublishesRepositoryTotals \
+            -only-testing:HealthTrackingAppUITests/NutritionDayUITests/testEmptyAndRecoverableErrorStatesRemainDistinctAndRetrySameDay \
             -only-testing:HealthTrackingAppUITests/NutritionQuickAddUITests/testCategoryRecipeAndDefaultConfirmAreExactlyThreeTapsAndPersistAfterRelaunch \
-            -test-iterations 10 -run-tests-until-failure \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee .build/nutrition-replay/xcodebuild.log
-      - name: Correlate every attempted replay with its own app trace
+      - name: Validate predecessor order and correlate target app trace
         if: always() && hashFiles('.build/nutrition-replay/start-utc.txt') != ''
         timeout-minutes: 10
-        run: python3 .github/scripts/nutrition_replay_capture.py
+        run: python3 .github/scripts/nutrition_replay_capture.py --ordered-prefix
       - name: Export replay attachments
         if: always() && hashFiles('.build/NutritionWarm.xcresult/Info.plist') != ''
         run: |
