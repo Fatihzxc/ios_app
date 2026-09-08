@@ -10,7 +10,9 @@ permissions:
 jobs:
   diagnose:
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 80
+    env:
+      TZ: UTC
     steps:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
@@ -86,6 +88,34 @@ jobs:
           xcrun xcresulttool export attachments \
             --path .build/HealthTrackingApp.xcresult \
             --output-path .build/nutrition-diagnostic/attachments
+      - name: Replay the unchanged first case up to ten times, stopping on failure
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          mkdir -p .build/nutrition-replay
+          date -u '+%Y-%m-%d %H:%M:%S+0000' > .build/nutrition-replay/start-utc.txt
+          date '+%Z %z' > .build/nutrition-replay/host-timezone.txt
+          xcodebuild -version > .build/nutrition-replay/xcode-version.txt
+          xcrun xcresulttool version > .build/nutrition-replay/xcresulttool-version.txt
+          destination="$(scripts/select-simulator.sh)"
+          xcodebuild test \
+            -project HealthTrackingApp.xcodeproj \
+            -scheme HealthTrackingApp-Local \
+            -destination "$destination" \
+            -resultBundlePath .build/NutritionWarm.xcresult \
+            -only-testing:HealthTrackingAppUITests/NutritionQuickAddUITests/testCategoryRecipeAndDefaultConfirmAreExactlyThreeTapsAndPersistAfterRelaunch \
+            -test-iterations 10 -run-tests-until-failure \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee .build/nutrition-replay/xcodebuild.log
+      - name: Correlate every attempted replay with its own app trace
+        if: always() && hashFiles('.build/nutrition-replay/start-utc.txt') != ''
+        timeout-minutes: 10
+        run: python3 .github/scripts/nutrition_replay_capture.py
+      - name: Export replay attachments
+        if: always() && hashFiles('.build/NutritionWarm.xcresult/Info.plist') != ''
+        run: |
+          xcrun xcresulttool export attachments \
+            --path .build/NutritionWarm.xcresult \
+            --output-path .build/nutrition-replay/attachments
       - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -94,4 +124,6 @@ jobs:
           path: |
             .build/nutrition-diagnostic
             .build/HealthTrackingApp.xcresult
+            .build/nutrition-replay
+            .build/NutritionWarm.xcresult
           if-no-files-found: error
