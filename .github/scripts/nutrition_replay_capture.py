@@ -14,16 +14,36 @@ def parse_iterations(console):
     iterations = []
     active = None
     for line in console.splitlines():
-        if line.strip() == f"Test Case '{CASE}' started.":
+        started = re.fullmatch(re.escape(f"Test Case '{CASE}' started")
+                               + r"(?: \(Iteration ([1-9][0-9]*) of ([1-9][0-9]*)\))?\.", line.strip())
+        if started:
             if active is not None:
                 raise ValueError("Overlapping or duplicate case start")
-            active = {}
+            active = {"launches": [], "terminations": []}
+            if started[1]:
+                ordinal, limit = int(started[1]), int(started[2])
+                if ordinal != len(iterations) + 1 or ordinal > limit:
+                    raise ValueError("Missing or out-of-order native iteration")
+                if iterations and iterations[0].get("nativeLimit") != limit:
+                    raise ValueError("Mixed repetition limits or header formats")
+                active.update(nativeIteration=ordinal, nativeLimit=limit)
+            elif iterations and "nativeIteration" in iterations[0]:
+                raise ValueError("Missing native repetition ordinal")
         elif active is not None and "Start Test at " in line:
             if "start" in active:
                 raise ValueError("Duplicate case timestamp")
             # Workflow explicitly runs in UTC; retain that provenance with the artifact.
             start = datetime.fromisoformat(line.split("Start Test at ", 1)[1].strip())
             active["start"] = start.replace(tzinfo=timezone.utc) if start.tzinfo is None else start.astimezone(timezone.utc)
+        elif active is not None and re.search(r"t =\s*[0-9.]+s\s+Launch com\.fatihzxc\.HealthTrackingApp$", line):
+            active["launches"].append(float(re.search(r"t =\s*([0-9.]+)s", line)[1]))
+        elif active is not None and "Terminate com.fatihzxc.HealthTrackingApp:" in line:
+            match = re.search(r"t =\s*([0-9.]+)s\s+Terminate com\.fatihzxc\.HealthTrackingApp:(\d+)$", line)
+            if not match:
+                raise ValueError("Unrecognized application termination marker")
+            active["terminations"].append({"offset": float(match[1]), "pid": int(match[2])})
+        elif active is not None and "Requesting snapshot of accessibility hierarchy for app with pid " in line:
+            active["snapshotProcessID"] = int(line.rsplit(" ", 1)[1])
         elif line.startswith(f"Test Case '{CASE}' "):
             match = re.fullmatch(re.escape(f"Test Case '{CASE}' ") + r"(passed|failed) \(([0-9.]+) seconds\)\.", line)
             if not match or active is None or "start" not in active:
@@ -67,6 +87,38 @@ def correlate(iterations, traces, destinations):
 
 def command_json(command):
     return json.loads(subprocess.check_output(command, text=True))
+
+
+def correlate_roots(results):
+    for result in results:
+        pid = result["processID"]
+        roots = [event for event in result["events"]
+                 if event["simulator"] == result["simulator"]
+                 and event["eventMessage"].split("event=", 1)[-1] == "root-appear"]
+        if not any(event.get("processID") == pid for event in roots):
+            raise ValueError("Missing positive first-process root trace")
+        stops = [item["offset"] for item in result["terminations"] if item["pid"] == pid]
+        result["relaunchedProcessID"] = None
+        if not stops:
+            if result["outcome"] == "passed" or len(result["launches"]) != 1:
+                raise ValueError("Missing expected relaunch markers")
+        else:
+            launches = [offset for offset in result["launches"] if offset > stops[0]]
+            if len(stops) != 1 or len(launches) != 1:
+                raise ValueError("Missing or ambiguous relaunch marker")
+            relaunched_at = result["start"] + timedelta(seconds=launches[0])
+            candidates = set()
+            for event in roots:
+                timestamp = datetime.fromisoformat(re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", event["timestamp"]))
+                if timestamp >= relaunched_at and event.get("processID") not in (None, pid):
+                    candidates.add(event["processID"])
+            if len(candidates) != 1:
+                raise ValueError("Missing or ambiguous relaunched-process root trace")
+            result["relaunchedProcessID"] = candidates.pop()
+            result["relaunchedAt"] = relaunched_at
+        expected_pid = result["relaunchedProcessID"] or pid
+        if result.get("snapshotProcessID", expected_pid) != expected_pid:
+            raise ValueError("Failure snapshot PID does not match correlated app process")
 
 
 def main():
@@ -123,6 +175,8 @@ def main():
             metadata(summary)
     iterations = parse_iterations((output / "xcodebuild.log").read_text())
     results = correlate(iterations, traces, destinations)
+    (output / "iterations.json").write_text(json.dumps(results, indent=2, default=str))
+    correlate_roots(results)
     (output / "iterations.json").write_text(json.dumps(results, indent=2, default=str))
     expected = Counter("success" if item["outcome"] == "passed" else "failure" for item in iterations)
     (output / "validation.json").write_text(json.dumps({

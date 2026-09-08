@@ -292,7 +292,20 @@ struct AppRootView: View {
             guard previousRoute == nil, route != nil else { return }
             trackerEntryReportsRefreshPolicy.beginPresentation()
         }
+        #if DEBUG
+        .onAppear {
+            NutritionRootTabDiagnostic.record(.rootAppear, selected: selectedTab)
+        }
+        .onDisappear {
+            NutritionRootTabDiagnostic.record(.rootDisappear, selected: selectedTab)
+        }
+        #endif
         .onChange(of: selectedTab) { previousTab, selectedTab in
+            #if DEBUG
+            NutritionRootTabDiagnostic.record(
+                .selectionChange, selected: selectedTab, previous: previousTab
+            )
+            #endif
             switch progressReportsLoadPolicy.transition(
                 from: previousTab,
                 to: selectedTab,
