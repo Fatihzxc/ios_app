@@ -33,12 +33,27 @@ jobs:
               ["xcrun", "simctl", "list", "devices", "--json"], text=True
           ))
           (output / "simulators.json").write_text(json.dumps(devices, indent=2))
+          result_root = json.loads(subprocess.check_output([
+              "xcrun", "xcresulttool", "get", "object", "--legacy", "--format", "json",
+              "--path", ".build/HealthTrackingApp.xcresult",
+          ], text=True))
+          test_devices = set()
+          for action in result_root["actions"]["_values"]:
+              target = action["runDestination"]["targetDeviceRecord"]
+              if target["platformRecord"]["identifier"]["_value"] == "com.apple.platform.iphonesimulator":
+                  test_devices.add(target["identifier"]["_value"])
+          (output / "test-destinations.json").write_text(json.dumps(sorted(test_devices)))
           observed = {}
           for runtime, candidates in devices["devices"].items():
               for device in candidates:
-                  if device.get("state") != "Booted":
-                      continue
                   simulator_id = device["udid"]
+                  if device.get("state") != "Booted":
+                      if simulator_id not in test_devices:
+                          continue
+                      # Xcode shuts down the tested device before the Release build finishes.
+                      # Boot only an exact xcresult-proven destination to read its retained log.
+                      subprocess.run(["xcrun", "simctl", "boot", simulator_id], check=True)
+                      subprocess.run(["xcrun", "simctl", "bootstatus", simulator_id, "-b"], check=True)
                   result = subprocess.run([
                       "xcrun", "simctl", "spawn", simulator_id, "log", "show",
                       "--last", "35m", "--style", "json", "--predicate",
