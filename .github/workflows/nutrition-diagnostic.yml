@@ -1,0 +1,82 @@
+name: Nutrition diagnostic (temporary)
+
+on:
+  push:
+    branches: [test/m4.8-nutrition-diagnostic]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Run unchanged three-tap and companion assertions
+        timeout-minutes: 30
+        run: scripts/test-ios.sh --focused-testing HealthTrackingAppUITests/NutritionQuickAddUITests
+      - name: Export bounded diagnostic trace
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p .build/nutrition-diagnostic
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import subprocess
+
+          output = Path(".build/nutrition-diagnostic")
+          devices = json.loads(subprocess.check_output(
+              ["xcrun", "simctl", "list", "devices", "--json"], text=True
+          ))
+          (output / "simulators.json").write_text(json.dumps(devices, indent=2))
+          observed = {}
+          for runtime, candidates in devices["devices"].items():
+              for device in candidates:
+                  if device.get("state") != "Booted":
+                      continue
+                  simulator_id = device["udid"]
+                  result = subprocess.run([
+                      "xcrun", "simctl", "spawn", simulator_id, "log", "show",
+                      "--last", "35m", "--style", "json", "--predicate",
+                      'subsystem == "com.fatihzxc.HealthTrackingApp.NutritionDiagnostic"',
+                  ], text=True, capture_output=True)
+                  (output / f"{simulator_id}-trace.json").write_text(result.stdout)
+                  (output / f"{simulator_id}-capture.txt").write_text(
+                      f"runtime={runtime} simulator={simulator_id} exit={result.returncode}\n"
+                      + result.stderr
+                  )
+                  if result.returncode:
+                      continue
+                  for entry in json.loads(result.stdout):
+                      message = entry.get("eventMessage", "")
+                      if "flow=persistent" not in message:
+                          continue
+                      key = (simulator_id, entry.get("processID"))
+                      observed.setdefault(key, set()).add(message.split("event=", 1)[-1])
+          # The original failing three-tap test alone uses the persistent-store flag.
+          # Require positive telemetry for that flow/PID before interpreting missing actions.
+          proven = [key for key, events in observed.items()
+                    if key[1] is not None and {"begin-entry", "begin-selecting"} <= events]
+          if not proven:
+              raise SystemExit("Missing positive three-tap begin trace; capture is inconclusive.")
+          print("Positive three-tap trace captured for simulator/PID:", proven)
+          PY
+      - name: Export test attachments
+        if: always()
+        run: |
+          xcrun xcresulttool export attachments \
+            --path .build/HealthTrackingApp.xcresult \
+            --output-path .build/nutrition-diagnostic/attachments
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nutrition-quick-add-diagnostic
+          path: |
+            .build/nutrition-diagnostic
+            .build/HealthTrackingApp.xcresult
+          if-no-files-found: error

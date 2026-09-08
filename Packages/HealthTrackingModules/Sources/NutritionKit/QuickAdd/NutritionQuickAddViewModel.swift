@@ -1,6 +1,9 @@
 import CoreModels
 import Foundation
 import Observation
+#if DEBUG
+import os
+#endif
 
 @MainActor
 @Observable
@@ -28,6 +31,10 @@ public final class NutritionQuickAddViewModel {
     private var generation = 0
     @ObservationIgnored
     private var context: NutritionQuickAddContext?
+#if DEBUG
+    @ObservationIgnored
+    private let diagnosticIdentity = UUID()
+#endif
 
     public init(
         repository: any NutritionQuickAddRepository,
@@ -42,6 +49,9 @@ public final class NutritionQuickAddViewModel {
     }
 
     public func begin(_ intent: NutritionQuickAddIntent) async {
+#if DEBUG
+        recordDiagnostic("begin-entry", presentation: intent.id)
+#endif
         generation &+= 1
         let loadGeneration = generation
         self.intent = intent
@@ -55,6 +65,9 @@ public final class NutritionQuickAddViewModel {
         targets = nil
         context = nil
         phase = .loading
+#if DEBUG
+        recordDiagnostic("begin-loading")
+#endif
 
         do {
             guard try NutritionDayKey(
@@ -84,9 +97,15 @@ public final class NutritionQuickAddViewModel {
                 category: intent.category
             )
             phase = .selecting
+#if DEBUG
+            recordDiagnostic("begin-selecting")
+#endif
         } catch {
             guard generation == loadGeneration, self.intent == intent else { return }
             phase = .loadError
+#if DEBUG
+            recordDiagnostic("begin-error")
+#endif
         }
     }
 
@@ -113,6 +132,10 @@ public final class NutritionQuickAddViewModel {
     }
 
     public func selectRecipe(id: UUID) {
+#if DEBUG
+        recordDiagnostic("select-entry member=\(recipes.contains(where: { $0.id == id }))")
+        defer { recordDiagnostic("select-exit") }
+#endif
         guard phase == .selecting,
               let recipe = recipes.first(where: { $0.id == id }) else { return }
         selectedRecipe = recipe
@@ -155,6 +178,10 @@ public final class NutritionQuickAddViewModel {
     }
 
     public func dismiss() {
+#if DEBUG
+        recordDiagnostic("dismiss-entry")
+        defer { recordDiagnostic("dismiss-exit") }
+#endif
         generation &+= 1
         phase = .idle
         intent = nil
@@ -168,6 +195,19 @@ public final class NutritionQuickAddViewModel {
         targets = nil
         context = nil
     }
+
+#if DEBUG
+    // Temporary, opt-in diagnosis only. No observable state or health payloads.
+    func recordDiagnostic(_ event: String, presentation: UUID? = nil) {
+        NutritionQuickAddDiagnostic.record(
+            event,
+            model: diagnosticIdentity,
+            presentation: presentation ?? intent?.id,
+            phase: String(describing: phase),
+            generation: generation
+        )
+    }
+#endif
 
     private func performSave(
         onPublish: @escaping @MainActor (
@@ -277,6 +317,43 @@ public final class NutritionQuickAddViewModel {
         return standard + custom
     }
 }
+
+#if DEBUG
+@MainActor
+private enum NutritionQuickAddDiagnostic {
+    private static let log = OSLog(
+        subsystem: "com.fatihzxc.HealthTrackingApp.NutritionDiagnostic",
+        category: "QuickAdd"
+    )
+    private static var sequence = 0
+    private static var models: [UUID: Int] = [:]
+    private static var presentations: [UUID: Int] = [:]
+
+    static func record(
+        _ event: String,
+        model: UUID,
+        presentation: UUID?,
+        phase: String,
+        generation: Int
+    ) {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains("-ui-testing"),
+              arguments.contains("-nutrition-quick-add-diagnostics"),
+              sequence < 512 else { return }
+        sequence += 1
+        if models[model] == nil { models[model] = models.count + 1 }
+        if let presentation, presentations[presentation] == nil {
+            presentations[presentation] = presentations.count + 1
+        }
+        let modelToken = models[model] ?? 0
+        let presentationToken = presentation.flatMap { presentations[$0] } ?? 0
+        let flow = arguments.contains("-ui-test-store-identifier") ? "persistent" : "transient"
+        let message = "seq=\(sequence) model=\(modelToken) presentation=\(presentationToken) "
+            + "generation=\(generation) flow=\(flow) phase=\(phase) event=\(event)"
+        os_log("%{public}@", log: log, type: .default, message)
+    }
+}
+#endif
 
 private enum NutritionQuickAddInternalError: Error {
     case invalidDay

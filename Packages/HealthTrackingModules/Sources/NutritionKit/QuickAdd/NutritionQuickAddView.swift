@@ -146,6 +146,9 @@ public struct NutritionQuickAddView: View {
             } else {
                 ForEach(viewModel.recipes) { recipe in
                     Button {
+#if DEBUG
+                        viewModel.recordDiagnostic("recipe-button-action", presentation: intent.id)
+#endif
                         viewModel.selectRecipe(id: recipe.id)
                         quantityText = formatted(viewModel.quantity)
                     } label: {

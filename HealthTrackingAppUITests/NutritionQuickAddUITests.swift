@@ -149,6 +149,7 @@ final class NutritionQuickAddUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = [
             "-ui-testing",
+            "-nutrition-quick-add-diagnostics",
             "-ui-test-scenario", "nutrition-quick-add",
             "-ui-test-appearance", appearance,
             "-AppleLanguages", "(tr)",
