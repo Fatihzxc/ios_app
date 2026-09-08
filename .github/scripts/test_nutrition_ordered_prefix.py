@@ -1,9 +1,6 @@
 """Fail-closed fixtures for the temporary five-case predecessor experiment."""
 import copy
-from pathlib import Path
-import shlex
 import unittest
-import yaml
 
 import nutrition_replay_capture as capture
 
@@ -34,22 +31,6 @@ def fixture(target="passed"):
 
 
 class OrderedPrefixTests(unittest.TestCase):
-    def test_workflow_selects_one_exact_prefix_without_native_repetition(self):
-        workflow = yaml.safe_load(Path(".github/workflows/nutrition-diagnostic.yml").read_text())
-        steps = workflow["jobs"]["diagnose"]["steps"]
-        run = next(step for step in steps if step.get("name", "").startswith("Run one unchanged predecessor"))
-        # YAML block indentation is stripped; isolate the sole native test command.
-        self.assertEqual(run["run"].count("xcodebuild test"), 1)
-        command = "xcodebuild test" + run["run"].split("xcodebuild test", 1)[1]
-        argv = shlex.split(command.replace("\\\n", ""))
-        selectors = [item for item in argv if item.startswith("-only-testing:")]
-        self.assertEqual(selectors, [f"-only-testing:HealthTrackingAppUITests/{suite}/{method}" for suite, method in METHODS])
-        self.assertFalse(any(item.startswith(("-test-iterations", "-run-tests", "-retry-tests", "-parallel-testing")) for item in argv))
-        self.assertIn("set -euo pipefail", run["run"])
-        self.assertEqual(run["timeout-minutes"], 25)
-        self.assertTrue(any(step.get("run") == "python3 .github/scripts/nutrition_replay_capture.py --ordered-prefix"
-                            and step.get("if", "").startswith("always()") for step in steps))
-
     def validate(self, console, records):
         validator = getattr(capture, "validate_ordered_prefix", None)
         self.assertTrue(callable(validator), "Ordered-prefix validation is not implemented")

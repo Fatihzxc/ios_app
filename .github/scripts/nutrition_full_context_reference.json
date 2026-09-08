@@ -1,0 +1,417 @@
+{
+  "sourceSHA": "f69c305961330e40bc4fc0325e0263435dd1503c",
+  "sourceRun": 34241435577,
+  "sourceArtifact": 10074629589,
+  "cases": [
+    {
+      "case": "-[HealthTrackingAppUITests.AccessibilitySmokeUITests testAccessibilityXXXLTraversesEveryRootWithoutDuplicateOrClippedControls]",
+      "outcome": "passed",
+      "duration": 127.378
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.AccessibilitySmokeUITests testVoiceOverContractsCoverSeededRowsStatesAndGalleryControls]",
+      "outcome": "passed",
+      "duration": 42.012
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.AppShellUITests testEmptyOnceReloadShowsLoadingBeforeSeededContent]",
+      "outcome": "passed",
+      "duration": 18.193
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.AppShellUITests testErrorOnceRetryShowsLoadingBeforeSeededContent]",
+      "outcome": "passed",
+      "duration": 17.12
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.AppShellUITests testFiveTabsExposeDistinctLoadedRootsInDarkAppearance]",
+      "outcome": "passed",
+      "duration": 44.752
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.AppShellUITests testFiveTabsExposeDistinctLoadedRootsInLightAppearance]",
+      "outcome": "passed",
+      "duration": 44.371
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.AppShellUITests testSeededTrainingContentIsOrderedAndDeterministicAcrossFreshProcesses]",
+      "outcome": "passed",
+      "duration": 30.111
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.AppShellUITests testSettingsGalleryPathRemainsPushedWithoutLeakingAcrossTabs]",
+      "outcome": "passed",
+      "duration": 23.768
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.AppShellUITests testStaticFatalConfigurationScenarioProvidesDeterministicEvidence]",
+      "outcome": "passed",
+      "duration": 5.85
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.AppShellUITests testStaticLoadingScenarioProvidesDeterministicEvidence]",
+      "outcome": "passed",
+      "duration": 12.662
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.BloodworkFlowUITests testAddEditDeleteAndRelaunchKeepsPermanentDisclaimer]",
+      "outcome": "passed",
+      "duration": 110.847
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.BloodworkFlowUITests testDarkHighContrastAndAX5KeepEditorAndDisclaimerReadable]",
+      "outcome": "passed",
+      "duration": 56.231
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.BodyMetricFlowUITests testDarkAndAX5QuickEntryEvidenceKeepsActionsReachable]",
+      "outcome": "passed",
+      "duration": 28.66
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.BodyMetricFlowUITests testTodayBatchRetryProgressEditDeleteAndRelaunch]",
+      "outcome": "passed",
+      "duration": 66.433
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.DeloadFlowUITests testReactiveTechniqueReviewSuppressesOnlyTheCurrentWeekWithoutMutation]",
+      "outcome": "passed",
+      "duration": 14.451
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.DeloadFlowUITests testScheduledWeekShowsVisibleWarningAndAcceptedDeloadLoad]",
+      "outcome": "passed",
+      "duration": 21.131
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.HealthCheckFlowUITests testAX5KeepsDisclaimerAndCompletionActionReachable]",
+      "outcome": "passed",
+      "duration": 16.226
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.HealthCheckFlowUITests testTodayDueCardRetryCompletionSuccessorAndProgressRelaunch]",
+      "outcome": "passed",
+      "duration": 36.284
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.HealthCheckNotificationFlowUITests testPermissionRequestOccursOnlyAfterExplicitHealthCheckActionAndNeverOnRelaunch]",
+      "outcome": "passed",
+      "duration": 29.934
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.LifestyleFlowUITests testCombinedSleepMoodSaveSurvivesRelaunchWithoutPartialState]",
+      "outcome": "passed",
+      "duration": 70.624
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.LifestyleFlowUITests testDarkAndAX5CombinedEntryKeepsOrderedActionsReachable]",
+      "outcome": "passed",
+      "duration": 40.035
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M1AcceptanceUITests testFirstPerformanceIsBaselineAndOnlyARealImprovementIsPresentedAsPR]",
+      "outcome": "passed",
+      "duration": 53.132
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M1AcceptanceUITests testHapticKillSwitchPersistsAcrossRelaunch]",
+      "outcome": "passed",
+      "duration": 23.161
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M1AcceptanceUITests testMissingRIRAndUnansweredOHPCannotPublishAnIncrease]",
+      "outcome": "passed",
+      "duration": 21.774
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M1AcceptanceUITests testWeekABCAndAllTwentySevenSeedExercisesPublishMeasurementAndSafety]",
+      "outcome": "passed",
+      "duration": 416.933
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M2AcceptanceUITests testFoodAndAdhocSourcesKeepHistoricalTotalsAfterFoodDeletionAndRelaunch]",
+      "outcome": "passed",
+      "duration": 158.305
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M2AcceptanceUITests testRecipeCreateThreeTapSnapshotArchiveRestoreAndRelaunch]",
+      "outcome": "passed",
+      "duration": 139.189
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M3AcceptanceUITests testReportDashboardFetchLifecycleAcrossRootSheetDismissals]",
+      "outcome": "passed",
+      "duration": 56.079
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M3AcceptanceUITests testTodayAndProgressExposeEveryM3TrackerEntryThroughOneLazyRouter]",
+      "outcome": "passed",
+      "duration": 98.729
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M3AcceptanceUITests testUS6AndUS8SummariesSurviveProgressSameDayEditAndRelaunch]",
+      "outcome": "passed",
+      "duration": 88.521
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M3AccessibilityUITests testEveryMetricTextFieldExposesFiftyTwoPointInteractionGeometry]",
+      "outcome": "passed",
+      "duration": 19.149
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M3AccessibilityUITests testProgressHubLightDarkDefaultXXLAX3AX5Matrix]",
+      "outcome": "passed",
+      "duration": 101.61
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M3AccessibilityUITests testReduceMotionAndHighContrastTrackerRoutesRemainOperable]",
+      "outcome": "passed",
+      "duration": 26.751
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M3AccessibilityUITests testSmallPhoneAX5TrackerRoutesRemainOperable]",
+      "outcome": "skipped",
+      "duration": 0.151
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M4ReportsAcceptanceUITests testCSVJSONAndBothExportsUseRealShareAndCleanEveryArtifact]",
+      "outcome": "passed",
+      "duration": 110.999
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M4ReportsAcceptanceUITests testExportFailureKeepsSelectionAndRetryThenDismissalCleansArtifact]",
+      "outcome": "passed",
+      "duration": 80.974
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M4ReportsAcceptanceUITests testSlowExportCanCancelAndRetryWithoutLeavingTemporaryFiles]",
+      "outcome": "passed",
+      "duration": 68.028
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M4ReportsAcceptanceUITests testTwoReadyPhotosShareOnlyAfterExplicitUserAction]",
+      "outcome": "passed",
+      "duration": 25.297
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M4ReportsAcceptanceUITests testUS7DashboardUsesEveryRangeAndShowsHonestObservedEvidence]",
+      "outcome": "passed",
+      "duration": 552.023
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M4ReportsAccessibilityUITests testDashboardLightDarkDefaultXXLAX3AX5Matrix]",
+      "outcome": "passed",
+      "duration": 1332.083
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M4ReportsAccessibilityUITests testReduceMotionAndHighContrastDashboardRemainOperable]",
+      "outcome": "passed",
+      "duration": 216.283
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.M4ReportsAccessibilityUITests testSmallPhoneAX5DashboardAndExportRemainOperable]",
+      "outcome": "skipped",
+      "duration": 0.299
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.MedicalSafetyFlowUITests testFirstUseExplanationPersistsIndependentlyFromPermanentReminderDisclaimer]",
+      "outcome": "passed",
+      "duration": 36.623
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.NavigationTitleSafeAreaUITests testErrorOnceTrainingNavigationTitleDoesNotOverlapStatusBar]",
+      "outcome": "passed",
+      "duration": 32.886
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.NavigationTitleSafeAreaUITests testSeededProgressNavigationTitleDoesNotOverlapStatusBar]",
+      "outcome": "passed",
+      "duration": 57.221
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.NavigationTitleSafeAreaUITests testSeededTrainingNavigationTitleDoesNotOverlapStatusBar]",
+      "outcome": "passed",
+      "duration": 57.22
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.NutritionAccessibilityUITests testAX5AdhocFieldsRemainReachableOrderedAndFiftyTwoPointsTall]",
+      "outcome": "passed",
+      "duration": 75.587
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.NutritionAccessibilityUITests testDarkHighContrastFoodSelectionRetainsSemanticRowsAndActions]",
+      "outcome": "passed",
+      "duration": 19.48
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.NutritionAccessibilityUITests testReduceMotionCanCompleteAdhocEntryWithoutTransitionDependency]",
+      "outcome": "passed",
+      "duration": 69.433
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.NutritionDayUITests testContentExposesCalendarNavigationTotalsStableCategoriesAndVoiceOverOrder]",
+      "outcome": "passed",
+      "duration": 37.596
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.NutritionDayUITests testDarkAX5ReduceMotionAndIncreaseContrastProduceCanonicalEvidence]",
+      "outcome": "passed",
+      "duration": 63.364
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.NutritionDayUITests testDeleteFailureRollsBackAndRetryPublishesRepositoryTotals]",
+      "outcome": "passed",
+      "duration": 33.23
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.NutritionDayUITests testEmptyAndRecoverableErrorStatesRemainDistinctAndRetrySameDay]",
+      "outcome": "passed",
+      "duration": 28.606
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.NutritionQuickAddUITests testCategoryRecipeAndDefaultConfirmAreExactlyThreeTapsAndPersistAfterRelaunch]",
+      "outcome": "failed",
+      "duration": 26.637
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.NutritionQuickAddUITests testDarkRecipeSelectionAndAX5ConfirmationHaveCanonicalEvidence]",
+      "outcome": "passed",
+      "duration": 40.373
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.NutritionQuickAddUITests testTodayMealActionOwnsTheTabRouteAndOpensSuggestedLocalTodayIntent]",
+      "outcome": "passed",
+      "duration": 12.011
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.OHPSafetyFlowUITests testAnsweredPriorSymptomsAndUncertaintyRenderTheShippedStoppedRoute]",
+      "outcome": "passed",
+      "duration": 89.087
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.OHPSafetyFlowUITests testPriorQuestionPrecedesWarmupAndCurrentSymptomsRouteToHalfKneeling]",
+      "outcome": "passed",
+      "duration": 89.25
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.PhaseTransitionFlowUITests testStayKeepsChecklistAccessibleThenExplicitAndManualSelectionsPersist]",
+      "outcome": "passed",
+      "duration": 32.145
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.PostureFlowUITests testDarkAX5AndHighContrastKeepDisclaimerAndActionsReachable]",
+      "outcome": "passed",
+      "duration": 57.689
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.PostureFlowUITests testWeeklyEntryRetrySafetyHistoryAndRelaunch]",
+      "outcome": "passed",
+      "duration": 67.085
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.ProgressPhotoGalleryUITests testChronologicalGalleryComparesTwoAvailablePhotosAndExplainsFallbacks]",
+      "outcome": "passed",
+      "duration": 27.461
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.ProgressPhotoGalleryUITests testShareAppearsForTwoReadyPhotosAndPresentsOnlyAfterExplicitTap]",
+      "outcome": "passed",
+      "duration": 25.816
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.ProgressPhotoLifecycleUITests testDeniedAndLimitedBroaderAccessKeepActualSystemPickerOperable]",
+      "outcome": "passed",
+      "duration": 27.562
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.ProgressPhotoLifecycleUITests testLocalImportRelaunchAndIdempotentDeleteWorkWithCloudDisabled]",
+      "outcome": "passed",
+      "duration": 40.108
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.ProgressPhotoLifecycleUITests testSuccessfulImportOffersAccessibleExactUndo]",
+      "outcome": "passed",
+      "duration": 20.361
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TodayGuidanceUITests testBloodworkCardKeepsRemainingAlertCountWithoutDuplicateAlertCard]",
+      "outcome": "passed",
+      "duration": 8.889
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TodayGuidanceUITests testEveryDirectiveClassHasLightDarkDefaultAndAccessibilityEvidence]",
+      "outcome": "passed",
+      "duration": 401.273
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TodayGuidanceUITests testLoadingStateAndEmptyErrorRetriesUseTheRealSnapshotLoad]",
+      "outcome": "passed",
+      "duration": 25.796
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TodayGuidanceUITests testOnlyHighestPriorityAlertIsExpandedAndRemainingCountIsVisible]",
+      "outcome": "passed",
+      "duration": 7.087
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TodayGuidanceUITests testTrainResumeAndRestOverrideActionsOpenTheRealSessionFlow]",
+      "outcome": "passed",
+      "duration": 29.327
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TrainingAccessibilityUITests testLightDarkAndDynamicTypeMatrixPassesSessionAudit]",
+      "outcome": "passed",
+      "duration": 472.909
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TrainingAccessibilityUITests testReduceMotionAndHighContrastFlowsRemainOperable]",
+      "outcome": "passed",
+      "duration": 46.143
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TrainingAccessibilityUITests testSmallPhoneAX5SessionRemainsOperable]",
+      "outcome": "skipped",
+      "duration": 8.558
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TrainingAccessibilityUITests testVoiceOverOrderValuesActionsAndFiftyTwoPointSessionTargets]",
+      "outcome": "passed",
+      "duration": 43.273
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TrainingHistoryUITests testHistoryEditDeleteAndMissingTemplateRecoveryUseRealRoutes]",
+      "outcome": "passed",
+      "duration": 44.043
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TrainingSessionFlowUITests testEveryMeasurementBarFamilyCooldownAndSummaryHaveLightDarkEvidence]",
+      "outcome": "passed",
+      "duration": 108.591
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TrainingSessionFlowUITests testGuidedOrderTapBudgetsSafetyAndOptionalSummary]",
+      "outcome": "passed",
+      "duration": 50.31
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TrainingSessionFlowUITests testMissingRIRHistoryNeverDisplaysALoadIncrease]",
+      "outcome": "passed",
+      "duration": 11.847
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TrainingSessionFlowUITests testResumeRestoresTheSameMovementAcrossRelaunch]",
+      "outcome": "passed",
+      "duration": 23.59
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TrainingSessionFlowUITests testTodayAndTrainingOpenTheSameRealFullScreenSession]",
+      "outcome": "passed",
+      "duration": 24.654
+    },
+    {
+      "case": "-[HealthTrackingAppUITests.TrainingSessionFlowUITests testWeeklyPallofVariantChooserPersistsExplicitOverride]",
+      "outcome": "passed",
+      "duration": 19.005
+    }
+  ]
+}

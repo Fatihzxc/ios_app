@@ -10,7 +10,9 @@ permissions:
 jobs:
   diagnose:
     runs-on: macos-15
-    timeout-minutes: 80
+    # One 30m baseline, original 150m full-suite cap, bounded capture/export overhead.
+    # Temporary diagnosis only; production acceptance budgets remain unchanged.
+    timeout-minutes: 240
     env:
       TZ: UTC
     steps:
@@ -109,8 +111,18 @@ jobs:
           xcrun xcresulttool export attachments \
             --path .build/HealthTrackingApp.xcresult \
             --output-path .build/nutrition-diagnostic/attachments
-      - name: Run one unchanged predecessor prefix then the three-tap case
-        timeout-minutes: 25
+      - name: Reset selected simulator before complete functional suite
+        run: |
+          set -euo pipefail
+          destination="$(scripts/select-simulator.sh)"
+          case "$destination" in
+            *,id=*) simulator_udid="${destination##*,id=}" ;;
+            *) echo "Selected simulator destination has no UDID: $destination" >&2; exit 1 ;;
+          esac
+          xcrun simctl shutdown "$simulator_udid" 2>/dev/null || :
+          xcrun simctl erase "$simulator_udid"
+      - name: Run one instrumented complete functional suite
+        timeout-minutes: 150
         run: |
           set -euo pipefail
           mkdir -p .build/nutrition-replay
@@ -118,22 +130,25 @@ jobs:
           date '+%Z %z' > .build/nutrition-replay/host-timezone.txt
           xcodebuild -version > .build/nutrition-replay/xcode-version.txt
           xcrun xcresulttool version > .build/nutrition-replay/xcresulttool-version.txt
+          scripts/bootstrap.sh
           destination="$(scripts/select-simulator.sh)"
           xcodebuild test \
             -project HealthTrackingApp.xcodeproj \
             -scheme HealthTrackingApp-Local \
             -destination "$destination" \
             -resultBundlePath .build/NutritionWarm.xcresult \
-            -only-testing:HealthTrackingAppUITests/NutritionDayUITests/testContentExposesCalendarNavigationTotalsStableCategoriesAndVoiceOverOrder \
-            -only-testing:HealthTrackingAppUITests/NutritionDayUITests/testDarkAX5ReduceMotionAndIncreaseContrastProduceCanonicalEvidence \
-            -only-testing:HealthTrackingAppUITests/NutritionDayUITests/testDeleteFailureRollsBackAndRetryPublishesRepositoryTotals \
-            -only-testing:HealthTrackingAppUITests/NutritionDayUITests/testEmptyAndRecoverableErrorStatesRemainDistinctAndRetrySameDay \
-            -only-testing:HealthTrackingAppUITests/NutritionQuickAddUITests/testCategoryRecipeAndDefaultConfirmAreExactlyThreeTapsAndPersistAfterRelaunch \
+            -skip-testing:HealthTrackingAppUITests/TodayGuidanceUITests/testColdLaunchPublishesFirstMeaningfulDirectiveWithinOneSecondMedian \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee .build/nutrition-replay/xcodebuild.log
-      - name: Validate predecessor order and correlate target app trace
+          xcodebuild build \
+            -project HealthTrackingApp.xcodeproj \
+            -scheme HealthTrackingApp-Local \
+            -configuration Release \
+            -destination "$destination" \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Validate full UI context and correlate target app trace
         if: always() && hashFiles('.build/nutrition-replay/start-utc.txt') != ''
         timeout-minutes: 10
-        run: python3 .github/scripts/nutrition_replay_capture.py --ordered-prefix
+        run: python3 .github/scripts/nutrition_replay_capture.py --full-context
       - name: Export replay attachments
         if: always() && hashFiles('.build/NutritionWarm.xcresult/Info.plist') != ''
         run: |

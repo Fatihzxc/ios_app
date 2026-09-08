@@ -36,3 +36,35 @@ function xcodebuild {{
     actual_arguments = result.stdout.split('\0')[:-1] if result.stdout else []
     assert actual_arguments == [argument for call in expected_calls for argument in call], (name, actual_arguments)
     print('PASS', name)
+
+# The full-context experiment retains the native test -> Release failure contract.
+# Execute only its native tail with command doubles; metadata redirections above
+# that tail are intentionally excluded so this check does not write artifacts.
+full_step = next(step for step in workflow['jobs']['diagnose']['steps']
+                 if step.get('name') == 'Run one instrumented complete functional suite')
+full_shell = 'set -euo pipefail\n' + full_step['run'][full_step['run'].index('xcodebuild test'):]
+expected_full_test = ['XCODE', 'test', '-project', 'HealthTrackingApp.xcodeproj',
+                      '-scheme', 'HealthTrackingApp-Local', '-destination',
+                      'platform=iOS Simulator,id=diagnostic-simulator',
+                      '-resultBundlePath', '.build/NutritionWarm.xcresult',
+                      '-skip-testing:HealthTrackingAppUITests/TodayGuidanceUITests/testColdLaunchPublishesFirstMeaningfulDirectiveWithinOneSecondMedian',
+                      'CODE_SIGNING_ALLOWED=NO']
+for name, test, build, expected_code, expected_calls in [
+    ('full native arguments', 0, 0, 0, [expected_full_test, expected_build]),
+    ('full test failure prevents Release', 65, 0, 65, [expected_full_test]),
+    ('full Release failure propagates', 0, 66, 66, [expected_full_test, expected_build]),
+]:
+    setup = f'''
+destination='platform=iOS Simulator,id=diagnostic-simulator'
+function tee {{ command cat; }}
+function xcodebuild {{
+  printf '%s\\0' XCODE "$@"
+  if [[ "$1" == test ]]; then return {test}; fi
+  return {build}
+}}
+'''
+    result = subprocess.run(['bash', '-c', setup + full_shell], text=True, capture_output=True)
+    assert result.returncode == expected_code, (name, result.returncode, result.stderr)
+    actual_arguments = result.stdout.split('\0')[:-1] if result.stdout else []
+    assert actual_arguments == [argument for call in expected_calls for argument in call], (name, actual_arguments)
+    print('PASS', name)

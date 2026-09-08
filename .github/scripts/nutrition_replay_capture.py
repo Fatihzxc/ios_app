@@ -19,7 +19,7 @@ PREFIX_CASES = [
 ]
 
 
-def parse_iterations(console, case=CASE):
+def parse_iterations(console, case=CASE, allow_skipped=False):
     iterations = []
     active = None
     for line in console.splitlines():
@@ -54,7 +54,8 @@ def parse_iterations(console, case=CASE):
         elif active is not None and "Requesting snapshot of accessibility hierarchy for app with pid " in line:
             active["snapshotProcessID"] = int(line.rsplit(" ", 1)[1])
         elif line.startswith(f"Test Case '{case}' "):
-            match = re.fullmatch(re.escape(f"Test Case '{case}' ") + r"(passed|failed) \(([0-9.]+) seconds\)\.", line)
+            outcomes = "passed|failed|skipped" if allow_skipped else "passed|failed"
+            match = re.fullmatch(re.escape(f"Test Case '{case}' ") + rf"({outcomes}) \(([0-9.]+) seconds\)\.", line)
             if not match or active is None or "start" not in active:
                 raise ValueError("Unmatched result or missing case timestamp")
             active["outcome"] = match[1]
@@ -70,47 +71,87 @@ def parse_iterations(console, case=CASE):
 
 
 def validate_ordered_prefix(console, records):
+    return _validate_case_context(console, records)
+
+
+def validate_full_context(console, records, reference):
+    return _validate_case_context(console, records, reference)
+
+
+def _validate_case_context(console, records, reference=None):
     """Validate this one observed invocation, not an arbitrary XCTest schema."""
     markers = re.findall(r"^Test Case '([^']+)' (.*)$", console, re.MULTILINE)
-    if len(markers) != 10:
+    expected_cases = PREFIX_CASES
+    if reference is not None:
+        expected_cases = [item["case"] for item in reference["cases"]]
+        markers = [item for item in markers if item[0].startswith("-[HealthTrackingAppUITests.")]
+        records = [record for record in records if record["identifierURL"]["_value"].startswith(
+            "test://com.apple.xcode/HealthTrackingApp/HealthTrackingAppUITests/")]
+    if not expected_cases or len(set(expected_cases)) != len(expected_cases) or expected_cases.count(CASE) != 1:
+        raise ValueError("Invalid reference case identities")
+    if len(markers) != len(expected_cases) * 2:
         raise ValueError("Missing, duplicated, or extra ordered-prefix case markers")
     parsed = []
-    for index, case in enumerate(PREFIX_CASES):
+    estimated_overlaps = []
+    for index, case in enumerate(expected_cases):
         start, result = markers[index * 2:index * 2 + 2]
         if start != (case, "started.") or result[0] != case:
             raise ValueError("Unexpected ordered-prefix execution order or overlap")
-        attempts = parse_iterations(console, case)
+        attempts = parse_iterations(console, case, allow_skipped=reference is not None)
         if len(attempts) != 1:
             raise ValueError("Expected one attempt per ordered-prefix case")
         attempt = attempts[0]
-        if parsed and attempt["start"] < parsed[-1]["end"]:
-            raise ValueError("Overlapping predecessor/target time windows")
-        if index < 4 and attempt["outcome"] != "passed":
+        if parsed:
+            if reference is not None and attempt["start"] <= parsed[-1]["start"]:
+                raise ValueError("Non-monotonic full-context start timestamps")
+            if attempt["start"] < parsed[-1]["end"]:
+                if reference is None:
+                    raise ValueError("Overlapping predecessor/target time windows")
+                # Actual original serial console has 1–14ms discrepancies here.
+                # Start Test + reported duration is not a physical execution boundary.
+                estimated_overlaps.append({"previousCase": expected_cases[index - 1],
+                                           "currentCase": case,
+                                           "seconds": (parsed[-1]["end"] - attempt["start"]).total_seconds()})
+        if reference is None and index < 4 and attempt["outcome"] != "passed":
             raise ValueError("Failed predecessor: target context is inconclusive")
+        if case == CASE and attempt["outcome"] == "skipped":
+            raise ValueError("Target was skipped; no diagnostic attempt")
         parsed.append(attempt)
     runners = list(re.finditer(r"^.*HealthTrackingAppUITests-Runner\[(\d+):\d+\].*Running tests\.\.\.$",
                                console, re.MULTILINE))
-    if len(runners) != 1 or runners[0].start() >= console.index("Test Case '"):
+    if len(runners) != 1 or runners[0].start() >= console.index(f"Test Case '{expected_cases[0]}'"):
         raise ValueError("Missing or multiple observed test-runner starts")
-    if len(records) != 5:
-        raise ValueError("Expected exactly five native test metadata records")
+    if len(records) != len(expected_cases):
+        raise ValueError("Unexpected native UI test metadata count")
     references = set()
-    for case, attempt in zip(PREFIX_CASES, parsed):
+    for case, attempt in zip(expected_cases, parsed):
         suite, method = case.removeprefix("-[HealthTrackingAppUITests.").removesuffix("]").split(" ")
         identity = f"test://com.apple.xcode/HealthTrackingApp/HealthTrackingAppUITests/{suite}/{method}"
         matches = [record for record in records if record["identifierURL"]["_value"] == identity]
         if len(matches) != 1:
             raise ValueError("Missing or duplicate native case identity")
         record = matches[0]
-        expected = "Success" if attempt["outcome"] == "passed" else "Failure"
+        expected = {"passed": "Success", "failed": "Failure", "skipped": "Skipped"}[attempt["outcome"]]
         if record["testStatus"]["_value"] != expected:
             raise ValueError("Native/console outcome mismatch")
         duration = float(record["duration"]["_value"])
         if not math.isfinite(duration) or abs(duration - attempt["duration"]) > 0.001:
             raise ValueError("Native/console duration mismatch")
         references.add(record["summaryRef"]["id"]["_value"])
-    if len(references) != 5:
+    if len(references) != len(expected_cases):
         raise ValueError("Native case summary references are not distinct")
+    if reference is not None:
+        return {"sourceSHA": reference["sourceSHA"],
+                "fullUIOrderMatches": True,
+                "matchedNativeUICaseCount": len(records),
+                "observedRunnerPID": int(runners[0][1]),
+                "estimatedWindowOverlaps": estimated_overlaps,
+                "targetOutcome": parsed[expected_cases.index(CASE)]["outcome"],
+                "backgroundOutcomeChanges": [
+                    {"case": original["case"], "original": original["outcome"], "observed": attempt["outcome"]}
+                    for original, attempt in zip(reference["cases"], parsed)
+                    if original["case"] != CASE and original["outcome"] != attempt["outcome"]],
+                "limitation": "Observed UI order/worker/device and outcomes only; timing and host state are not identical"}
     return {"orderedPrefix": "four passing predecessors then target",
             "observedRunnerPID": int(runners[0][1]),
             "targetOutcome": parsed[-1]["outcome"],
@@ -178,7 +219,7 @@ def correlate_roots(results):
             raise ValueError("Failure snapshot PID does not match correlated app process")
 
 
-def main(ordered_prefix=False):
+def main(ordered_prefix=False, full_context=False):
     output = Path(".build/nutrition-replay")
     result_path = ".build/NutritionWarm.xcresult"
     base = ["xcrun", "xcresulttool", "get", "object", "--legacy", "--format", "json", "--path", result_path]
@@ -239,18 +280,30 @@ def main(ordered_prefix=False):
     (output / "iterations.json").write_text(json.dumps(results, indent=2, default=str))
     correlate_roots(results)
     (output / "iterations.json").write_text(json.dumps(results, indent=2, default=str))
-    if ordered_prefix:
+    if ordered_prefix or full_context:
         # Raw events, console, bundle and target correlation are already retained.
         # Multiple action/testable destinations cannot establish this ordered context.
         if len(destinations) != 1 or len(root["actions"]["_values"]) != 1 or len(summaries) != 1:
             raise ValueError("Ordered prefix requires one native action/destination/summary")
         plan_runs = summaries[0]["summaries"]["_values"]
-        if len(plan_runs) != 1 or len(plan_runs[0]["testableSummaries"]["_values"]) != 1:
+        if len(plan_runs) != 1:
+            raise ValueError("Context requires one native plan run")
+        testables = plan_runs[0]["testableSummaries"]["_values"]
+        if full_context:
+            testables = [item for item in testables if item["targetName"]["_value"] == "HealthTrackingAppUITests"]
+        if len(testables) != 1:
             raise ValueError("Ordered prefix requires one native testable run")
-        validation = validate_ordered_prefix((output / "xcodebuild.log").read_text(), records)
+        console = (output / "xcodebuild.log").read_text()
+        if full_context:
+            reference = json.loads(Path(".github/scripts/nutrition_full_context_reference.json").read_text())
+            validation = validate_full_context(console, records, reference)
+        else:
+            validation = validate_ordered_prefix(console, records)
         validation["simulator"] = next(iter(destinations))
         (output / "validation.json").write_text(json.dumps(validation, indent=2))
-        print("One ordered-prefix experiment correlated:", validation, "Not acceptance.")
+        if full_context and validation["backgroundOutcomeChanges"]:
+            raise ValueError("Different background outcomes; inspect preserved context comparison")
+        print("One context experiment correlated:", validation, "Not acceptance.")
         return
     expected = Counter("success" if item["outcome"] == "passed" else "failure" for item in iterations)
     (output / "validation.json").write_text(json.dumps({
@@ -271,6 +324,6 @@ def main(ordered_prefix=False):
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] not in ([], ["--ordered-prefix"]):
-        raise SystemExit("Only optional --ordered-prefix is supported")
-    main(ordered_prefix=sys.argv[1:] == ["--ordered-prefix"])
+    if sys.argv[1:] not in ([], ["--ordered-prefix"], ["--full-context"]):
+        raise SystemExit("Only optional --ordered-prefix or --full-context is supported")
+    main(ordered_prefix=sys.argv[1:] == ["--ordered-prefix"], full_context=sys.argv[1:] == ["--full-context"])
