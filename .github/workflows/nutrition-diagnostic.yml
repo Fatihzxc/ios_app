@@ -19,7 +19,28 @@ jobs:
         run: brew install xcodegen
       - name: Run unchanged three-tap and companion assertions
         timeout-minutes: 30
-        run: scripts/test-ios.sh --focused-testing HealthTrackingAppUITests/NutritionQuickAddUITests
+        # Diagnostic-only native tail of test-ios.sh. Intentional DEBUG structural
+        # logging is incompatible with production's zero-log gate. ios.yml and all
+        # production verifiers remain unchanged and must pass after trace removal.
+        # Success here is test/capture evidence, never privacy or M4 acceptance.
+        run: |
+          set -euo pipefail
+          scripts/bootstrap.sh
+          destination="$(scripts/select-simulator.sh)"
+          mkdir -p .build
+          xcodebuild test \
+            -project HealthTrackingApp.xcodeproj \
+            -scheme HealthTrackingApp-Local \
+            -only-testing:HealthTrackingAppUITests/NutritionQuickAddUITests \
+            -destination "$destination" \
+            -resultBundlePath "$PWD/.build/HealthTrackingApp.xcresult" \
+            CODE_SIGNING_ALLOWED=NO
+          xcodebuild build \
+            -project HealthTrackingApp.xcodeproj \
+            -scheme HealthTrackingApp-Local \
+            -configuration Release \
+            -destination "$destination" \
+            CODE_SIGNING_ALLOWED=NO
       - name: Export bounded diagnostic trace
         if: always()
         run: |
