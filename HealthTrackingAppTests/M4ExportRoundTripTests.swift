@@ -526,11 +526,12 @@ final class M4ExportRoundTripTests: XCTestCase {
             } else if scalar.value == 0x0A {
                 throw RoundTripFailure.invalidCSV
             } else {
+                guard !wasQuoted else { throw RoundTripFailure.invalidCSV }
                 value.unicodeScalars.append(scalar)
             }
             index += 1
         }
-        guard !quoted, record.isEmpty, value.isEmpty, !records.isEmpty else {
+        guard !quoted, !wasQuoted, record.isEmpty, value.isEmpty, !records.isEmpty else {
             throw RoundTripFailure.invalidCSV
         }
         return records
