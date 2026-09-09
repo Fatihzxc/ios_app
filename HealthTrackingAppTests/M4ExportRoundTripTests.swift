@@ -106,6 +106,62 @@ final class M4ExportRoundTripTests: XCTestCase {
         XCTAssertEqual(embeddedCRLF.value, "satır 1\r\nsatır 2")
     }
 
+    func testCSVDecoderRejectsOrdinaryTextAfterAClosingQuote() {
+        for malformed in [
+            "\"a\"b\r\n",
+            "\"a\" \r\n",
+            "\"\"42\r\n",
+            "\"a\"b,c\r\n",
+            "h\r\n\"\"x\r\n",
+        ] {
+            XCTAssertThrowsError(try parseRFC4180(Data(malformed.utf8))) { error in
+                guard case RoundTripFailure.invalidCSV = error else {
+                    return XCTFail("Expected invalid CSV, received \(error)")
+                }
+            }
+        }
+    }
+
+    func testCSVDecoderRequiresExportFinalCRLFEvenForAQuotedEmptyField() {
+        // RFC 4180 permits an omitted final CRLF, but our export contract does not.
+        for unterminatedRecord in ["h\r\n\"\"", "h\r\n\"a\"", "h\r\nx", "h\r\n,"] {
+            XCTAssertThrowsError(try parseRFC4180(Data(unterminatedRecord.utf8))) { error in
+                guard case RoundTripFailure.invalidCSV = error else {
+                    return XCTFail("Expected invalid CSV, received \(error)")
+                }
+            }
+        }
+    }
+
+    func testCSVDecoderPreservesEscapingLineBreaksUnicodeAndSignificantSpaces() throws {
+        let records = try parseRFC4180(Data((
+            "a,b,c,d,e,f\r\n"
+                + "\"\",,\"a,\"\"b\"\"\",\"satır 1\r\nsatır 2\",\" Çığ \", 42 \r\n"
+        ).utf8))
+        XCTAssertEqual(records.count, 2)
+        let fields = try XCTUnwrap(records.last)
+        XCTAssertEqual(fields.map(\.value), ["", "", "a,\"b\"", "satır 1\r\nsatır 2", " Çığ ", " 42 "])
+        XCTAssertEqual(fields.map(\.wasQuoted), [true, false, true, true, true, false])
+
+        let separateLineBreaks = try parseRFC4180(Data("a,b\r\n\"x\ry\",\"x\ny\"\r\n".utf8))
+        XCTAssertEqual(separateLineBreaks.last?.map(\.value), ["x\ry", "x\ny"])
+    }
+
+    func testCSVDecoderDistinguishesQuotedEmptyFromTrailingNull() throws {
+        let records = try parseRFC4180(Data("a,b,c\r\n\"\",x,\r\n".utf8))
+        XCTAssertEqual(records.count, 2)
+        let fields = try XCTUnwrap(records.last)
+        XCTAssertEqual(fields.map(\.value), ["", "x", ""])
+        XCTAssertEqual(fields.map(\.wasQuoted), [true, false, false])
+    }
+
+    func testCSVDecoderRetainsMalformedQuoteAndRecordSeparatorRejections() {
+        for malformed in ["a\"b\r\n", "\"unterminated\r\n", "a\rb\r\n", "a\nb\r\n"] {
+            XCTAssertThrowsError(try parseRFC4180(Data(malformed.utf8)))
+        }
+        XCTAssertThrowsError(try parseRFC4180(Data([0xFF])))
+    }
+
     func testGeneratedZIPPassesPureInspectorManifestHashesAndAttachesHostedArtifact() async throws {
         let snapshot = try makeSnapshot()
         let coordinator = ReportExportCoordinator(
