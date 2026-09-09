@@ -11,8 +11,10 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
+import textwrap
 from pathlib import Path
 
 FULL_JOB_GUARD = "${{ github.event_name != 'push' || !startsWith(github.ref_name, 'test/m4.') || startsWith(github.ref_name, 'test/m4.9-') }}"
@@ -742,6 +744,85 @@ def verify_task9_stage_a_contract(root: Path) -> None:
         source = (root / relative_path).read_text(encoding="utf-8")
         if logging_pattern.search(swift_code_without_comments_and_literals(source)):
             raise ValueError("M4.9 privacy scan forbids Stage-A payload logging")
+
+
+def task9_zip_attachment_self_test(source_root: Path) -> None:
+    """Execute the hosted selector: Xcode inserts its suffix before .zip."""
+    workflow = (source_root / ".github/workflows/ios.yml").read_text(encoding="utf-8")
+    full_job = job_block(workflow, "test")
+    step = full_job.split("      - name: Audit attached M4 export ZIP\n", 1)[1]
+    step = step.split("      - name:", 1)[0]
+    selector = textwrap.dedent(
+        step.split("<<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+    )
+    method = "testGeneratedZIPPassesPureInspectorManifestHashesAndAttachesHostedArtifact"
+    owner = f"M4ExportRoundTripTests/{method}()"
+    # Actual metadata shape from run34241435577 attempt2/artifact10091291049.
+    exported_name = "90C7ED51-296A-47BC-B081-9AE32F3646A4.zip"
+    suggested_name = "m4-round-trip-export_0_F9138758-38D6-4CF6-A698-579CD9C80378.zip"
+
+    def record(identifier=owner, suggested=suggested_name, exported=exported_name):
+        return {
+            "testIdentifier": identifier,
+            "testIdentifierURL": (
+                "test://com.apple.xcode/HealthTrackingApp/HealthTrackingAppTests/"
+                f"M4ExportRoundTripTests/{method}"
+            ),
+            "attachments": [{
+                "configurationName": "Test Scheme Action",
+                "deviceId": "DF24883C-910C-42D6-A87A-531F98C777E2",
+                "deviceName": "iPhone 16 Pro",
+                "exportedFileName": exported,
+                "isAssociatedWithFailure": False,
+                "suggestedHumanReadableName": suggested,
+                "timestamp": 1788929540.705,
+            }],
+        }
+
+    cases = (
+        ("observed Xcode name", [record()], True, True, None),
+        ("bare canonical name", [record(suggested="m4-round-trip-export.zip")], True, True, None),
+        ("case normalization", [record(suggested=suggested_name.upper())], True, True, None),
+        ("qualified class", [record(identifier=f"HealthTrackingAppTests.M4ExportRoundTripTests/{method}()")], True, True, None),
+        ("module path", [record(identifier=f"HealthTrackingAppTests/M4ExportRoundTripTests/{method}()")], True, True, None),
+        ("wrong owner", [record(identifier=f"OtherTests/{method}()")], True, False, "found 0"),
+        ("wrong module", [record(identifier=f"OtherModule/M4ExportRoundTripTests/{method}()")], True, False, "found 0"),
+        ("wrong method", [record(identifier="M4ExportRoundTripTests/testOther()")], True, False, "found 0"),
+        ("unowned decoy ignored", [record(identifier=f"OtherTests/{method}()"), record()], True, True, None),
+        ("duplicate owned attachment", [record(), record()], True, False, "found 2"),
+        ("missing exported file", [record()], False, False, "not an exported ZIP"),
+        ("non-ZIP exported file", [record(exported="payload.txt")], True, False, "not an exported ZIP"),
+        ("wrong suggested extension", [record(suggested=suggested_name[:-4] + ".txt")], True, False, "found 0"),
+        ("unrelated name", [record(suggested="other-export.zip")], True, False, "found 0"),
+        ("prefix without separator", [record(suggested="m4-round-trip-exported.zip")], True, False, "found 0"),
+        ("missing record", [], True, False, "found 0"),
+        ("malformed attachment list", [{"testIdentifier": owner, "attachments": None}], True, False, "malformed"),
+    )
+    # A minimal ZIP is enough here: this boundary selects/copies, while the
+    # subsequent hosted unzip/manifest/checksum audit validates real contents.
+    fixture_bytes = b"PK\x05\x06" + b"\x00" * 18
+    for label, records, create_source, succeeds, error in cases:
+        with tempfile.TemporaryDirectory(prefix="m4-zip-selector-") as directory:
+            fixture = Path(directory)
+            attachments = fixture / "attachments"
+            attachments.mkdir()
+            archive = fixture / "selected.zip"
+            (attachments / "manifest.json").write_text(json.dumps(records), encoding="utf-8")
+            if create_source:
+                (attachments / exported_name).write_bytes(fixture_bytes)
+                (attachments / "payload.txt").write_bytes(fixture_bytes)
+            result = subprocess.run(
+                [sys.executable, "-", str(attachments), str(archive)],
+                input=selector, capture_output=True, text=True, timeout=10,
+            )
+            if succeeds:
+                if result.returncode != 0 or not archive.is_file():
+                    raise ValueError(f"M4 ZIP selector rejected {label}: {result.stderr.strip()}")
+                if archive.read_bytes() != fixture_bytes:
+                    raise ValueError(f"M4 ZIP selector changed bytes for {label}")
+            elif result.returncode == 0 or archive.exists() or error not in result.stderr:
+                raise ValueError(f"M4 ZIP selector did not fail closed for {label}: {result.stderr.strip()}")
+    print(f"M4 ZIP attachment selector behavioral self-tests passed ({len(cases)} cases).")
 
 
 def task9_stage_a_self_test(source_root: Path) -> None:
@@ -7692,6 +7773,7 @@ def self_test(source_root: Path) -> None:
 root = Path(sys.argv[1])
 mode = sys.argv[2]
 if mode == "--self-test":
+    task9_zip_attachment_self_test(root)
     self_test(root)
     task9_red_self_test(root)
     task9_stage_a_self_test(root)

@@ -608,7 +608,11 @@ jobs:
                       raise SystemExit("M4 round-trip attachment metadata is malformed.")
                   normalized = suggested.lower()
                   canonical = "m4-round-trip-export.zip"
-                  if normalized == canonical or normalized.startswith(f"{canonical}_"):
+                  # xcresulttool inserts its unique suffix before the extension.
+                  if normalized == canonical or (
+                      normalized.startswith(f"{Path(canonical).stem}_")
+                      and normalized.endswith(".zip")
+                  ):
                       matches.append(attachment_directory / exported)
 
           if len(matches) != 1:
