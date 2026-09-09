@@ -469,7 +469,6 @@ def verify_task9_stage_a_contract(root: Path) -> None:
             '"payloadChecksumsVerified": verified',
             "M4-export-round-trip-evidence",
             ".build/m4-export-evidence/**",
-            "Test M1 and M3 on small iPhone at AX5",
             'M4_SMALL_PHONE_GATE: "1"',
             "M4_SMALL_PHONE_GATE=1",
             "-only-testing:HealthTrackingAppUITests/M4ReportsAccessibilityUITests/testSmallPhoneAX5DashboardAndExportRemainOperable",
@@ -840,6 +839,30 @@ def task9_stage_a_self_test(source_root: Path) -> None:
             shutil.copy2(source, destination)
         verify_task9_stage_a_contract(fixture)
 
+        # A display-only rename must not change the M4 evidence contract.
+        workflow_path = fixture / ".github/workflows/ios.yml"
+        original_workflow = workflow_path.read_text(encoding="utf-8")
+        small_phone_steps = re.split(
+            r"(?=^      - )", job_block(original_workflow, "test-small-phone"),
+            flags=re.MULTILINE,
+        )
+        selector = (
+            "-only-testing:HealthTrackingAppUITests/M4ReportsAccessibilityUITests/"
+            "testSmallPhoneAX5DashboardAndExportRemainOperable"
+        )
+        owned_steps = [step for step in small_phone_steps if selector in step]
+        if len(owned_steps) != 1:
+            raise SystemExit("M4.9 cosmetic-rename fixture must identify one step")
+        display_line = owned_steps[0].splitlines(keepends=True)[0]
+        if not display_line.startswith("      - name: ") or original_workflow.count(display_line) != 1:
+            raise SystemExit("M4.9 cosmetic-rename fixture must identify one display name")
+        workflow_path.write_text(
+            original_workflow.replace(display_line, "      - name: Cosmetic AX5 gate label\n", 1),
+            encoding="utf-8",
+        )
+        verify_task9_stage_a_contract(fixture)
+        workflow_path.write_text(original_workflow, encoding="utf-8")
+
         mutations = (
             (
                 ".github/workflows/ios.yml",
@@ -856,12 +879,6 @@ def task9_stage_a_self_test(source_root: Path) -> None:
                 'M4_SMALL_PHONE_GATE: "$(M4_SMALL_PHONE_GATE)"',
                 'M4_SMALL_PHONE_GATE: "0"',
                 "small-phone XCTest environment forwarding contract",
-            ),
-            (
-                ".github/workflows/ios.yml",
-                "Test M1 and M3 on small iPhone at AX5",
-                "Test M1, M3, and M4 on small iPhone at AX5",
-                "workflow evidence contract",
             ),
             (
                 ".github/workflows/ios.yml",
