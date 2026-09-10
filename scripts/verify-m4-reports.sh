@@ -6280,6 +6280,7 @@ TASK7_TEST_SUITES = {
             "testDescriptorDirectoryEnumerationDoesNotAdvanceTheCallersCleanupCursor",
             "testPrivateNamespaceLeaseRejectsRootOwnedAndNestedMovesWhileAllocationIsLive",
             "testCleanupLeaseRejectsNestedMoveAtRecursiveCleanupBoundary",
+            "testCleanupRetryRemovesQuarantinedPayloadAfterReopenFailure",
             "testRecursiveCleanupRejectsQuarantineReplacementBetweenMetadataAndOpen",
             "testRecursiveCleanupRejectsQuarantineReplacementBetweenMetadataAndUnlink",
             "testPostMkdirPathInspectionFailureRetainsCleanupAuthorization",
@@ -6301,7 +6302,7 @@ TASK7_TEST_ASSET_SHA256 = {
         "861e2554ec075586706fd008690d2777055818cdeb2f897e4e89513931fba48b"
     ),
     "Packages/HealthTrackingModules/Tests/ReportsKitTests/ReportExportCoordinatorTests.swift": (
-        "f4ed898e4aed79d631c4cbdf1d8a3b8b675e950d611c3c31b777567eb3111045"
+        "94dcd7d3bbaed0a045c47d59c7916144da70100997b994cf58e67ab57548d59d"
     ),
 }
 
@@ -6318,7 +6319,7 @@ TASK7_TRUSTED_CANONICAL_TEST_SOURCE_SHA256 = {
         "861e2554ec075586706fd008690d2777055818cdeb2f897e4e89513931fba48b"
     ),
     "Packages/HealthTrackingModules/Tests/ReportsKitTests/ReportExportCoordinatorTests.swift": (
-        "f4ed898e4aed79d631c4cbdf1d8a3b8b675e950d611c3c31b777567eb3111045"
+        "94dcd7d3bbaed0a045c47d59c7916144da70100997b994cf58e67ab57548d59d"
     ),
 }
 
