@@ -89,8 +89,27 @@ final class ReportChartReadabilityTests: XCTestCase {
                         x: index == 0 ? 18 : image.size.width - 38,
                         y: bounds.midY - 4, width: index == 0 ? 26 : 18, height: 8
                     )
+                    let inkCount = try darkPixelCount(in: image, region: gutter)
+                    let cgImage = try XCTUnwrap(image.cgImage)
+                    let pixelScale = CGFloat(cgImage.width) / image.size.width
+                    let pixelCrop = gutter.applying(CGAffineTransform(scaleX: pixelScale, y: pixelScale)).integral
+                    let crop = try XCTUnwrap(cgImage.cropping(to: pixelCrop))
+                    attach(
+                        UIImage(cgImage: crop, scale: image.scale, orientation: .up),
+                        name: "m4-chart-date-connector-crop-\(kind)-\(size)-\(index)"
+                    )
+                    let diagnostic = XCTAttachment(string: """
+                        date=\(date), kind=\(kind), size=\(size)
+                        imagePoints=\(image.size), imageScale=\(image.scale)
+                        cgPixels=\(image.cgImage?.width ?? 0)x\(image.cgImage?.height ?? 0)
+                        ocrBoundsPoints=\(bounds), gutterPoints=\(gutter), inkCount=\(inkCount)
+                        cropPixels=\(pixelCrop)
+                        """)
+                    diagnostic.name = "m4-chart-date-connector-probe-\(kind)-\(size)-\(index)"
+                    diagnostic.lifetime = .keepAlways
+                    add(diagnostic)
                     XCTAssertGreaterThan(
-                        try darkPixelCount(in: image, region: gutter), 8,
+                        inkCount, 8,
                         "Missing visible date connector beside \(date), \(kind), \(size)."
                     )
                 }
@@ -309,6 +328,15 @@ final class ReportChartReadabilityTests: XCTestCase {
         let observation = try XCTUnwrap(request.results?.first {
             $0.topCandidates(1).first.map { normalized($0.string).contains(normalized(text)) } ?? false
         }, "Expected visible full text to locate connector region: \(text)")
+        let diagnostic = XCTAttachment(string: """
+            requested=\(text)
+            recognized=\(observation.topCandidates(1).first?.string ?? "")
+            normalizedBounds=\(observation.boundingBox)
+            imagePoints=\(image.size), imageScale=\(image.scale)
+            """)
+        diagnostic.name = "m4-chart-ocr-observation"
+        diagnostic.lifetime = .keepAlways
+        add(diagnostic)
         let box = observation.boundingBox
         return CGRect(
             x: box.minX * image.size.width, y: (1 - box.maxY) * image.size.height,
