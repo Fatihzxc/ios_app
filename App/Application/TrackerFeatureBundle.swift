@@ -54,7 +54,9 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
     let healthChecksRepository: any HealthChecksRepository
     let bloodworkRepository: any BloodworkRepository
     let progressPhotoRepository: any ProgressPhotoRepository
-    let reportsRepository: any ReportsRepository & ReportsExportRepository
+    var reportsRepository: any ReportsRepository & ReportsExportRepository {
+        reports.value.repository
+    }
     let progressPhotoAssetSynchronizer: any CloudPhotoAssetSynchronizing
     let healthCheckNotificationComposition: HealthCheckNotificationComposition
     let bodyMetricViewModel: BodyMetricViewModel
@@ -64,9 +66,13 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
     let bloodworkViewModel: BloodworkViewModel
     let progressPhotoImportViewModel: ProgressPhotoImportViewModel
     let progressPhotoGalleryViewModel: ProgressPhotoGalleryViewModel
-    let reportsDashboardViewModel: ReportsDashboardViewModel
-    let reportExportViewModel: ReportExportViewModel
-    private let reportExportCoordinator: ReportExportCoordinator
+    var reportsDashboardViewModel: ReportsDashboardViewModel {
+        reports.value.dashboardViewModel
+    }
+    var reportExportViewModel: ReportExportViewModel {
+        reports.value.exportViewModel
+    }
+    private let reports: DeferredTrackerReports
     private let calendar: Calendar
     private let now: @MainActor () -> Date
     private let progressPhotoFixtureData: Data?
@@ -80,6 +86,9 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         progressPhotoRepository: any ProgressPhotoRepository = NoOpProgressPhotoRepository.shared,
         progressPhotoAssetSynchronizer: any CloudPhotoAssetSynchronizing = NoOpCloudPhotoAssetCoordinator.shared,
         reportsRepository: (any ReportsRepository & ReportsExportRepository)? = nil,
+        makeReportsRepository: (
+            @MainActor () -> any ReportsRepository & ReportsExportRepository
+        )? = nil,
         reportExportPhotoProvider: (any ReportExportPhotoByteProviding)? = nil,
         progressPhotoFixtureData: Data? = nil,
         broaderPhotoLibraryAccessState: PhotoLibraryAccessState = .authorized,
@@ -124,23 +133,38 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         self.healthChecksRepository = resolvedHealthChecksRepository
         self.bloodworkRepository = bloodworkRepository
         self.progressPhotoRepository = progressPhotoRepository
-        let resolvedReportsRepository = reportsRepository
-            ?? EmptyTrackerReportsRepository.shared
-        self.reportsRepository = resolvedReportsRepository
         self.progressPhotoAssetSynchronizer = progressPhotoAssetSynchronizer
         self.progressPhotoFixtureData = progressPhotoFixtureData
         self.broaderPhotoLibraryAccessState = broaderPhotoLibraryAccessState
         self.calendar = calendar
         self.now = now
-        let reportsDashboardViewModel = ReportsDashboardViewModel(
-            repository: resolvedReportsRepository,
-            calendar: calendar
-        )
-        self.reportsDashboardViewModel = reportsDashboardViewModel
+        let reports = DeferredTrackerReports {
+            let repository = makeReportsRepository?()
+                ?? reportsRepository
+                ?? EmptyTrackerReportsRepository.shared
+            let coordinator = ReportExportCoordinator(
+                repository: repository,
+                photoProvider: reportExportPhotoProvider
+                    ?? ProgressPhotoReportExportProvider(repository: progressPhotoRepository)
+            )
+            return DeferredTrackerReports.Content(
+                repository: repository,
+                dashboardViewModel: ReportsDashboardViewModel(
+                    repository: repository,
+                    calendar: calendar
+                ),
+                exportViewModel: ReportExportViewModel(
+                    generator: coordinator,
+                    calendar: calendar
+                )
+            )
+        }
+        self.reports = reports
         bodyMetricViewModel = BodyMetricViewModel(
             repository: metricsRepository,
             onCommittedEdit: {
-                await reportsDashboardViewModel.load(referenceDate: now())
+                // Edits from Today must not create Progress-only dependencies.
+                await reports.resolved?.dashboardViewModel.load(referenceDate: now())
             }
         )
         postureViewModel = PostureViewModel(repository: metricsRepository)
@@ -154,16 +178,6 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         )
         progressPhotoGalleryViewModel = ProgressPhotoGalleryViewModel(
             repository: progressPhotoRepository
-        )
-        let reportExportCoordinator = ReportExportCoordinator(
-            repository: resolvedReportsRepository,
-            photoProvider: reportExportPhotoProvider
-                ?? ProgressPhotoReportExportProvider(repository: progressPhotoRepository)
-        )
-        self.reportExportCoordinator = reportExportCoordinator
-        reportExportViewModel = ReportExportViewModel(
-            generator: reportExportCoordinator,
-            calendar: calendar
         )
     }
 
@@ -347,9 +361,33 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
 
     @discardableResult
     func reportShareDidFinish(artifactID: UUID, completed: Bool) -> Bool {
-        guard reportExportViewModel.token?.id == artifactID else { return false }
+        guard let reportExportViewModel = reports.resolved?.exportViewModel,
+              reportExportViewModel.token?.id == artifactID else { return false }
         reportExportViewModel.shareDidFinish(completed: completed)
         return true
+    }
+}
+
+@MainActor
+private final class DeferredTrackerReports {
+    struct Content {
+        let repository: any ReportsRepository & ReportsExportRepository
+        let dashboardViewModel: ReportsDashboardViewModel
+        let exportViewModel: ReportExportViewModel
+    }
+
+    private let makeContent: @MainActor () -> Content
+    private(set) var resolved: Content?
+
+    init(makeContent: @escaping @MainActor () -> Content) {
+        self.makeContent = makeContent
+    }
+
+    var value: Content {
+        if let resolved { return resolved }
+        let content = makeContent()
+        resolved = content
+        return content
     }
 }
 
@@ -615,7 +653,7 @@ enum DefaultTrackerFeatureFactory {
     static func make(
         environment: AppEnvironment,
         modelContext: ModelContext,
-        makeReportsRepository: TrackerReportsRepositoryFactory =
+        makeReportsRepository: @escaping TrackerReportsRepositoryFactory =
             DefaultTrackerFeatureFactory.defaultReportsRepository,
         healthCheckNotificationCenter: any NotificationCenterClient =
             SystemNotificationCenterAdapter(),
@@ -694,7 +732,9 @@ enum DefaultTrackerFeatureFactory {
             inboundAssetStore: progressPhotoAssetStore,
             now: now
         )
-        let reportsRepository = makeReportsRepository(modelContext, calendar)
+        let reportsRepository: @MainActor () -> any ReportsRepository & ReportsExportRepository = {
+            makeReportsRepository(modelContext, calendar)
+        }
         let progressPhotoAssetSynchronizer = makeProgressPhotoAssetSynchronizer(
             environment: environment,
             assetStore: progressPhotoAssetStore,
@@ -714,7 +754,7 @@ enum DefaultTrackerFeatureFactory {
                     lifestyleRepository: lifestyleRepository,
                     healthChecksRepository: healthChecksRepository,
                     bloodworkRepository: bloodworkRepository,
-                    reportsRepository: reportsRepository,
+                    makeReportsRepository: reportsRepository,
                     healthCheckNotificationComposition:
                         resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
@@ -730,7 +770,7 @@ enum DefaultTrackerFeatureFactory {
                     ),
                     healthChecksRepository: healthChecksRepository,
                     bloodworkRepository: bloodworkRepository,
-                    reportsRepository: reportsRepository,
+                    makeReportsRepository: reportsRepository,
                     healthCheckNotificationComposition:
                         resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
@@ -747,7 +787,7 @@ enum DefaultTrackerFeatureFactory {
                     lifestyleRepository: lifestyleRepository,
                     healthChecksRepository: healthChecksRepository,
                     bloodworkRepository: bloodworkRepository,
-                    reportsRepository: reportsRepository,
+                    makeReportsRepository: reportsRepository,
                     healthCheckNotificationComposition:
                         resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
@@ -763,9 +803,9 @@ enum DefaultTrackerFeatureFactory {
                         failsFirstCompletion: true
                     ),
                     bloodworkRepository: bloodworkRepository,
-                    reportsRepository: UITestReportsRepository(
-                        repository: reportsRepository
-                    ),
+                    makeReportsRepository: {
+                        UITestReportsRepository(repository: reportsRepository())
+                    },
                     healthCheckNotificationComposition:
                         resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
@@ -786,7 +826,7 @@ enum DefaultTrackerFeatureFactory {
                         failsFirstLoad: true,
                         failsFirstCreate: true
                     ),
-                    reportsRepository: reportsRepository,
+                    makeReportsRepository: reportsRepository,
                     healthCheckNotificationComposition:
                         resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
@@ -800,7 +840,7 @@ enum DefaultTrackerFeatureFactory {
                     healthChecksRepository: healthChecksRepository,
                     bloodworkRepository: bloodworkRepository,
                     progressPhotoRepository: progressPhotoRepository,
-                    reportsRepository: reportsRepository,
+                    makeReportsRepository: reportsRepository,
                     progressPhotoFixtureData: Data(
                         base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2Z7sAAAAASUVORK5CYII="
                     ),
@@ -820,7 +860,7 @@ enum DefaultTrackerFeatureFactory {
                     healthChecksRepository: healthChecksRepository,
                     bloodworkRepository: bloodworkRepository,
                     progressPhotoRepository: UITestProgressPhotoGalleryRepository(),
-                    reportsRepository: reportsRepository,
+                    makeReportsRepository: reportsRepository,
                     healthCheckNotificationComposition:
                         resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
@@ -837,9 +877,9 @@ enum DefaultTrackerFeatureFactory {
                     healthChecksRepository: healthChecksRepository,
                     bloodworkRepository: bloodworkRepository,
                     progressPhotoRepository: photoRepository,
-                    reportsRepository: M4ReportsUITestRepository(
-                        behavior: behavior
-                    ),
+                    makeReportsRepository: {
+                        M4ReportsUITestRepository(behavior: behavior)
+                    },
                     reportExportPhotoProvider: M4ReportsUITestPhotoProvider(),
                     healthCheckNotificationComposition:
                         resolvedHealthCheckNotificationComposition,
@@ -856,7 +896,7 @@ enum DefaultTrackerFeatureFactory {
             bloodworkRepository: bloodworkRepository,
             progressPhotoRepository: progressPhotoRepository,
             progressPhotoAssetSynchronizer: progressPhotoAssetSynchronizer,
-            reportsRepository: reportsRepository,
+            makeReportsRepository: reportsRepository,
             healthCheckNotificationComposition:
                 resolvedHealthCheckNotificationComposition,
             calendar: calendar,
@@ -909,6 +949,8 @@ private final class UITestReportsRepository:
 
     init(repository: any ReportsRepository & ReportsExportRepository) {
         self.repository = repository
+        AppUITestLaunchConfiguration.reportsDashboardFetchEvidence
+            .recordRepositoryConstruction()
     }
 
     func fetchDashboardSource(

@@ -169,6 +169,16 @@ struct AppRootView: View {
                     .allowsHitTesting(false)
             }
             if exposesTrackerFeatureRouterEvidence {
+                TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                    let count = reportsDashboardFetchEvidence.repositoryConstructionCount
+                    Text(String(count))
+                        .font(.system(size: 1))
+                        .foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .accessibilityIdentifier("m4.reports.repository-construction-count")
+                        .accessibilityValue(String(count))
+                        .allowsHitTesting(false)
+                }
                 Text(String(trackerFeatureRouterInstantiationCount()))
                     .font(.system(size: 1))
                     .foregroundStyle(.clear)
@@ -397,7 +407,8 @@ struct AppRootView: View {
                 onNutritionSnapshot: publishNutritionSnapshot
             )
         case .progress:
-            if let trackerFeatureRouter {
+            if progressReportsLoadPolicy.hasSelectedProgress,
+               let trackerFeatureRouter {
                 trackerFeatureRouter.makeProgressView(
                     onOpenBodyMetric: { trackerEntryRoute = .bodyMetric },
                     onOpenLifestyle: { trackerEntryRoute = .lifestyle },
