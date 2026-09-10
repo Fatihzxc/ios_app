@@ -85,9 +85,11 @@ final class ReportChartReadabilityTests: XCTestCase {
                 attach(image, name: "m4-chart-date-connectors-\(kind)-\(size)")
                 for (index, date) in expectedDateRange.enumerated() {
                     let bounds = try textBounds(date, in: image)
+                    // OCR glyph bounds and the text layout box need not share
+                    // a center. Check the gutter beside the full visible row.
                     let gutter = CGRect(
                         x: index == 0 ? 18 : image.size.width - 38,
-                        y: bounds.midY - 4, width: index == 0 ? 26 : 18, height: 8
+                        y: bounds.minY, width: index == 0 ? 26 : 18, height: bounds.height
                     )
                     XCTAssertGreaterThan(
                         try darkPixelCount(in: image, region: gutter), 8,
