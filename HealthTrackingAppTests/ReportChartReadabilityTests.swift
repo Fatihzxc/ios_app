@@ -26,6 +26,38 @@ final class ReportChartReadabilityTests: XCTestCase {
         try assertReadableEndpoints(kind: .bar, size: .accessibility5, width: 343, name: "bar-compact-ax5")
     }
 
+    // Mutation caught: automatic date ticks can collapse to only an ellipsis
+    // even when the plot and endpoint labels are readable. A reader must be
+    // able to identify the displayed date range without opening the table.
+    func testDateAxisRangeRemainsReadableAtAX3() throws {
+        try assertReadableDateRange(kind: .line, size: .accessibility3, width: 361)
+    }
+
+    func testDateAxisRangeRemainsReadableAtCompactAX5() throws {
+        for kind in [ReportChartKind.line, .bar] {
+            try assertReadableDateRange(kind: kind, size: .accessibility5, width: 343)
+        }
+    }
+
+    func testPixelTextReaderRecognizesFullDateRangeAtAX5() throws {
+        let image = try render(
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(expectedDateRange, id: \.self) { date in
+                    Text(date)
+                        .font(.caption2.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            },
+            size: .accessibility5,
+            width: 343
+        )
+        attach(image, name: "m4-chart-date-reader-calibration")
+        let text = try recognizedText(in: image)
+        for date in expectedDateRange {
+            XCTAssertTrue(text.contains(normalized(date)), "Date OCR calibration missing \(date): \(text)")
+        }
+    }
+
     // Mutation caught: sizing the entire Chart instead of reserving real plot
     // space lets large axes/legend consume it. Read the real ChartProxy plot
     // geometry: tall text, symbols, or connectors cannot masquerade as the plot.
@@ -95,6 +127,25 @@ final class ReportChartReadabilityTests: XCTestCase {
     private let expectedLabels = [
         "Alpha: 79.4 kg", "Bravo: 79 kg", "Charlie: 82 kg", "Delta: 81 kg",
     ]
+
+    // Independently read from the fixture: earliest Jan 1, latest Jan 8, 2024.
+    private let expectedDateRange = ["Jan 1, 2024", "Jan 8, 2024"]
+
+    private func assertReadableDateRange(
+        kind: ReportChartKind,
+        size: DynamicTypeSize,
+        width: CGFloat
+    ) throws {
+        let image = try render(chart(kind: kind), size: size, width: width)
+        attach(image, name: "m4-chart-date-range-\(kind)-\(size)")
+        let text = try recognizedText(in: image)
+        for date in expectedDateRange {
+            XCTAssertTrue(
+                text.contains(normalized(date)),
+                "Rendered date range is missing or truncated: \(date). Recognized pixels: \(text)"
+            )
+        }
+    }
 
     private func assertReadableEndpoints(
         kind: ReportChartKind,
