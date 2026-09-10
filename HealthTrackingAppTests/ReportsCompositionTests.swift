@@ -63,12 +63,21 @@ final class ReportsCompositionTests: XCTestCase {
         XCTAssertTrue(firstSelectionPolicy.loadsReportsOnPresentation)
 
         let firstProgressRoute = dependencies.makeTrackerFeatureRouter()
-        XCTAssertEqual(reportRepositoryConstructions, 1)
+        XCTAssertEqual(reportRepositoryConstructions, 0)
         let repeatedProgressRoute = dependencies.makeTrackerFeatureRouter()
-        XCTAssertEqual(reportRepositoryConstructions, 1)
+        XCTAssertEqual(reportRepositoryConstructions, 0)
         XCTAssertTrue(firstProgressRoute === repeatedProgressRoute)
 
         let bundle = try XCTUnwrap(firstProgressRoute as? TrackerFeatureBundle)
+        _ = bundle.makeProgressView(
+            onOpenBodyMetric: {},
+            onOpenLifestyle: {},
+            onOpenPosture: {},
+            onOpenHealthChecks: {},
+            onOpenBloodwork: {},
+            onOpenProgressPhotos: {}
+        )
+        XCTAssertEqual(reportRepositoryConstructions, 1)
         XCTAssertTrue((bundle.reportsRepository as AnyObject) === reportsRepository)
         await bundle.reportsDashboardViewModel.load(
             referenceDate: Date(timeIntervalSince1970: 1_706_745_600)
@@ -134,7 +143,7 @@ final class ReportsCompositionTests: XCTestCase {
 
         let firstProgressRoute = dependencies.makeTrackerFeatureRouter()
         let bundle = try XCTUnwrap(firstProgressRoute as? TrackerFeatureBundle)
-        XCTAssertEqual(reportRepositoryConstructions, 1)
+        XCTAssertEqual(reportRepositoryConstructions, 0)
         XCTAssertEqual(
             reportsRepository.dashboardFetchCount,
             0,
@@ -162,6 +171,15 @@ final class ReportsCompositionTests: XCTestCase {
         )
         XCTAssertTrue(progressLoadPolicy.loadsReportsOnPresentation)
 
+        _ = bundle.makeProgressView(
+            onOpenBodyMetric: {},
+            onOpenLifestyle: {},
+            onOpenPosture: {},
+            onOpenHealthChecks: {},
+            onOpenBloodwork: {},
+            onOpenProgressPhotos: {}
+        )
+        XCTAssertEqual(reportRepositoryConstructions, 1)
         await bundle.reportsDashboardViewModel.load(
             referenceDate: Date(timeIntervalSince1970: 1_706_745_600)
         )
@@ -198,6 +216,89 @@ final class ReportsCompositionTests: XCTestCase {
         XCTAssertEqual(bundle.reportsDashboardViewModel.source, reentrySource)
         XCTAssertEqual(reportRepositoryConstructions, 1)
         XCTAssertTrue((bundle.reportsRepository as AnyObject) === reportsRepository)
+    }
+
+    func testTodayTrackerEntriesRemainReportColdUntilFirstProgressPresentation() throws {
+        let repository = CompositionReportsRepositoryStub()
+        var constructions = 0
+        let dependencies = try AppDependencies(
+            environment: .uiTesting,
+            makeReportsRepository: { _, _ in
+                constructions += 1
+                return repository
+            }
+        )
+        let route = dependencies.makeTrackerFeatureRouter()
+        let bundle = try XCTUnwrap(route as? TrackerFeatureBundle)
+
+        // These are the same shared-router entry builders used by Today.
+        _ = route.makeBodyMetricEntryView(onClose: {})
+        _ = route.makeLifestyleEntryView(onClose: {})
+        _ = route.makePostureEntryView(onClose: {})
+        _ = route.makeHealthCheckListView(onCommittedMutation: {}, onClose: {})
+        _ = route.makeBloodworkListView(onCommittedMutation: {}, onClose: {})
+        XCTAssertFalse(bundle.reportShareDidFinish(artifactID: UUID(), completed: false))
+        XCTAssertEqual(constructions, 0, "Today entry and stale share callbacks must not construct report dependencies.")
+        XCTAssertEqual(repository.dashboardFetchCount, 0)
+        XCTAssertEqual(repository.exportFetchCount, 0)
+
+        _ = route.makeProgressView(
+            onOpenBodyMetric: {},
+            onOpenLifestyle: {},
+            onOpenPosture: {},
+            onOpenHealthChecks: {},
+            onOpenBloodwork: {},
+            onOpenProgressPhotos: {}
+        )
+        XCTAssertEqual(constructions, 1, "First Progress presentation must resolve the report capability.")
+        let dashboard = bundle.reportsDashboardViewModel
+        let export = bundle.reportExportViewModel
+        XCTAssertTrue(dependencies.makeTrackerFeatureRouter() === route)
+        XCTAssertTrue(bundle.reportsDashboardViewModel === dashboard)
+        XCTAssertTrue(bundle.reportExportViewModel === export)
+        XCTAssertEqual(constructions, 1)
+        XCTAssertEqual(repository.dashboardFetchCount, 0, "The presentation task owns the initial fetch.")
+        XCTAssertEqual(repository.exportFetchCount, 0)
+    }
+
+    func testBodyMetricEditBeforeProgressDoesNotFetchReports() async throws {
+        let date = Date(timeIntervalSince1970: 1_706_745_600)
+        let original = BodyMetricSnapshot(
+            id: UUID(uuidString: "00000000-0000-4000-8000-000000000862")!,
+            createdAt: date,
+            updatedAt: date,
+            date: date,
+            type: .weight,
+            customName: nil,
+            value: 80,
+            unit: "kg"
+        )
+        let metrics = CompositionBodyMetricRepositoryStub(
+            snapshots: [original],
+            updatedSnapshot: original
+        )
+        let reports = CompositionReportsRepositoryStub()
+        let bundle = TrackerFeatureBundle(
+            metricsRepository: metrics,
+            lifestyleRepository: TrackerLifestyleRepositoryStub(),
+            healthChecksRepository: CompositionHealthChecksRepositoryStub(),
+            bloodworkRepository: TrackerBloodworkRepositoryStub(),
+            reportsRepository: reports,
+            calendar: try utcCalendar(),
+            now: { date }
+        )
+
+        await bundle.bodyMetricViewModel.load()
+        await bundle.bodyMetricViewModel.update(original, date: date, value: try .weight(kilograms: 80))
+        XCTAssertEqual(bundle.bodyMetricViewModel.editPhase, .saved)
+        XCTAssertEqual(metrics.updateCallCount, 1)
+        XCTAssertEqual(reports.dashboardFetchCount, 0, "A committed tracker edit before Progress must stay report-cold.")
+
+        await bundle.bodyMetricViewModel.delete(original)
+        XCTAssertEqual(bundle.bodyMetricViewModel.editPhase, .saved)
+        XCTAssertEqual(metrics.deleteCallCount, 1)
+        XCTAssertEqual(reports.dashboardFetchCount, 0)
+        XCTAssertEqual(reports.exportFetchCount, 0)
     }
 
     func testBundleReportRefreshUsesTheInjectedCurrentDateForEveryGeneration() async throws {
