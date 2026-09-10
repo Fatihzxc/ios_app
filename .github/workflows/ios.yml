@@ -888,6 +888,15 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
+      - name: Retain focused M4 native test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: M4-focused-xcresult
+          path: .build/HealthTrackingApp.xcresult/**
+          include-hidden-files: true
+          if-no-files-found: warn
+
   test-cold-launch:
     runs-on: macos-15
     timeout-minutes: 30
