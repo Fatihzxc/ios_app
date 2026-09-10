@@ -17,6 +17,7 @@ struct ReportChartLayout<Content: View>: View {
     private let leaderGutter: CGFloat = 32
 
     var body: some View {
+        let dates = dateBoundaries
         VStack(alignment: .leading, spacing: AppSpacing.standard) {
             VStack(alignment: .leading, spacing: AppSpacing.standard) {
                 ForEach(descriptor.model.series) { series in
@@ -56,10 +57,10 @@ struct ReportChartLayout<Content: View>: View {
                         plot.frame(height: basePlotHeight + plotGrowth)
                     }
                     .chartXAxis {
-                        AxisMarks(values: .automatic(desiredCount: dynamicTypeSize.isAccessibilitySize ? 2 : 4)) {
+                        AxisMarks(values: dates) {
                             AxisGridLine()
                             AxisTick()
-                            AxisValueLabel()
+                            // The full date labels flow below and connect to these ticks.
                         }
                     }
                     .chartYAxis {
@@ -87,10 +88,45 @@ struct ReportChartLayout<Content: View>: View {
                                             .position(x: plot.minX + x, y: plot.minY)
                                     }
                                 }
+                                ForEach(dates, id: \.self) { date in
+                                    if let x = proxy.position(forX: date) {
+                                        Color.clear
+                                            .frame(width: 1, height: 1)
+                                            .anchorPreference(key: EndpointAnchors.self, value: .bounds) {
+                                                [.datePoint(date): $0]
+                                            }
+                                            .position(x: plot.minX + x, y: plot.maxY)
+                                    }
+                                }
                             }
                         }
                     }
+                    .anchorPreference(key: EndpointAnchors.self, value: .bounds) {
+                        [.chartBounds: $0]
+                    }
                     .padding(.top, leaderGutter)
+
+                if !dates.isEmpty {
+                    VStack(alignment: .leading, spacing: AppSpacing.standard) {
+                        ForEach(dates, id: \.self) { date in
+                            Text(ReportChartDescriptor.dateDescription(
+                                date,
+                                calendar: descriptor.calendar,
+                                locale: descriptor.locale
+                            ))
+                            .font(AppTypography.micro)
+                            .foregroundStyle(AppColors.color(.inkPrimary, scheme: colorScheme))
+                            .multilineTextAlignment(date == dates.first ? .leading : .trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .anchorPreference(key: EndpointAnchors.self, value: .bounds) {
+                                [.dateLabel(date): $0]
+                            }
+                            .frame(maxWidth: .infinity, alignment: date == dates.first ? .leading : .trailing)
+                        }
+                    }
+                    .padding(.top, leaderGutter)
+                    .padding(.trailing, leaderGutter)
+                }
 
                 Text(descriptor.model.xAxisTitle)
                     .font(AppTypography.micro)
@@ -118,6 +154,24 @@ struct ReportChartLayout<Content: View>: View {
                             path.addLine(to: CGPoint(x: lane, y: labelBounds.midY))
                             path.addLine(to: CGPoint(x: labelBounds.minX - 4, y: labelBounds.midY))
                         }
+                        if let chart = anchors[.chartBounds] {
+                            let corridorY = geometry[chart].maxY + leaderGutter / 2
+                            for date in dates {
+                                guard let label = anchors[.dateLabel(date)],
+                                      let point = anchors[.datePoint(date)] else { continue }
+                                let labelBounds = geometry[label]
+                                let pointBounds = geometry[point]
+                                let isStart = date == dates.first
+                                // Opposite gutters keep chronological date leaders from crossing.
+                                let laneX = isStart ? leaderGutter / 2 : geometry.size.width - leaderGutter / 2
+                                let labelX = isStart ? labelBounds.minX - 4 : labelBounds.maxX + 4
+                                path.move(to: CGPoint(x: pointBounds.midX, y: pointBounds.midY))
+                                path.addLine(to: CGPoint(x: pointBounds.midX, y: corridorY))
+                                path.addLine(to: CGPoint(x: laneX, y: corridorY))
+                                path.addLine(to: CGPoint(x: laneX, y: labelBounds.midY))
+                                path.addLine(to: CGPoint(x: labelX, y: labelBounds.midY))
+                            }
+                        }
                     }
                     .stroke(
                         AppColors.color(.inkSecondary, scheme: colorScheme),
@@ -132,6 +186,12 @@ struct ReportChartLayout<Content: View>: View {
         }
     }
 
+    private var dateBoundaries: [Date] {
+        let dates = descriptor.model.series.flatMap { $0.observations.map(\.date) }
+        guard let start = dates.min(), let end = dates.max() else { return [] }
+        return start == end ? [start] : [start, end]
+    }
+
     static func symbol(for seriesID: String, in descriptor: ReportChartDescriptor) -> BasicChartSymbolShape {
         let shapes: [BasicChartSymbolShape] = [.circle, .square, .triangle, .diamond]
         let index = descriptor.model.series.firstIndex { $0.id == seriesID } ?? 0
@@ -143,6 +203,9 @@ private enum EndpointAnchor: Hashable {
     case label(String)
     case point(String)
     case plotTop(String)
+    case dateLabel(Date)
+    case datePoint(Date)
+    case chartBounds
 }
 
 private struct EndpointAnchors: PreferenceKey {
