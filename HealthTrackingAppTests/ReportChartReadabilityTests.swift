@@ -58,6 +58,65 @@ final class ReportChartReadabilityTests: XCTestCase {
         }
     }
 
+    // Mutation caught: replacing descendant anchor preferences at the chart
+    // boundary silently removes every connector while OCR and plot tests pass.
+    // Inspect glyph-free gutters beside actual OCR-located labels, not AX text.
+    func testEndpointConnectorsRemainVisibleAtAccessibilitySizes() throws {
+        for size in [DynamicTypeSize.accessibility3, .accessibility5] {
+            for kind in [ReportChartKind.line, .bar] {
+                let image = try render(chart(kind: kind), size: size, width: 343)
+                attach(image, name: "m4-chart-endpoint-connectors-\(kind)-\(size)")
+                for label in expectedLabels {
+                    let bounds = try textBounds(label, in: image)
+                    let gutter = CGRect(x: 18, y: bounds.midY - 4, width: 26, height: 8)
+                    XCTAssertGreaterThan(
+                        try darkPixelCount(in: image, region: gutter), 8,
+                        "Missing visible endpoint connector beside \(label), \(kind), \(size)."
+                    )
+                }
+            }
+        }
+    }
+
+    func testDateConnectorsRemainVisibleAtAccessibilitySizes() throws {
+        for size in [DynamicTypeSize.accessibility3, .accessibility5] {
+            for kind in [ReportChartKind.line, .bar] {
+                let image = try render(chart(kind: kind), size: size, width: 343)
+                attach(image, name: "m4-chart-date-connectors-\(kind)-\(size)")
+                for (index, date) in expectedDateRange.enumerated() {
+                    let bounds = try textBounds(date, in: image)
+                    let gutter = CGRect(
+                        x: index == 0 ? 18 : image.size.width - 38,
+                        y: bounds.midY - 4, width: index == 0 ? 26 : 18, height: 8
+                    )
+                    XCTAssertGreaterThan(
+                        try darkPixelCount(in: image, region: gutter), 8,
+                        "Missing visible date connector beside \(date), \(kind), \(size)."
+                    )
+                }
+            }
+        }
+    }
+
+    func testConnectorPixelReaderDistinguishesThinDashedInkFromBlankSpace() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 3
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 100, height: 100), format: format).image {
+            context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 100, height: 100))
+            context.cgContext.setStrokeColor(UIColor.darkGray.cgColor)
+            context.cgContext.setLineWidth(1)
+            context.cgContext.setLineDash(phase: 0, lengths: [3, 3])
+            context.cgContext.move(to: CGPoint(x: 20, y: 30))
+            context.cgContext.addLine(to: CGPoint(x: 44, y: 30))
+            context.cgContext.strokePath()
+        }
+        attach(image, name: "m4-chart-connector-reader-calibration")
+        XCTAssertGreaterThan(try darkPixelCount(in: image, region: CGRect(x: 18, y: 26, width: 26, height: 8)), 8)
+        XCTAssertEqual(try darkPixelCount(in: image, region: CGRect(x: 18, y: 66, width: 26, height: 8)), 0)
+    }
+
     // Mutation caught: sizing the entire Chart instead of reserving real plot
     // space lets large axes/legend consume it. Read the real ChartProxy plot
     // geometry: tall text, symbols, or connectors cannot masquerade as the plot.
@@ -238,6 +297,44 @@ final class ReportChartReadabilityTests: XCTestCase {
         try VNImageRequestHandler(cgImage: XCTUnwrap(image.cgImage)).perform([request])
         let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
         return normalized(lines.joined(separator: " "))
+    }
+
+    private func textBounds(_ text: String, in image: UIImage) throws -> CGRect {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["en-US"]
+        request.usesLanguageCorrection = false
+        request.minimumTextHeight = 0
+        try VNImageRequestHandler(cgImage: XCTUnwrap(image.cgImage)).perform([request])
+        let observation = try XCTUnwrap(request.results?.first {
+            $0.topCandidates(1).first.map { normalized($0.string).contains(normalized(text)) } ?? false
+        }, "Expected visible full text to locate connector region: \(text)")
+        let box = observation.boundingBox
+        return CGRect(
+            x: box.minX * image.size.width, y: (1 - box.maxY) * image.size.height,
+            width: box.width * image.size.width, height: box.height * image.size.height
+        )
+    }
+
+    private func darkPixelCount(in image: UIImage, region: CGRect) throws -> Int {
+        let source = try XCTUnwrap(image.cgImage)
+        let scale = CGFloat(source.width) / image.size.width
+        let pixels = region.applying(CGAffineTransform(scaleX: scale, y: scale)).integral
+        XCTAssertTrue(CGRect(x: 0, y: 0, width: source.width, height: source.height).contains(pixels))
+        let crop = try XCTUnwrap(source.cropping(to: pixels))
+        var rgba = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
+        try rgba.withUnsafeMutableBytes { bytes in
+            let context = try XCTUnwrap(CGContext(
+                data: bytes.baseAddress, width: crop.width, height: crop.height,
+                bitsPerComponent: 8, bytesPerRow: crop.width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            context.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
+        }
+        return stride(from: 0, to: rgba.count, by: 4).filter { offset in
+            rgba[offset] < 220 && rgba[offset + 1] < 220 && rgba[offset + 2] < 220 && rgba[offset + 3] > 240
+        }.count
     }
 
     private func normalized(_ text: String) -> String {
