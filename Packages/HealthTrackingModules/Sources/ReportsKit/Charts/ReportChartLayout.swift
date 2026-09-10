@@ -101,8 +101,9 @@ struct ReportChartLayout<Content: View>: View {
                             }
                         }
                     }
-                    .anchorPreference(key: EndpointAnchors.self, value: .bounds) {
-                        [.chartBounds: $0]
+                    .transformAnchorPreference(key: EndpointAnchors.self, value: .bounds) { anchors, bounds in
+                        // Preserve the point anchors emitted by the chart's descendants.
+                        anchors[.chartBounds] = bounds
                     }
                     .padding(.top, leaderGutter)
 
