@@ -13,6 +13,7 @@ final class M3AcceptanceUITests: XCTestCase {
             .joined(separator: ".")
 
         require(identified("root.today.content", in: app))
+        assertReportConstructionCountRemains(0, in: app)
         assertReportFetchCountRemains(0, in: app)
 
         openAndCloseSheet(
@@ -21,10 +22,12 @@ final class M3AcceptanceUITests: XCTestCase {
             close: "metrics.entry.close",
             in: app
         )
+        assertReportConstructionCountRemains(0, in: app)
         assertReportFetchCountRemains(0, in: app)
 
         openProgress(in: app)
         assertReportFetchCountEventually(1, in: app)
+        assertReportConstructionCountRemains(1, in: app)
 
         openAndCloseSheet(
             action: progressMetricsAction,
@@ -46,6 +49,7 @@ final class M3AcceptanceUITests: XCTestCase {
         openProgress(in: app)
         assertReportFetchCountEventually(4, in: app)
         assertReportFetchCountRemains(4, in: app)
+        assertReportConstructionCountRemains(1, in: app)
     }
 
     func testTodayAndProgressExposeEveryM3TrackerEntryThroughOneLazyRouter() {
@@ -252,6 +256,27 @@ final class M3AcceptanceUITests: XCTestCase {
             withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92)
         )
         start.press(forDuration: 0.1, thenDragTo: end)
+    }
+
+    private func assertReportConstructionCountRemains(
+        _ expected: Int,
+        in app: XCUIApplication
+    ) {
+        let evidence = require(
+            identified("m4.reports.repository-construction-count", in: app),
+            "The real root must expose DEBUG-only report construction evidence."
+        )
+        let value = String(expected)
+        let changed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value != %@", value),
+            object: evidence
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [changed], timeout: 1),
+            .timedOut,
+            "Report construction count must remain \(value); found \(String(describing: evidence.value))."
+        )
+        XCTAssertEqual(evidence.value as? String, value)
     }
 
     private func assertReportFetchCountEventually(

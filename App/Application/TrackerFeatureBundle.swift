@@ -909,6 +909,8 @@ private final class UITestReportsRepository:
 
     init(repository: any ReportsRepository & ReportsExportRepository) {
         self.repository = repository
+        AppUITestLaunchConfiguration.reportsDashboardFetchEvidence
+            .recordRepositoryConstruction()
     }
 
     func fetchDashboardSource(

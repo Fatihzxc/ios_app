@@ -169,6 +169,15 @@ struct AppRootView: View {
                     .allowsHitTesting(false)
             }
             if exposesTrackerFeatureRouterEvidence {
+                Text(String(reportsDashboardFetchEvidence.repositoryConstructionCount))
+                    .font(.system(size: 1))
+                    .foregroundStyle(.clear)
+                    .frame(width: 1, height: 1)
+                    .accessibilityIdentifier("m4.reports.repository-construction-count")
+                    .accessibilityValue(
+                        String(reportsDashboardFetchEvidence.repositoryConstructionCount)
+                    )
+                    .allowsHitTesting(false)
                 Text(String(trackerFeatureRouterInstantiationCount()))
                     .font(.system(size: 1))
                     .foregroundStyle(.clear)

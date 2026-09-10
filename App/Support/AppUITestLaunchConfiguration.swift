@@ -15,6 +15,11 @@ final class NotificationAuthorizationUITestEvidence: ObservableObject {
 @MainActor
 final class ReportsDashboardFetchUITestEvidence: ObservableObject {
     @Published private(set) var fetchCount = 0
+    @Published private(set) var repositoryConstructionCount = 0
+
+    func recordRepositoryConstruction() {
+        repositoryConstructionCount += 1
+    }
 
     func recordFetch() {
         fetchCount += 1
