@@ -11,7 +11,7 @@ public struct ReportLineChart: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.standard) {
+        ReportChartLayout(descriptor: descriptor, basePlotHeight: 180) {
             Chart {
                 ForEach(descriptor.model.series) { series in
                     ForEach(series.observations) { observation in
@@ -28,7 +28,7 @@ public struct ReportLineChart: View {
                         )
                         .symbol(by: .value(
                             String(localized: "reports.chart.series", bundle: .module),
-                            series.name
+                            series.id
                         ))
                     }
 
@@ -40,41 +40,20 @@ public struct ReportLineChart: View {
                         .foregroundStyle(
                             AppColors.color(.inkPrimary, scheme: colorScheme)
                         )
-                        .annotation(position: .top, alignment: .leading) {
-                            Text(finalLabel(series: series, observation: final))
-                                .font(AppTypography.micro)
-                                .foregroundStyle(
-                                    AppColors.color(.inkPrimary, scheme: colorScheme)
-                                )
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        .symbol(by: .value(
+                            String(localized: "reports.chart.series", bundle: .module),
+                            series.id
+                        ))
                     }
                 }
             }
-            .chartXAxisLabel(descriptor.model.xAxisTitle)
-            .chartYAxisLabel(descriptor.model.yAxisTitle)
-            .frame(minHeight: 220)
             .accessibilityChartDescriptor(descriptor)
             .accessibilityLabel(descriptor.model.title)
             .accessibilityIdentifier("reports.chart.\(chartIdentifier)")
-
-            ReportTextTable(descriptor: descriptor)
         }
     }
 
     private var chartIdentifier: String {
         descriptor.model.series.first?.id ?? "empty"
-    }
-
-    private func finalLabel(
-        series: ReportChartSeries,
-        observation: ReportChartObservation
-    ) -> String {
-        ReportChartDescriptor.finalValueDescription(
-            seriesName: series.name,
-            value: observation.value,
-            unit: descriptor.model.unit,
-            locale: descriptor.locale
-        )
     }
 }
