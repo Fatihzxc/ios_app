@@ -2243,7 +2243,7 @@ extension FileManagerReportExportTemporaryFileSystem {
                 let renamed = try ReportExportDescriptorIO.withRemovalAllowed(
                     in: allocation.root.descriptor.rawValue
                 ) {
-                    currentName.withCString { source in
+                    let result = currentName.withCString { source in
                         quarantine.withCString { destination in
                             Darwin.renameatx_np(
                                 allocation.root.descriptor.rawValue,
@@ -2254,6 +2254,12 @@ extension FileManagerReportExportTemporaryFileSystem {
                             )
                         }
                     }
+                    if result == 0 {
+                        // A later flag restore or reopen can fail. Retries must
+                        // retain the name that now owns the private payload.
+                        allocation.markQuarantined(as: quarantine)
+                    }
+                    return result
                 }
                 if renamed != 0 {
                     try? ReportExportDescriptorIO.setNoUnlink(
@@ -2283,7 +2289,6 @@ extension FileManagerReportExportTemporaryFileSystem {
                 }
                 return quarantine
             }
-            allocation.markQuarantined(as: quarantineName)
         }
         try ReportExportDescriptorIO.removeContents(
             of: allocation.descriptor.rawValue,

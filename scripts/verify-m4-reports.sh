@@ -6280,6 +6280,7 @@ TASK7_TEST_SUITES = {
             "testDescriptorDirectoryEnumerationDoesNotAdvanceTheCallersCleanupCursor",
             "testPrivateNamespaceLeaseRejectsRootOwnedAndNestedMovesWhileAllocationIsLive",
             "testCleanupLeaseRejectsNestedMoveAtRecursiveCleanupBoundary",
+            "testCleanupRetryRemovesQuarantinedPayloadAfterReopenFailure",
             "testRecursiveCleanupRejectsQuarantineReplacementBetweenMetadataAndOpen",
             "testRecursiveCleanupRejectsQuarantineReplacementBetweenMetadataAndUnlink",
             "testPostMkdirPathInspectionFailureRetainsCleanupAuthorization",
@@ -6301,7 +6302,7 @@ TASK7_TEST_ASSET_SHA256 = {
         "861e2554ec075586706fd008690d2777055818cdeb2f897e4e89513931fba48b"
     ),
     "Packages/HealthTrackingModules/Tests/ReportsKitTests/ReportExportCoordinatorTests.swift": (
-        "f4ed898e4aed79d631c4cbdf1d8a3b8b675e950d611c3c31b777567eb3111045"
+        "603a0e3e583d35e68c1955fe4488f39612caae9cdd21f8b4f323668ce073ee35"
     ),
 }
 
@@ -6318,7 +6319,7 @@ TASK7_TRUSTED_CANONICAL_TEST_SOURCE_SHA256 = {
         "861e2554ec075586706fd008690d2777055818cdeb2f897e4e89513931fba48b"
     ),
     "Packages/HealthTrackingModules/Tests/ReportsKitTests/ReportExportCoordinatorTests.swift": (
-        "f4ed898e4aed79d631c4cbdf1d8a3b8b675e950d611c3c31b777567eb3111045"
+        "603a0e3e583d35e68c1955fe4488f39612caae9cdd21f8b4f323668ce073ee35"
     ),
 }
 
@@ -6347,7 +6348,7 @@ TASK7_PRODUCTION_ASSET_SHA256: dict[str, str] = {
         "aef595aaed9246e01d2cefbcc247af5316ff0b19c5d18ef9a91b328afbda5bb2"
     ),
     "Packages/HealthTrackingModules/Sources/ReportsKit/Export/DescriptorBoundFileSystem.swift": (
-        "a0254320d15bc961e7e637d98f5523ad5cec9c674c70491b81ac7905729ab3c1"
+        "8928caf59132771b6bd731eda173b257f4cac22c445a1c92e32ba79a1265348a"
     ),
     "Packages/HealthTrackingModules/Sources/ReportsKit/Export/ReportExportCoordinator.swift": (
         "52f47cdcd231fff2a84a4bc398e8472cc2a4e4754dbcf5323d3dda7fb062feab"
