@@ -1185,6 +1185,63 @@ final class ReportExportCoordinatorTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: parked.path))
     }
 
+    func testCleanupRetryRemovesQuarantinedPayloadAfterReopenFailure() throws {
+        let root = temporaryDirectory.appendingPathComponent("cleanup-reopen-failure", isDirectory: true)
+        let fileSystem = BoundaryRaceTemporaryFileSystem()
+        let store = ReportExportTemporaryStore(
+            rootDirectory: root,
+            fileSystem: fileSystem,
+            makeDirectoryID: { UUID(uuidString: "00000000-0000-4000-8000-000000000186")! },
+            cleanupRegistry: ReportExportLifetimeCleanupRegistry(scheduler: ManualCleanupScheduler())
+        )
+        let allocation = try store.allocate()
+        let pressure = CleanupDescriptorPressure()
+        defer {
+            pressure.release()
+            _ = allocation.cleanup()
+            // The RED intentionally leaves a protected orphan. Clear only this
+            // flat fixture's flags so the normal test teardown can remove it.
+            try? setPrivateNamespaceProtection(false, at: root)
+            if let children = try? FileManager.default.contentsOfDirectory(
+                at: root, includingPropertiesForKeys: nil
+            ) {
+                for child in children {
+                    try? setPrivateNamespaceProtection(false, at: child)
+                    for name in [".allocation-id", "payload.json"] {
+                        try? setPrivateNamespaceProtection(false, at: child.appendingPathComponent(name))
+                    }
+                }
+            }
+        }
+        let payload = Data("private cleanup retry fixture".utf8)
+        _ = try allocation.write(payload, relativePath: "payload.json")
+        fileSystem.arm(.recursiveCleanup) { pressure.exhaust() }
+
+        // No XCTest, logging, suspension or filesystem inspection while the
+        // process descriptor table is saturated. Reopen is the next new FD.
+        let firstCleanup = allocation.cleanup()
+        pressure.release()
+
+        XCTAssertEqual(pressure.failureCode, EMFILE, "The fault probe must reach EMFILE; other failures do not qualify.")
+        XCTAssertFalse(firstCleanup)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: allocation.directoryURL.path))
+        let children = try FileManager.default.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil
+        )
+        XCTAssertEqual(children.count, 1)
+        let quarantine = try XCTUnwrap(children.first)
+        XCTAssertTrue(quarantine.lastPathComponent.hasPrefix(".cleanup-"))
+        XCTAssertNotNil(UUID(uuidString: String(quarantine.lastPathComponent.dropFirst(".cleanup-".count))))
+        XCTAssertEqual(try Data(contentsOf: quarantine.appendingPathComponent("payload.json")), payload)
+
+        XCTAssertTrue(allocation.cleanup())
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: root.path),
+            [],
+            "Reporting cleanup success must not leave the renamed private allocation behind."
+        )
+    }
+
     func testRecursiveCleanupRejectsQuarantineReplacementBetweenMetadataAndOpen() throws {
         let root = temporaryDirectory.appendingPathComponent("cleanup-metadata-open-root")
         let fileSystem = BoundaryRaceTemporaryFileSystem()
@@ -2198,6 +2255,45 @@ private final class BoundaryRaceTemporaryFileSystem:
         }
         lock.unlock()
         try action?()
+    }
+}
+
+private final class CleanupDescriptorPressure: @unchecked Sendable {
+    private let lock = NSLock()
+    private let maximumDescriptors = 16_384
+    private var descriptors: [Int32] = []
+    private var storedFailureCode: Int32?
+
+    init() {
+        descriptors.reserveCapacity(maximumDescriptors)
+    }
+
+    deinit { release() }
+
+    var failureCode: Int32? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedFailureCode
+    }
+
+    func exhaust() {
+        lock.lock()
+        defer { lock.unlock() }
+        for _ in 0..<maximumDescriptors {
+            let descriptor = Darwin.open("/dev/null", O_RDONLY | O_CLOEXEC)
+            if descriptor < 0 {
+                storedFailureCode = errno
+                return
+            }
+            descriptors.append(descriptor)
+        }
+    }
+
+    func release() {
+        lock.lock()
+        defer { lock.unlock() }
+        for descriptor in descriptors { _ = Darwin.close(descriptor) }
+        descriptors.removeAll(keepingCapacity: true)
     }
 }
 
