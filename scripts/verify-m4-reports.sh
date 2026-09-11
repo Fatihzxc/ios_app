@@ -1059,6 +1059,97 @@ def task9_stage_a_self_test(source_root: Path) -> None:
             raise SystemExit("M4.9 Stage-A payload logging mutation escaped")
 
 
+def task9_partition_self_test(source_root: Path) -> None:
+    """Exercise the verifier with independently partitioned and broken workflows.
+
+    Catch the observed six-hour serial-job regression without dropping a test,
+    changing a test timeout, or permitting an optional/soft-failing audit job.
+    """
+    with tempfile.TemporaryDirectory(prefix="m4-ci-partition-") as directory:
+        fixture = Path(directory)
+        for relative in (
+            (".github/workflows/ios.yml",)
+            + TASK9_STAGE_A_CONFIG_PATHS + TASK9_STAGE_A_SWIFT_PATHS
+        ):
+            target = fixture / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_root / relative, target)
+        path = fixture / ".github/workflows/ios.yml"
+        original = path.read_text(encoding="utf-8")
+        commands = (
+            ("Targeted M4.9 report acceptance", 45,
+             "scripts/test-ios.sh --focused-testing HealthTrackingAppUITests/M4ReportsAcceptanceUITests"),
+            ("Targeted M4.9 accessibility matrix", 60,
+             "scripts/test-ios.sh --focused-testing HealthTrackingAppUITests/M4ReportsAccessibilityUITests"),
+            ("Targeted M4.9 export round trip", 30,
+             "scripts/test-ios.sh --focused-testing HealthTrackingAppTests/M4ExportRoundTripTests"),
+            ("Targeted M4.9 large dataset audit", 30,
+             "scripts/test-ios.sh --focused-testing ReportsKitTests/ReportsLargeDatasetTests"),
+        )
+        audit_steps = "\n".join(
+            f"      - name: {name}\n        timeout-minutes: {minutes}\n        run: {command}\n"
+            for name, minutes, command in commands
+        )
+        if "  test-m4-acceptance:\n" not in original:
+            setup = job_block(original, "test").split("    steps:\n", 1)[1].split(
+                "      - name: Targeted M4.9 report acceptance\n", 1
+            )[0]
+            partitioned = original
+            for name, minutes, command in commands:
+                step = f"      - name: {name}\n        timeout-minutes: {minutes}\n        run: {command}\n"
+                if partitioned.count(step) != 1:
+                    raise ValueError("CI partition fixture must find each original audit step once")
+                partitioned = partitioned.replace(step, "", 1)
+            partitioned += (
+                "\n  test-m4-acceptance:\n"
+                f"    if: {FULL_JOB_GUARD}\n"
+                "    runs-on: macos-15\n    timeout-minutes: 210\n    steps:\n"
+                + setup + "\n" + audit_steps
+                + "\n      - name: Upload targeted M4 acceptance results\n"
+                "        if: always()\n        uses: actions/upload-artifact@v4\n"
+                "        with:\n          name: M4-acceptance-xcresult\n"
+                "          path: .build/**/*.xcresult\n"
+                "          include-hidden-files: true\n          if-no-files-found: warn\n"
+            )
+        else:
+            partitioned = original
+        path.write_text(partitioned, encoding="utf-8")
+        verify_task9_stage_a_contract(fixture)
+        verify_task9_red_contract(fixture)
+
+        target_block = job_block(partitioned, "test-m4-acceptance")
+        mutations = [
+            target_block.replace(f"    if: {FULL_JOB_GUARD}", "    if: false", 1),
+            target_block.replace("    steps:", "    continue-on-error: true\n    steps:", 1),
+            target_block.replace("    steps:", "    needs: test\n    steps:", 1),
+            target_block.replace("    timeout-minutes: 210", "    timeout-minutes: 30", 1),
+            target_block.replace("      - uses: actions/checkout@v4", "      - uses: actions/checkout@v4\n        if: false", 1),
+            target_block.replace("        if: always()", "        if: success()", 1),
+        ]
+        for name, minutes, command in commands:
+            mutations.extend((
+                target_block.replace(f"        run: {command}", "        run: true", 1),
+                target_block.replace(f"        run: {command}", f"        run: {command} || true", 1),
+                target_block.replace(f"      - name: {name}\n", f"      - name: {name}\n        continue-on-error: true\n", 1),
+                target_block.replace(f"      - name: {name}\n", f"      - name: {name}\n        if: false\n", 1),
+            ))
+        invalid = [partitioned.replace(target_block, mutation, 1) for mutation in mutations]
+        invalid.append(partitioned.replace("  test-m4-acceptance:\n" + target_block.lstrip("\n"), "", 1))
+        invalid.append(partitioned.replace("      - name: Qualifying M3.11 behavior RED", audit_steps + "\n      - name: Qualifying M3.11 behavior RED", 1))
+        invalid.append(partitioned + "\n  test-m4-acceptance:\n" + target_block)
+        for index, workflow in enumerate(invalid):
+            if workflow == partitioned:
+                raise ValueError(f"CI partition mutation {index} made no change")
+            path.write_text(workflow, encoding="utf-8")
+            try:
+                verify_task9_stage_a_contract(fixture)
+            except ValueError:
+                pass
+            else:
+                raise ValueError(f"CI partition mutation {index} escaped the verifier")
+        print(f"M4 CI partition verifier behavioral self-tests passed ({len(invalid)} rejected workflows).")
+
+
 def target_dependencies(package: str, name: str) -> list[str]:
     match = re.search(
         rf'        \.target\(\s*\n            name: "{re.escape(name)}",\s*\n(.*?)^        \),',
@@ -7791,6 +7882,7 @@ def self_test(source_root: Path) -> None:
 root = Path(sys.argv[1])
 mode = sys.argv[2]
 if mode == "--self-test":
+    task9_partition_self_test(root)
     task9_zip_attachment_self_test(root)
     self_test(root)
     task9_red_self_test(root)
