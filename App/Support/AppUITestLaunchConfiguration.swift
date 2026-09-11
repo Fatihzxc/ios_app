@@ -12,6 +12,20 @@ final class NotificationAuthorizationUITestEvidence: ObservableObject {
     }
 }
 
+@MainActor
+final class ReportsDashboardFetchUITestEvidence: ObservableObject {
+    @Published private(set) var fetchCount = 0
+    private(set) var repositoryConstructionCount = 0
+
+    func recordRepositoryConstruction() {
+        repositoryConstructionCount += 1
+    }
+
+    func recordFetch() {
+        fetchCount += 1
+    }
+}
+
 enum AppUITestScenario: String {
     case seeded
     case emptyOnce = "empty-once"
@@ -53,6 +67,7 @@ enum AppUITestScenario: String {
     case m3Bloodwork = "m3-bloodwork"
     case m3ProgressPhotos = "m3-progress-photos"
     case m3PhotoGallery = "m3-photo-gallery"
+    case m4Reports = "m4-reports"
 }
 
 struct AppUITestLaunchConfiguration {
@@ -63,8 +78,12 @@ struct AppUITestLaunchConfiguration {
         "health-check.notifications.permission.request-count"
     static let photoLibraryAccessFlag = "-ui-test-photo-library-access"
     static let fixedNowFlag = "-ui-test-now"
+    static let fixedTimeZoneFlag = "-ui-test-time-zone"
+    static let reportsExportBehaviorFlag = "-ui-test-reports-export-behavior"
     @MainActor static let notificationAuthorizationEvidence =
         NotificationAuthorizationUITestEvidence()
+    @MainActor static let reportsDashboardFetchEvidence =
+        ReportsDashboardFetchUITestEvidence()
     @MainActor static var notificationAuthorizationRequestCount: Int {
         notificationAuthorizationEvidence.requestCount
     }
@@ -72,6 +91,11 @@ struct AppUITestLaunchConfiguration {
     @MainActor
     static func recordNotificationAuthorizationRequest() {
         notificationAuthorizationEvidence.recordRequest()
+    }
+
+    @MainActor
+    static func recordReportsDashboardFetch() {
+        reportsDashboardFetchEvidence.recordFetch()
     }
 
     enum Appearance: String {
@@ -86,6 +110,12 @@ struct AppUITestLaunchConfiguration {
         }
     }
 
+    enum ReportsExportBehavior: String {
+        case success
+        case failOnce = "fail-once"
+        case slowOnce = "slow-once"
+    }
+
     let scenario: AppUITestScenario
     let appearance: Appearance
     let persistentStoreIdentifier: UUID?
@@ -93,6 +123,8 @@ struct AppUITestLaunchConfiguration {
     let exposesMedicalSafetyFirstUseEvidence: Bool
     let broaderPhotoLibraryAccessState: PhotoLibraryAccessState
     let fixedNow: Date?
+    let fixedTimeZone: TimeZone?
+    let reportsExportBehavior: ReportsExportBehavior?
 
     static func resolve(arguments: [String] = ProcessInfo.processInfo.arguments) -> Self? {
         guard arguments.filter({ $0 == "-ui-testing" }).count == 1,
@@ -140,6 +172,35 @@ struct AppUITestLaunchConfiguration {
             fixedNow = nil
         }
 
+        let fixedTimeZone: TimeZone?
+        if arguments.contains(fixedTimeZoneFlag) {
+            guard let value = uniqueValue(after: fixedTimeZoneFlag, in: arguments),
+                  let timeZone = TimeZone(identifier: value) else {
+                return nil
+            }
+            fixedTimeZone = timeZone
+        } else {
+            fixedTimeZone = nil
+        }
+
+        let reportsExportBehavior: ReportsExportBehavior?
+        if arguments.contains(reportsExportBehaviorFlag) {
+            guard let value = uniqueValue(
+                after: reportsExportBehaviorFlag,
+                in: arguments
+            ), let behavior = ReportsExportBehavior(rawValue: value) else {
+                return nil
+            }
+            reportsExportBehavior = behavior
+        } else {
+            reportsExportBehavior = nil
+        }
+
+        if scenario == .m4Reports,
+           (fixedNow == nil || fixedTimeZone == nil || reportsExportBehavior == nil) {
+            return nil
+        }
+
         return Self(
             scenario: scenario,
             appearance: appearance,
@@ -151,7 +212,9 @@ struct AppUITestLaunchConfiguration {
                 medicalSafetyFirstUseEvidenceFlag
             ),
             broaderPhotoLibraryAccessState: broaderPhotoLibraryAccessState,
-            fixedNow: fixedNow
+            fixedNow: fixedNow,
+            fixedTimeZone: fixedTimeZone,
+            reportsExportBehavior: reportsExportBehavior
         )
     }
 

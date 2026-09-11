@@ -58,6 +58,8 @@ if package.is_file():
         ("testTarget", "MetricsKitTests"),
         ("target", "SleepMoodKit"),
         ("testTarget", "SleepMoodKitTests"),
+        ("target", "ReportsKit"),
+        ("testTarget", "ReportsKitTests"),
     ]
     missing_module_targets = [
         declaration
@@ -66,7 +68,7 @@ if package.is_file():
     ]
     if missing_module_targets:
         errors.append(
-            f"Package must declare GuidanceKit, NutritionKit, HealthSafetyKit, HealthChecksKit, NotificationsKit, ProgressPhotosKit, MetricsKit and SleepMoodKit library/test targets; "
+            f"Package must declare GuidanceKit, NutritionKit, HealthSafetyKit, HealthChecksKit, NotificationsKit, ProgressPhotosKit, MetricsKit, SleepMoodKit and ReportsKit library/test targets; "
             f"missing {missing_module_targets}"
         )
 
@@ -186,7 +188,7 @@ if project.is_file():
         "CoreModelsTests", "GuidanceKitTests", "PersistenceKitTests", "TrainingKitTests",
         "DesignSystemTests", "NutritionKitTests", "HealthSafetyKitTests",
         "HealthChecksKitTests", "NotificationsKitTests", "ProgressPhotosKitTests",
-        "MetricsKitTests", "SleepMoodKitTests",
+        "MetricsKitTests", "SleepMoodKitTests", "ReportsKitTests",
     ]
     if local_package_test_targets != expected_package_test_targets:
         errors.append(
@@ -705,6 +707,23 @@ PY
     fi
     grep -Fq 'Package must declare GuidanceKit, NutritionKit, HealthSafetyKit, HealthChecksKit, NotificationsKit' "$fixture/notifications-target.out"
     cp "$repo_root/Packages/HealthTrackingModules/Package.swift" "$fixture/Packages/HealthTrackingModules/Package.swift"
+    python3 - "$fixture/Packages/HealthTrackingModules/Package.swift" <<'PY'
+from pathlib import Path
+path = Path(__import__('sys').argv[1])
+target = '''        .testTarget(
+            name: "ReportsKitTests",
+            dependencies: ["ReportsKit"],
+            swiftSettings: strictConcurrency
+        )
+'''
+path.write_text(path.read_text().replace(target, '', 1))
+PY
+    if verify_repo "$fixture" >"$fixture/reports-test-target.out" 2>&1; then
+        echo "Requirements self-test expected a missing ReportsKitTests target failure." >&2
+        return 1
+    fi
+    grep -Fq "('testTarget', 'ReportsKitTests')" "$fixture/reports-test-target.out"
+    cp "$repo_root/Packages/HealthTrackingModules/Package.swift" "$fixture/Packages/HealthTrackingModules/Package.swift"
     python3 - "$fixture/project.yml" <<'PY'
 from pathlib import Path
 path = Path(__import__('sys').argv[1])
@@ -766,6 +785,17 @@ PY
         return 1
     fi
     grep -Fq 'Local scheme package tests must be exactly' "$fixture/notifications-test-target.out"
+    cp "$repo_root/project.yml" "$fixture/project.yml"
+    python3 - "$fixture/project.yml" <<'PY'
+from pathlib import Path
+path = Path(__import__('sys').argv[1])
+path.write_text(path.read_text().replace('        - package: HealthTrackingModules/ReportsKitTests\n', '', 1))
+PY
+    if verify_repo "$fixture" >"$fixture/reports-scheme-test-target.out" 2>&1; then
+        echo "Requirements self-test expected a missing ReportsKitTests scheme target failure." >&2
+        return 1
+    fi
+    grep -Fq 'Local scheme package tests must be exactly' "$fixture/reports-scheme-test-target.out"
     cp "$repo_root/project.yml" "$fixture/project.yml"
     python3 - "$fixture/project.yml" <<'PY'
 from pathlib import Path

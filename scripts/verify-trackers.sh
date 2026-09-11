@@ -296,7 +296,7 @@ m32_support = {
         '.library(name: "MetricsKit", targets: ["MetricsKit"])',
         'name: "MetricsKit"',
         'dependencies: ["CoreModels", "DesignSystem"]',
-        'dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "SleepMoodKit", "TrainingKit"]',
+        'dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "ReportsKit", "SleepMoodKit", "TrainingKit"]',
         'name: "MetricsKitTests"',
         'dependencies: ["CoreModels", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
     },
@@ -398,7 +398,7 @@ m33_support = {
     "Packages/HealthTrackingModules/Package.swift": {
         '.library(name: "SleepMoodKit", targets: ["SleepMoodKit"])',
         'name: "SleepMoodKit"',
-        'dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "SleepMoodKit", "TrainingKit"]',
+        'dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "ReportsKit", "SleepMoodKit", "TrainingKit"]',
         'name: "SleepMoodKitTests"',
         'dependencies: ["CoreModels", "SleepMoodKit"]',
         'dependencies: ["CoreModels", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
@@ -653,7 +653,7 @@ m35_support = {
         'resources: [.process("Resources")]',
         'name: "HealthChecksKitTests"',
         'dependencies: ["CoreModels", "HealthChecksKit"]',
-        'dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "SleepMoodKit", "TrainingKit"]',
+        'dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "ReportsKit", "SleepMoodKit", "TrainingKit"]',
         'dependencies: ["CoreModels", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
     },
     "project.yml": {
@@ -1152,7 +1152,7 @@ m37_support = {
         '.library(name: "ProgressPhotosKit", targets: ["ProgressPhotosKit"])',
         'name: "ProgressPhotosKit"',
         'dependencies: ["CoreModels", "DesignSystem"]',
-        'dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "SleepMoodKit", "TrainingKit"]',
+        'dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "ReportsKit", "SleepMoodKit", "TrainingKit"]',
         'name: "ProgressPhotosKitTests"',
         'dependencies: ["CoreModels", "ProgressPhotosKit"]',
         'dependencies: ["CoreModels", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "SleepMoodKit", "TrainingKit", "PersistenceKit"]',
@@ -1199,6 +1199,7 @@ for source_path in progress_photo_source_root.rglob("*.swift"):
             "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Platform/SystemPhotosPickerView.swift",
             "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Platform/PhotoThumbnailView.swift",
             "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Platform/ProgressPhotoAccessibilityAnnouncer.swift",
+            "Packages/HealthTrackingModules/Sources/ProgressPhotosKit/Share/UIKitProgressPhotoComparisonRenderer.swift",
         }
         if relative not in allowed:
             raise SystemExit(
@@ -5846,6 +5847,12 @@ def yaml_scalar(value: str) -> str:
     return scalar
 
 
+M4_SAFE_FULL_JOB_GUARD = (
+    "${{ github.event_name != 'push' || !startsWith(github.ref_name, "
+    "'test/m4.') || startsWith(github.ref_name, 'test/m4.9-') }}"
+)
+
+
 def canonical_test_job_steps(source: str) -> list[dict[str, object]]:
     lines = source.splitlines()
     active_lines = [yaml_without_inline_comment(line).rstrip() for line in lines]
@@ -5946,19 +5953,20 @@ def canonical_test_job_steps(source: str) -> list[dict[str, object]]:
         match = re.fullmatch(r"    ([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*", line)
         if match is None:
             raise SystemExit(
-                "M3.11 test workflow job must remain unconditional and canonical"
+                "M3.11 test workflow job must use the exact M4-safe full-job guard"
             )
         job_keys.setdefault(match.group(1), []).append(
             (yaml_scalar(match.group(2)), index)
         )
     if (
-        set(job_keys) != {"runs-on", "timeout-minutes", "steps"}
+        set(job_keys) != {"if", "runs-on", "timeout-minutes", "steps"}
+        or [value for value, _ in job_keys["if"]] != [M4_SAFE_FULL_JOB_GUARD]
         or [value for value, _ in job_keys["runs-on"]] != ["macos-15"]
-        or [value for value, _ in job_keys["timeout-minutes"]] != ["300"]
+        or [value for value, _ in job_keys["timeout-minutes"]] != ["360"]
         or [value for value, _ in job_keys["steps"]] != [""]
     ):
         raise SystemExit(
-            "M3.11 test workflow job must remain unconditional and canonical"
+            "M3.11 test workflow job must use the exact M4-safe full-job guard"
         )
 
     steps_start = job_keys["steps"][0][1]
@@ -6878,6 +6886,10 @@ from pathlib import Path
 
 repo = Path(sys.argv[1])
 script = repo / "scripts/verify-trackers.sh"
+M4_SAFE_FULL_JOB_GUARD = (
+    "${{ github.event_name != 'push' || !startsWith(github.ref_name, "
+    "'test/m4.') || startsWith(github.ref_name, 'test/m4.9-') }}"
+)
 
 
 def braced_declaration(source: str, pattern: str) -> tuple[int, int] | None:
@@ -7060,7 +7072,7 @@ fixture_files = {
             'dependencies: ["CoreModels", "DesignSystem"]',
             'dependencies: ["CoreModels", "DesignSystem", "HealthSafetyKit"]',
             'dependencies: ["CoreModels", "HealthChecksKit"]',
-            'dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "SleepMoodKit", "TrainingKit"]',
+            'dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "ReportsKit", "SleepMoodKit", "TrainingKit"]',
             'name: "MetricsKitTests"',
             'name: "SleepMoodKitTests"',
             'name: "HealthSafetyKitTests"',
@@ -10743,13 +10755,24 @@ with tempfile.TemporaryDirectory() as temporary:
     original_m311_workflow = m311_workflow.read_text(encoding="utf-8")
     m311_workflow.write_text(
         original_m311_workflow.replace(
-            "    timeout-minutes: 300\n",
+            f"    if: {M4_SAFE_FULL_JOB_GUARD}",
+            "    if: false",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    run(root, "M3.11 test workflow job must use the exact M4-safe full-job guard")
+    m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
+
+    m311_workflow.write_text(
+        original_m311_workflow.replace(
+            "    timeout-minutes: 360\n",
             "    timeout-minutes: 180\n",
             1,
         ),
         encoding="utf-8",
     )
-    run(root, "M3.11 test workflow job must remain unconditional and canonical")
+    run(root, "M3.11 test workflow job must use the exact M4-safe full-job guard")
     m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
 
     m311_workflow.write_text(
@@ -10863,13 +10886,13 @@ with tempfile.TemporaryDirectory() as temporary:
 
     m311_workflow.write_text(
         original_m311_workflow.replace(
-            "  test:\n",
-            "  test:\n    if: false\n",
+            f"    if: {M4_SAFE_FULL_JOB_GUARD}",
+            "    if: false",
             1,
         ),
         encoding="utf-8",
     )
-    run(root, "test workflow job must remain unconditional and canonical")
+    run(root, "test workflow job must use the exact M4-safe full-job guard")
     m311_workflow.write_text(original_m311_workflow, encoding="utf-8")
 
     for missing_trigger in (

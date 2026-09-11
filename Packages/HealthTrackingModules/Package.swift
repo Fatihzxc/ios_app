@@ -42,7 +42,7 @@ let package = Package(
         ),
         .target(
             name: "PersistenceKit",
-            dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "SleepMoodKit", "TrainingKit"],
+            dependencies: ["CoreModels", "GuidanceKit", "HealthChecksKit", "MetricsKit", "NutritionKit", "ProgressPhotosKit", "ReportsKit", "SleepMoodKit", "TrainingKit"],
             swiftSettings: strictConcurrency
         ),
         .target(
@@ -92,7 +92,7 @@ let package = Package(
         ),
         .target(
             name: "ReportsKit",
-            dependencies: ["DesignSystem"],
+            dependencies: ["DesignSystem", "GuidanceKit"],
             resources: [.process("Resources")],
             swiftSettings: strictConcurrency
         ),
@@ -160,6 +160,11 @@ let package = Package(
         .testTarget(
             name: "SleepMoodKitTests",
             dependencies: ["CoreModels", "SleepMoodKit"],
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
+            name: "ReportsKitTests",
+            dependencies: ["ReportsKit"],
             swiftSettings: strictConcurrency
         )
     ]

@@ -89,6 +89,64 @@ final class ProgressPhotoGalleryUITests: XCTestCase {
         findByScrolling("photos.gallery.corrupt", in: app)
     }
 
+    func testShareAppearsForTwoReadyPhotosAndPresentsOnlyAfterExplicitTap() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-testing",
+            "-ui-test-scenario", "m3-photo-gallery",
+            "-ui-test-store-identifier", UUID().uuidString,
+            "-ui-test-appearance", "light",
+            "-AppleLanguages", "(tr)",
+            "-AppleLocale", "tr_TR",
+        ]
+        app.launch()
+
+        require(app.descendants(matching: .any)["tab.progress"]).tap()
+        require(app.descendants(matching: .any)["root.progress"])
+        let open = require(app.descendants(matching: .any)["progress.photos.action"])
+        makeHittable(open, in: app)
+        open.tap()
+
+        require(app.descendants(matching: .any)["photos.gallery.content"])
+        let share = app.buttons["photos.compare.share"]
+        XCTAssertFalse(share.exists)
+
+        let first = require(
+            app.buttons[
+                "photos.gallery.select.00000000-0000-0000-0000-000000000201"
+            ]
+        )
+        let second = require(
+            app.buttons[
+                "photos.gallery.select.00000000-0000-0000-0000-000000000202"
+            ]
+        )
+        makeHittable(first, in: app)
+        first.tap()
+        XCTAssertFalse(share.exists)
+        makeHittable(second, in: app)
+        second.tap()
+
+        require(share, "Share must exist only after two full images are ready.")
+        makeHittable(share, in: app)
+        XCTAssertGreaterThanOrEqual(share.frame.height, 52)
+        XCTAssertTrue(share.label.localizedCaseInsensitiveContains("paylaş"))
+        XCTAssertFalse(app.descendants(matching: .any)["photos.compare.share.sheet"].exists)
+
+        share.tap()
+
+        let activitySheet = app.descendants(matching: .any)["photos.compare.share.sheet"]
+        let didPresentActivitySheet = activitySheet.waitForExistence(timeout: 15)
+        if !didPresentActivitySheet {
+            XCTAssertFalse(
+                app.descendants(matching: .any)["photos.compare.share.error"].exists,
+                "The share artifact must remain valid through activity-sheet presentation."
+            )
+            XCTFail("An explicit share tap must present the single-artifact activity sheet.")
+        }
+        XCTAssertTrue(activitySheet.exists)
+    }
+
     private func findByScrolling(_ identifier: String, in app: XCUIApplication) {
         let element = app.descendants(matching: .any)[identifier]
         for _ in 0..<24 {

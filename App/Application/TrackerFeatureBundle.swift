@@ -6,9 +6,15 @@ import MetricsKit
 import NotificationsKit
 import PersistenceKit
 import ProgressPhotosKit
+import ReportsKit
 import SleepMoodKit
 import SwiftData
 import SwiftUI
+
+typealias TrackerReportsRepositoryFactory = @MainActor (
+    _ modelContext: ModelContext,
+    _ calendar: Calendar
+) -> any ReportsRepository & ReportsExportRepository
 
 @MainActor
 struct HealthCheckListNotificationActions {
@@ -48,6 +54,9 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
     let healthChecksRepository: any HealthChecksRepository
     let bloodworkRepository: any BloodworkRepository
     let progressPhotoRepository: any ProgressPhotoRepository
+    var reportsRepository: any ReportsRepository & ReportsExportRepository {
+        reports.value.repository
+    }
     let progressPhotoAssetSynchronizer: any CloudPhotoAssetSynchronizing
     let healthCheckNotificationComposition: HealthCheckNotificationComposition
     let bodyMetricViewModel: BodyMetricViewModel
@@ -57,6 +66,13 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
     let bloodworkViewModel: BloodworkViewModel
     let progressPhotoImportViewModel: ProgressPhotoImportViewModel
     let progressPhotoGalleryViewModel: ProgressPhotoGalleryViewModel
+    var reportsDashboardViewModel: ReportsDashboardViewModel {
+        reports.value.dashboardViewModel
+    }
+    var reportExportViewModel: ReportExportViewModel {
+        reports.value.exportViewModel
+    }
+    private let reports: DeferredTrackerReports
     private let calendar: Calendar
     private let now: @MainActor () -> Date
     private let progressPhotoFixtureData: Data?
@@ -69,6 +85,11 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         bloodworkRepository: any BloodworkRepository,
         progressPhotoRepository: any ProgressPhotoRepository = NoOpProgressPhotoRepository.shared,
         progressPhotoAssetSynchronizer: any CloudPhotoAssetSynchronizing = NoOpCloudPhotoAssetCoordinator.shared,
+        reportsRepository: (any ReportsRepository & ReportsExportRepository)? = nil,
+        makeReportsRepository: (
+            @MainActor () -> any ReportsRepository & ReportsExportRepository
+        )? = nil,
+        reportExportPhotoProvider: (any ReportExportPhotoByteProviding)? = nil,
         progressPhotoFixtureData: Data? = nil,
         broaderPhotoLibraryAccessState: PhotoLibraryAccessState = .authorized,
         notificationCenter: any NotificationCenterClient =
@@ -117,7 +138,35 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         self.broaderPhotoLibraryAccessState = broaderPhotoLibraryAccessState
         self.calendar = calendar
         self.now = now
-        bodyMetricViewModel = BodyMetricViewModel(repository: metricsRepository)
+        let reports = DeferredTrackerReports {
+            let repository = makeReportsRepository?()
+                ?? reportsRepository
+                ?? EmptyTrackerReportsRepository.shared
+            let coordinator = ReportExportCoordinator(
+                repository: repository,
+                photoProvider: reportExportPhotoProvider
+                    ?? ProgressPhotoReportExportProvider(repository: progressPhotoRepository)
+            )
+            return DeferredTrackerReports.Content(
+                repository: repository,
+                dashboardViewModel: ReportsDashboardViewModel(
+                    repository: repository,
+                    calendar: calendar
+                ),
+                exportViewModel: ReportExportViewModel(
+                    generator: coordinator,
+                    calendar: calendar
+                )
+            )
+        }
+        self.reports = reports
+        bodyMetricViewModel = BodyMetricViewModel(
+            repository: metricsRepository,
+            onCommittedEdit: {
+                // Edits from Today must not create Progress-only dependencies.
+                await reports.resolved?.dashboardViewModel.load(referenceDate: now())
+            }
+        )
         postureViewModel = PostureViewModel(repository: metricsRepository)
         lifestyleViewModel = LifestyleViewModel(repository: lifestyleRepository)
         let healthChecksRepository = resolvedHealthChecksRepository
@@ -215,6 +264,10 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
             .requestFromExplicitUserAction()
     }
 
+    func refreshReports() async {
+        await reportsDashboardViewModel.load(referenceDate: now())
+    }
+
     func makeBloodworkListView(
         onCommittedMutation: @escaping @MainActor () -> Void,
         onClose: @escaping @MainActor () -> Void
@@ -250,7 +303,8 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
         onOpenPosture: @escaping @MainActor () -> Void,
         onOpenHealthChecks: @escaping @MainActor () -> Void,
         onOpenBloodwork: @escaping @MainActor () -> Void,
-        onOpenProgressPhotos: @escaping @MainActor () -> Void
+        onOpenProgressPhotos: @escaping @MainActor () -> Void,
+        loadsReportsOnPresentation: Bool
     ) -> AnyView {
         AnyView(
             BodyMetricProgressView(viewModel: bodyMetricViewModel) {
@@ -274,8 +328,247 @@ final class TrackerFeatureBundle: TrackerFeatureRouting {
                         now: now,
                         onOpenBloodwork: onOpenBloodwork
                     )
+                    TrackerReportsDashboardCompositionView(
+                        dashboardViewModel: reportsDashboardViewModel,
+                        exportViewModel: reportExportViewModel,
+                        calendar: calendar,
+                        referenceDate: now,
+                        loadsReportsOnPresentation: loadsReportsOnPresentation
+                    )
                 }
             }
+        )
+    }
+
+    func makeProgressView(
+        onOpenBodyMetric: @escaping @MainActor () -> Void,
+        onOpenLifestyle: @escaping @MainActor () -> Void,
+        onOpenPosture: @escaping @MainActor () -> Void,
+        onOpenHealthChecks: @escaping @MainActor () -> Void,
+        onOpenBloodwork: @escaping @MainActor () -> Void,
+        onOpenProgressPhotos: @escaping @MainActor () -> Void
+    ) -> AnyView {
+        makeProgressView(
+            onOpenBodyMetric: onOpenBodyMetric,
+            onOpenLifestyle: onOpenLifestyle,
+            onOpenPosture: onOpenPosture,
+            onOpenHealthChecks: onOpenHealthChecks,
+            onOpenBloodwork: onOpenBloodwork,
+            onOpenProgressPhotos: onOpenProgressPhotos,
+            loadsReportsOnPresentation: true
+        )
+    }
+
+    @discardableResult
+    func reportShareDidFinish(artifactID: UUID, completed: Bool) -> Bool {
+        guard let reportExportViewModel = reports.resolved?.exportViewModel,
+              reportExportViewModel.token?.id == artifactID else { return false }
+        reportExportViewModel.shareDidFinish(completed: completed)
+        return true
+    }
+}
+
+@MainActor
+private final class DeferredTrackerReports {
+    struct Content {
+        let repository: any ReportsRepository & ReportsExportRepository
+        let dashboardViewModel: ReportsDashboardViewModel
+        let exportViewModel: ReportExportViewModel
+    }
+
+    private let makeContent: @MainActor () -> Content
+    private(set) var resolved: Content?
+
+    init(makeContent: @escaping @MainActor () -> Content) {
+        self.makeContent = makeContent
+    }
+
+    var value: Content {
+        if let resolved { return resolved }
+        let content = makeContent()
+        resolved = content
+        return content
+    }
+}
+
+@MainActor
+private struct TrackerReportsDashboardCompositionView: View {
+    @Bindable private var dashboardViewModel: ReportsDashboardViewModel
+    @Bindable private var exportViewModel: ReportExportViewModel
+    @State private var isExportPresented = false
+    private let calendar: Calendar
+    private let referenceDate: @MainActor () -> Date
+    private let loadsReportsOnPresentation: Bool
+
+    init(
+        dashboardViewModel: ReportsDashboardViewModel,
+        exportViewModel: ReportExportViewModel,
+        calendar: Calendar,
+        referenceDate: @escaping @MainActor () -> Date,
+        loadsReportsOnPresentation: Bool
+    ) {
+        self.dashboardViewModel = dashboardViewModel
+        self.exportViewModel = exportViewModel
+        self.calendar = calendar
+        self.referenceDate = referenceDate
+        self.loadsReportsOnPresentation = loadsReportsOnPresentation
+    }
+
+    var body: some View {
+        ReportsDashboardView(
+            viewModel: dashboardViewModel,
+            calendar: calendar,
+            referenceDate: referenceDate,
+            loadsOnPresentation: loadsReportsOnPresentation,
+            onOpenExport: { isExportPresented = true }
+        )
+        .sheet(isPresented: $isExportPresented) {
+            TrackerReportExportHostView(
+                viewModel: exportViewModel,
+                referenceDate: referenceDate
+            )
+        }
+    }
+}
+
+@MainActor
+private struct TrackerReportExportHostView: View {
+    @Bindable private var viewModel: ReportExportViewModel
+    @State private var shareRequest: TrackerReportShareRequest?
+    private let referenceDate: @MainActor () -> Date
+
+    init(
+        viewModel: ReportExportViewModel,
+        referenceDate: @escaping @MainActor () -> Date
+    ) {
+        self.viewModel = viewModel
+        self.referenceDate = referenceDate
+    }
+
+    var body: some View {
+        NavigationStack {
+            ReportExportView(
+                viewModel: viewModel,
+                referenceDate: referenceDate,
+                onShare: beginShare
+            )
+        }
+        .sheet(item: $shareRequest) { request in
+            SystemActivityView(
+                activityItemURLs: request.urls,
+                artifactID: request.id,
+                accessibilityIdentifier: "reports.export.share.sheet"
+            ) { artifactID, completed, _ in
+                finishShare(artifactID: artifactID, completed: completed)
+            } onPresentationFailure: { artifactID in
+                finishShare(artifactID: artifactID, completed: false)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("reports.export.share.sheet")
+        }
+    }
+
+    private func beginShare(_ urls: [URL]) {
+        guard let token = viewModel.token,
+              token.shareURLs == urls,
+              !urls.isEmpty else {
+            if let artifactID = viewModel.token?.id {
+                finishShare(artifactID: artifactID, completed: false)
+            }
+            return
+        }
+        shareRequest = TrackerReportShareRequest(id: token.id, urls: urls)
+    }
+
+    private func finishShare(artifactID: UUID, completed: Bool) {
+        guard viewModel.token?.id == artifactID else {
+            if shareRequest?.id == artifactID { shareRequest = nil }
+            return
+        }
+        viewModel.shareDidFinish(completed: completed)
+        if shareRequest?.id == artifactID {
+            shareRequest = nil
+        }
+    }
+}
+
+private struct TrackerReportShareRequest: Identifiable {
+    let id: UUID
+    let urls: [URL]
+}
+
+actor ProgressPhotoReportExportProvider: ReportExportPhotoByteProviding {
+    private let repository: any ProgressPhotoRepository
+    private var imageRefsByPhotoID: [UUID: String]?
+    private var photoIDsMissingAfterRefresh: Set<UUID> = []
+
+    init(repository: any ProgressPhotoRepository) {
+        self.repository = repository
+    }
+
+    func jpegData(for photoID: UUID) async throws -> ReportExportPhotoPayloadV1 {
+        guard let imageRef = try await imageRef(for: photoID) else {
+            return .missing
+        }
+        switch try await repository.fullImage(assetID: imageRef) {
+        case let .available(data): return .available(data)
+        case .missing: return .missing
+        case .corrupt: return .corrupt
+        }
+    }
+
+    private func imageRef(for photoID: UUID) async throws -> String? {
+        if let cached = imageRefsByPhotoID?[photoID] { return cached }
+        if photoIDsMissingAfterRefresh.contains(photoID) { return nil }
+
+        let index = try await fetchImageRefIndex()
+        imageRefsByPhotoID = index
+        guard let refreshed = index[photoID] else {
+            photoIDsMissingAfterRefresh.insert(photoID)
+            return nil
+        }
+        return refreshed
+    }
+
+    private func fetchImageRefIndex() async throws -> [UUID: String] {
+        let photos = try await repository.fetchPhotos()
+        return photos.reduce(into: [UUID: String]()) { index, photo in
+            if index[photo.id] == nil { index[photo.id] = photo.imageRef }
+        }
+    }
+}
+
+@MainActor
+private final class EmptyTrackerReportsRepository:
+    ReportsRepository, ReportsExportRepository {
+    static let shared = EmptyTrackerReportsRepository()
+
+    private init() {}
+
+    func fetchDashboardSource(
+        in interval: ReportDateInterval
+    ) async throws -> ReportsDashboardSource {
+        _ = interval
+        return ReportsDashboardSource()
+    }
+
+    func fetchExportSnapshot(
+        in interval: ReportDateInterval,
+        modules: Set<ExportModuleV1>
+    ) async throws -> ExportSnapshotV1 {
+        let tables = try ExportModuleV1.allCases.compactMap {
+            module -> ExportTableV1? in
+            guard modules.contains(module) else { return nil }
+            return try ExportTableV1(
+                module: module,
+                columns: ExportSchemaV1.columns(for: module),
+                rows: []
+            )
+        }
+        return try ExportSnapshotV1(
+            interval: interval,
+            selectedModules: modules,
+            tables: tables
         )
     }
 }
@@ -360,6 +653,8 @@ enum DefaultTrackerFeatureFactory {
     static func make(
         environment: AppEnvironment,
         modelContext: ModelContext,
+        makeReportsRepository: @escaping TrackerReportsRepositoryFactory =
+            DefaultTrackerFeatureFactory.defaultReportsRepository,
         healthCheckNotificationCenter: any NotificationCenterClient =
             SystemNotificationCenterAdapter(),
         healthCheckNotificationComposition: HealthCheckNotificationComposition? = nil
@@ -437,6 +732,9 @@ enum DefaultTrackerFeatureFactory {
             inboundAssetStore: progressPhotoAssetStore,
             now: now
         )
+        let reportsRepository: @MainActor () -> any ReportsRepository & ReportsExportRepository = {
+            makeReportsRepository(modelContext, calendar)
+        }
         let progressPhotoAssetSynchronizer = makeProgressPhotoAssetSynchronizer(
             environment: environment,
             assetStore: progressPhotoAssetStore,
@@ -456,6 +754,7 @@ enum DefaultTrackerFeatureFactory {
                     lifestyleRepository: lifestyleRepository,
                     healthChecksRepository: healthChecksRepository,
                     bloodworkRepository: bloodworkRepository,
+                    makeReportsRepository: reportsRepository,
                     healthCheckNotificationComposition:
                         resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
@@ -471,6 +770,7 @@ enum DefaultTrackerFeatureFactory {
                     ),
                     healthChecksRepository: healthChecksRepository,
                     bloodworkRepository: bloodworkRepository,
+                    makeReportsRepository: reportsRepository,
                     healthCheckNotificationComposition:
                         resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
@@ -487,6 +787,7 @@ enum DefaultTrackerFeatureFactory {
                     lifestyleRepository: lifestyleRepository,
                     healthChecksRepository: healthChecksRepository,
                     bloodworkRepository: bloodworkRepository,
+                    makeReportsRepository: reportsRepository,
                     healthCheckNotificationComposition:
                         resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
@@ -502,6 +803,9 @@ enum DefaultTrackerFeatureFactory {
                         failsFirstCompletion: true
                     ),
                     bloodworkRepository: bloodworkRepository,
+                    makeReportsRepository: {
+                        UITestReportsRepository(repository: reportsRepository())
+                    },
                     healthCheckNotificationComposition:
                         resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
@@ -522,6 +826,7 @@ enum DefaultTrackerFeatureFactory {
                         failsFirstLoad: true,
                         failsFirstCreate: true
                     ),
+                    makeReportsRepository: reportsRepository,
                     healthCheckNotificationComposition:
                         resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
@@ -535,6 +840,7 @@ enum DefaultTrackerFeatureFactory {
                     healthChecksRepository: healthChecksRepository,
                     bloodworkRepository: bloodworkRepository,
                     progressPhotoRepository: progressPhotoRepository,
+                    makeReportsRepository: reportsRepository,
                     progressPhotoFixtureData: Data(
                         base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2Z7sAAAAASUVORK5CYII="
                     ),
@@ -554,6 +860,27 @@ enum DefaultTrackerFeatureFactory {
                     healthChecksRepository: healthChecksRepository,
                     bloodworkRepository: bloodworkRepository,
                     progressPhotoRepository: UITestProgressPhotoGalleryRepository(),
+                    makeReportsRepository: reportsRepository,
+                    healthCheckNotificationComposition:
+                        resolvedHealthCheckNotificationComposition,
+                    calendar: calendar,
+                    now: now
+                )
+            }
+            if scenario == .m4Reports,
+               let behavior = AppUITestLaunchConfiguration.resolve()?
+                    .reportsExportBehavior {
+                let photoRepository = UITestProgressPhotoGalleryRepository()
+                return TrackerFeatureBundle(
+                    metricsRepository: metricsRepository,
+                    lifestyleRepository: lifestyleRepository,
+                    healthChecksRepository: healthChecksRepository,
+                    bloodworkRepository: bloodworkRepository,
+                    progressPhotoRepository: photoRepository,
+                    makeReportsRepository: {
+                        M4ReportsUITestRepository(behavior: behavior)
+                    },
+                    reportExportPhotoProvider: M4ReportsUITestPhotoProvider(),
                     healthCheckNotificationComposition:
                         resolvedHealthCheckNotificationComposition,
                     calendar: calendar,
@@ -569,11 +896,19 @@ enum DefaultTrackerFeatureFactory {
             bloodworkRepository: bloodworkRepository,
             progressPhotoRepository: progressPhotoRepository,
             progressPhotoAssetSynchronizer: progressPhotoAssetSynchronizer,
+            makeReportsRepository: reportsRepository,
             healthCheckNotificationComposition:
                 resolvedHealthCheckNotificationComposition,
             calendar: calendar,
             now: now
         )
+    }
+
+    static func defaultReportsRepository(
+        modelContext: ModelContext,
+        calendar: Calendar
+    ) -> any ReportsRepository & ReportsExportRepository {
+        SwiftDataReportsRepository(modelContext: modelContext, calendar: calendar)
     }
 
     private static func makeProgressPhotoAssetSynchronizer(
@@ -605,6 +940,325 @@ enum DefaultTrackerFeatureFactory {
         )
     }
 }
+
+#if DEBUG
+@MainActor
+private final class UITestReportsRepository:
+    ReportsRepository, ReportsExportRepository {
+    private let repository: any ReportsRepository & ReportsExportRepository
+
+    init(repository: any ReportsRepository & ReportsExportRepository) {
+        self.repository = repository
+        AppUITestLaunchConfiguration.reportsDashboardFetchEvidence
+            .recordRepositoryConstruction()
+    }
+
+    func fetchDashboardSource(
+        in interval: ReportDateInterval
+    ) async throws -> ReportsDashboardSource {
+        AppUITestLaunchConfiguration.recordReportsDashboardFetch()
+        return try await repository.fetchDashboardSource(in: interval)
+    }
+
+    func fetchExportSnapshot(
+        in interval: ReportDateInterval,
+        modules: Set<ExportModuleV1>
+    ) async throws -> ExportSnapshotV1 {
+        try await repository.fetchExportSnapshot(
+            in: interval,
+            modules: modules
+        )
+    }
+}
+#endif
+
+#if DEBUG
+@MainActor
+private final class M4ReportsUITestRepository:
+    ReportsRepository, ReportsExportRepository {
+    private enum FixtureFailure: Error {
+        case export
+    }
+
+    private let behavior: AppUITestLaunchConfiguration.ReportsExportBehavior
+    private var hasConsumedExportBehavior = false
+
+    init(behavior: AppUITestLaunchConfiguration.ReportsExportBehavior) {
+        self.behavior = behavior
+    }
+
+    func fetchDashboardSource(
+        in interval: ReportDateInterval
+    ) async throws -> ReportsDashboardSource {
+        AppUITestLaunchConfiguration.recordReportsDashboardFetch()
+        let body = Self.bodyMetrics.filter { interval.contains($0.date) }
+        let exercise = Self.exerciseSets.filter { interval.contains($0.sessionDate) }
+        let nutrition = Self.nutritionDays.filter { interval.contains($0.date) }
+        let sleep = Self.sleepRecords.filter { interval.contains($0.date) }
+        let mood = Self.moodRecords.filter { interval.contains($0.date) }
+        let posture = Self.postureRecords.filter { interval.contains($0.date) }
+        let observationDates = body.map(\.date)
+            + exercise.map(\.sessionDate)
+            + nutrition.map(\.date)
+            + sleep.map(\.date)
+            + mood.map(\.date)
+            + posture.map(\.date)
+        return ReportsDashboardSource(
+            coverage: ReportCoverage(observationDates: observationDates),
+            bodyMetricRecords: body,
+            exerciseSetRecords: exercise,
+            nutritionDayRecords: nutrition,
+            sleepRecords: sleep,
+            moodRecords: mood,
+            postureRecords: posture,
+            programPhases: Self.programPhases,
+            currentPhaseState: Self.currentPhaseState,
+            phaseTransitions: []
+        )
+    }
+
+    func fetchExportSnapshot(
+        in interval: ReportDateInterval,
+        modules: Set<ExportModuleV1>
+    ) async throws -> ExportSnapshotV1 {
+        switch behavior {
+        case .failOnce where !hasConsumedExportBehavior:
+            hasConsumedExportBehavior = true
+            throw FixtureFailure.export
+        case .slowOnce where !hasConsumedExportBehavior:
+            hasConsumedExportBehavior = true
+            try await Task.sleep(nanoseconds: 30_000_000_000)
+            try Task.checkCancellation()
+        case .success, .failOnce, .slowOnce:
+            break
+        }
+
+        let tables = try modules.map { module in
+            try ExportTableV1(
+                module: module,
+                columns: ExportSchemaV1.columns(for: module),
+                rows: module == .photos
+                    ? Self.photoRows.filter { interval.contains($0.primaryTimestamp) }
+                    : []
+            )
+        }
+        return try ExportSnapshotV1(
+            interval: interval,
+            selectedModules: modules,
+            tables: tables
+        )
+    }
+
+    private static let bodyMetrics: [ReportBodyMetricRecord] = [
+        bodyMetric("00000000-0000-4000-8000-00000000b401", "2026-02-10T09:00:00Z", .weight, 84.5, "kg"),
+        bodyMetric("00000000-0000-4000-8000-00000000b402", "2026-05-10T09:00:00Z", .weight, 82.0, "kg"),
+        bodyMetric("00000000-0000-4000-8000-00000000b407", "2026-06-10T09:00:00Z", .weight, 81.0, "kg"),
+        bodyMetric("00000000-0000-4000-8000-00000000b403", "2026-08-05T09:00:00Z", .weight, 79.4, "kg"),
+        bodyMetric("00000000-0000-4000-8000-00000000b404", "2026-08-08T09:00:00Z", .weight, 79.0, "kg"),
+        bodyMetric("00000000-0000-4000-8000-00000000b405", "2026-08-05T09:30:00Z", .waist, 86.0, "cm"),
+        bodyMetric("00000000-0000-4000-8000-00000000b406", "2026-08-08T09:30:00Z", .waist, 85.2, "cm"),
+    ]
+
+    private static let exerciseSets: [ReportExerciseSetRecord] = [
+        exerciseSet("00000000-0000-4000-8000-00000000a501", "00000000-0000-4000-8000-00000000a601", "2026-08-06T08:00:00Z", 0, 80, 8),
+        exerciseSet("00000000-0000-4000-8000-00000000a502", "00000000-0000-4000-8000-00000000a601", "2026-08-06T08:00:00Z", 1, 82.5, 6),
+        exerciseSet("00000000-0000-4000-8000-00000000a503", "00000000-0000-4000-8000-00000000a602", "2026-08-09T08:00:00Z", 0, 85, 7),
+        exerciseSet("00000000-0000-4000-8000-00000000a504", "00000000-0000-4000-8000-00000000a602", "2026-08-09T08:00:00Z", 1, 87.5, 5),
+    ]
+
+    private static let nutritionDays: [ReportNutritionDayRecord] = [
+        nutrition("00000000-0000-4000-8000-00000000c401", "2026-08-08T12:00:00Z", 120, 100),
+        nutrition("00000000-0000-4000-8000-00000000c402", "2026-08-09T12:00:00Z", 70, 100),
+        nutrition("00000000-0000-4000-8000-00000000c403", "2026-08-10T12:00:00Z", 60, nil),
+    ]
+
+    private static let sleepRecords = [
+        ReportSleepRecord(
+            id: uuid("00000000-0000-4000-8000-00000000d401"),
+            date: date("2026-08-04T06:00:00Z"),
+            createdAt: date("2026-08-04T06:00:00Z"),
+            durationHours: 7.5,
+            quality: 8
+        ),
+        ReportSleepRecord(
+            id: uuid("00000000-0000-4000-8000-00000000d402"),
+            date: date("2026-08-08T06:00:00Z"),
+            createdAt: date("2026-08-08T06:00:00Z"),
+            durationHours: 8,
+            quality: 9
+        ),
+    ]
+
+    private static let moodRecords = [
+        ReportMoodRecord(
+            id: uuid("00000000-0000-4000-8000-00000000e401"),
+            date: date("2026-08-04T18:00:00Z"),
+            createdAt: date("2026-08-04T18:00:00Z"),
+            score: 6,
+            energy: 6
+        ),
+        ReportMoodRecord(
+            id: uuid("00000000-0000-4000-8000-00000000e402"),
+            date: date("2026-08-08T18:00:00Z"),
+            createdAt: date("2026-08-08T18:00:00Z"),
+            score: 8,
+            energy: 8
+        ),
+    ]
+
+    private static let postureRecords = [
+        ReportPostureRecord(
+            id: uuid("00000000-0000-4000-8000-00000000f401"),
+            date: date("2026-08-04T17:00:00Z"),
+            createdAt: date("2026-08-04T17:00:00Z"),
+            symptomScore: 5,
+            wallTestPass: false
+        ),
+        ReportPostureRecord(
+            id: uuid("00000000-0000-4000-8000-00000000f402"),
+            date: date("2026-08-08T17:00:00Z"),
+            createdAt: date("2026-08-08T17:00:00Z"),
+            symptomScore: 2,
+            wallTestPass: true
+        ),
+    ]
+
+    private static let phaseID = uuid("00000000-0000-4000-8000-000000009401")
+    private static let programID = uuid("00000000-0000-4000-8000-000000009402")
+    private static let programPhases = [
+        ReportProgramPhaseRecord(id: phaseID, name: "Temel", orderIndex: 0),
+    ]
+    private static let currentPhaseState = ReportCurrentPhaseStateRecord(
+        programID: programID,
+        phaseID: phaseID,
+        phaseStartedAt: date("2026-04-01T09:00:00Z")
+    )
+
+    private static let photoRows: [ExportRowV1] = {
+        do {
+            return try [
+                photoRow("00000000-0000-0000-0000-000000000201", "front"),
+                photoRow("00000000-0000-0000-0000-000000000202", "side"),
+            ]
+        } catch {
+            preconditionFailure("Invalid deterministic M4 photo fixture")
+        }
+    }()
+
+    private static func bodyMetric(
+        _ id: String,
+        _ timestamp: String,
+        _ kind: ReportBodyMetricKind,
+        _ value: Double,
+        _ unit: String
+    ) -> ReportBodyMetricRecord {
+        let observedAt = date(timestamp)
+        return ReportBodyMetricRecord(
+            id: uuid(id),
+            date: observedAt,
+            createdAt: observedAt,
+            kind: kind,
+            customName: nil,
+            value: value,
+            unit: unit
+        )
+    }
+
+    private static func exerciseSet(
+        _ id: String,
+        _ sessionID: String,
+        _ timestamp: String,
+        _ setIndex: Int,
+        _ weightKg: Double,
+        _ reps: Int
+    ) -> ReportExerciseSetRecord {
+        let sessionDate = date(timestamp)
+        return ReportExerciseSetRecord(
+            id: uuid(id),
+            createdAt: sessionDate,
+            sessionID: uuid(sessionID),
+            sessionDate: sessionDate,
+            sessionCreatedAt: sessionDate,
+            exerciseTemplateID: uuid(
+                "00000000-0000-4000-8000-00000000a401"
+            ),
+            exerciseName: "Bench Press",
+            setIndex: setIndex,
+            sessionCompleted: true,
+            isWarmup: false,
+            measurement: .weightedRepetitions,
+            weightKg: weightKg,
+            reps: reps,
+            durationSec: nil,
+            distanceSteps: nil
+        )
+    }
+
+    private static func nutrition(
+        _ id: String,
+        _ timestamp: String,
+        _ protein: Double,
+        _ target: Double?
+    ) -> ReportNutritionDayRecord {
+        let observedAt = date(timestamp)
+        return ReportNutritionDayRecord(
+            id: uuid(id),
+            date: observedAt,
+            createdAt: observedAt,
+            entryCount: 1,
+            proteinTotalG: protein,
+            proteinTargetG: target
+        )
+    }
+
+    private static func photoRow(
+        _ identifier: String,
+        _ pose: String
+    ) throws -> ExportRowV1 {
+        let timestamp = date("2026-08-08T10:00:00Z")
+        let cells = ExportSchemaV1.columns(for: .photos).map { column in
+            let value: ExportCellV1
+            switch column.name {
+            case "record_type": value = .text(ExportRecordTypeV1.progressPhoto.rawValue)
+            case "id": value = .uuid(uuid(identifier))
+            case "created_at", "updated_at", "progress_photo_date":
+                value = .timestamp(timestamp)
+            case "config_scope", "progress_photo_note": value = .null
+            case "progress_photo_image_available": value = .boolean(true)
+            case "progress_photo_pose": value = .text(pose)
+            default: value = .null
+            }
+            return ExportNamedCellV1(columnName: column.name, value: value)
+        }
+        return try ExportRowV1(primaryTimestamp: timestamp, cells: cells)
+    }
+
+    private static func uuid(_ value: String) -> UUID {
+        guard let identifier = UUID(uuidString: value) else {
+            preconditionFailure("Invalid deterministic M4 UUID")
+        }
+        return identifier
+    }
+
+    private static func date(_ value: String) -> Date {
+        guard let date = ISO8601DateFormatter().date(from: value) else {
+            preconditionFailure("Invalid deterministic M4 date")
+        }
+        return date
+    }
+}
+
+private struct M4ReportsUITestPhotoProvider: ReportExportPhotoByteProviding {
+    func jpegData(for photoID: UUID) async throws -> ReportExportPhotoPayloadV1 {
+        let available = [
+            UUID(uuidString: "00000000-0000-0000-0000-000000000201")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000202")!,
+        ]
+        guard available.contains(photoID) else { return .missing }
+        return .available(Data([0xff, 0xd8, 0x01, 0x02, 0xff, 0xd9]))
+    }
+}
+#endif
 
 #if DEBUG
 @MainActor

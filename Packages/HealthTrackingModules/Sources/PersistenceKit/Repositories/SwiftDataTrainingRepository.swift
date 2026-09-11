@@ -27,6 +27,12 @@ public enum TrainingRepositoryIntegrityError: Error, Equatable, Sendable {
     case transactionDidNotProduceSessionSnapshot
     case transactionDidNotProduceProgressSnapshot
     case missingProgramState(programID: UUID)
+    case duplicateProgramPhases(programID: UUID, phaseID: UUID, count: Int)
+    case currentPhaseNotFound(programID: UUID, phaseID: UUID)
+    case duplicatePhaseTransitionSettings(programID: UUID, count: Int)
+    case phaseTransitionSettingIDCollision(id: UUID)
+    case phaseTransitionRecordIDCollision(id: UUID)
+    case invalidPhaseTransitionLedger(programID: UUID, PhaseTransitionLedgerError)
 }
 
 public enum TrainingRepositoryMutationError: Error, Equatable, Sendable {
@@ -42,6 +48,16 @@ public enum TrainingRepositoryMutationError: Error, Equatable, Sendable {
         to: WorkoutSessionStatus
     )
     case phaseNotFound(programID: UUID, phaseID: UUID)
+    case invalidPhaseTransitionDate(
+        programID: UUID,
+        currentPhaseStartedAt: Date,
+        transitionedAt: Date
+    )
+}
+
+public enum TrainingRepositoryOperationError: Error, Equatable, Sendable {
+    case phaseTransitionSaveFailed
+    case pendingContextChanges
 }
 
 @MainActor
@@ -49,10 +65,25 @@ public final class SwiftDataTrainingRepository: TrainingRepository,
     SynchronousTodaySnapshotRepository {
     private let modelContext: ModelContext
     private let calendar: Calendar
+    private let phaseTransitionRecordID: @MainActor () -> UUID
+    private let phaseTransitionSettingID: @MainActor () -> UUID
+    private let saveOperation: @MainActor () throws -> Void
+    private let rollbackOperation: @MainActor () -> Void
 
-    public init(modelContext: ModelContext, calendar: Calendar = .current) {
+    public init(
+        modelContext: ModelContext,
+        calendar: Calendar = .current,
+        phaseTransitionRecordID: @escaping @MainActor () -> UUID = { UUID() },
+        phaseTransitionSettingID: @escaping @MainActor () -> UUID = { UUID() },
+        save: (@MainActor () throws -> Void)? = nil,
+        rollback: (@MainActor () -> Void)? = nil
+    ) {
         self.modelContext = modelContext
         self.calendar = calendar
+        self.phaseTransitionRecordID = phaseTransitionRecordID
+        self.phaseTransitionSettingID = phaseTransitionSettingID
+        saveOperation = save ?? { try modelContext.save() }
+        rollbackOperation = rollback ?? { modelContext.rollback() }
     }
 
     public func fetchTodaySnapshot() async throws -> TodayRepositorySnapshot? {
@@ -438,28 +469,149 @@ public final class SwiftDataTrainingRepository: TrainingRepository,
         phaseID: UUID,
         at date: Date
     ) async throws -> ProgramState {
+        let state = try requiredProgramState(programID: programID)
+        _ = try requiredProgramPhase(programID: programID, phaseID: phaseID)
+        guard state.currentPhaseId != phaseID else { return state }
+        guard !modelContext.hasChanges else {
+            throw TrainingRepositoryOperationError.pendingContextChanges
+        }
+        guard date.timeIntervalSinceReferenceDate.isFinite,
+              date > state.phaseStartedAt else {
+            throw TrainingRepositoryMutationError.invalidPhaseTransitionDate(
+                programID: programID,
+                currentPhaseStartedAt: state.phaseStartedAt,
+                transitionedAt: date
+            )
+        }
+        let originalPhaseID = state.currentPhaseId
+        let originalPhaseStartedAt = state.phaseStartedAt
+        let originalStateUpdatedAt = state.updatedAt
+        var originalSetting: (model: AppSetting, value: String, updatedAt: Date)?
         var updatedState: ProgramState?
-        try modelContext.transaction {
-            let state = try requiredProgramState(programID: programID)
-            let matchingPhases = try modelContext.fetch(FetchDescriptor<ProgramPhase>())
-                .filter { $0.id == phaseID && $0.program?.id == programID }
-            guard matchingPhases.count == 1 else {
-                throw TrainingRepositoryMutationError.phaseNotFound(
-                    programID: programID,
-                    phaseID: phaseID
-                )
-            }
+        do {
+            try modelContext.transaction {
+                let state = try requiredProgramState(programID: programID)
+                _ = try requiredProgramPhase(programID: programID, phaseID: phaseID)
+                do {
+                    _ = try requiredCurrentProgramPhase(
+                        programID: programID,
+                        phaseID: state.currentPhaseId
+                    )
+                    let key = PhaseTransitionLedgerV1.key(for: programID)
+                    let settings = try modelContext.fetch(FetchDescriptor<AppSetting>())
+                    let matchingSettings = settings.filter { $0.key == key }
+                    guard matchingSettings.count <= 1 else {
+                        throw TrainingRepositoryIntegrityError.duplicatePhaseTransitionSettings(
+                            programID: programID,
+                            count: matchingSettings.count
+                        )
+                    }
+                    let setting: AppSetting
+                    var ledger: PhaseTransitionLedgerV1
+                    if let existing = matchingSettings.first {
+                        setting = existing
+                        originalSetting = (existing, existing.value, existing.updatedAt)
+                        ledger = try PhaseTransitionLedgerV1.decode(existing.value, for: programID)
+                    } else {
+                        let settingID = phaseTransitionSettingID()
+                        guard !settings.contains(where: { $0.id == settingID }) else {
+                            throw TrainingRepositoryIntegrityError.phaseTransitionSettingIDCollision(
+                                id: settingID
+                            )
+                        }
+                        setting = AppSetting(
+                            id: settingID,
+                            createdAt: date,
+                            updatedAt: date,
+                            key: key,
+                            value: ""
+                        )
+                        ledger = PhaseTransitionLedgerV1(records: [])
+                        modelContext.insert(setting)
+                    }
 
-            state.currentPhaseId = phaseID
-            state.phaseStartedAt = date
-            state.updatedAt = date
-            try modelContext.save()
-            updatedState = state
+                    let recordID = phaseTransitionRecordID()
+                    guard !ledger.records.contains(where: { $0.id == recordID }) else {
+                        throw TrainingRepositoryIntegrityError.phaseTransitionRecordIDCollision(
+                            id: recordID
+                        )
+                    }
+                    ledger.records.append(PhaseTransitionRecord(
+                        id: recordID,
+                        programID: programID,
+                        fromPhaseID: state.currentPhaseId,
+                        toPhaseID: phaseID,
+                        fromStartedAt: state.phaseStartedAt,
+                        transitionedAt: date
+                    ))
+                    setting.value = try ledger.encoded(for: programID)
+                    setting.updatedAt = date
+                } catch let error as PhaseTransitionLedgerError {
+                    throw TrainingRepositoryIntegrityError.invalidPhaseTransitionLedger(
+                        programID: programID,
+                        error
+                    )
+                }
+
+                state.currentPhaseId = phaseID
+                state.phaseStartedAt = date
+                state.updatedAt = date
+                try saveOperation()
+                updatedState = state
+            }
+        } catch {
+            state.currentPhaseId = originalPhaseID
+            state.phaseStartedAt = originalPhaseStartedAt
+            state.updatedAt = originalStateUpdatedAt
+            if let originalSetting {
+                originalSetting.model.value = originalSetting.value
+                originalSetting.model.updatedAt = originalSetting.updatedAt
+            }
+            rollbackOperation()
+            if let error = error as? TrainingRepositoryIntegrityError { throw error }
+            if let error = error as? TrainingRepositoryMutationError { throw error }
+            throw TrainingRepositoryOperationError.phaseTransitionSaveFailed
         }
         guard let updatedState else {
             throw TrainingRepositoryIntegrityError.missingProgramState(programID: programID)
         }
         return updatedState
+    }
+
+    private func requiredProgramPhase(
+        programID: UUID,
+        phaseID: UUID
+    ) throws -> ProgramPhase {
+        let matching = try modelContext.fetch(FetchDescriptor<ProgramPhase>())
+            .filter { $0.id == phaseID && $0.program?.id == programID }
+        guard matching.count <= 1 else {
+            throw TrainingRepositoryIntegrityError.duplicateProgramPhases(
+                programID: programID,
+                phaseID: phaseID,
+                count: matching.count
+            )
+        }
+        guard let phase = matching.first else {
+            throw TrainingRepositoryMutationError.phaseNotFound(
+                programID: programID,
+                phaseID: phaseID
+            )
+        }
+        return phase
+    }
+
+    private func requiredCurrentProgramPhase(
+        programID: UUID,
+        phaseID: UUID
+    ) throws -> ProgramPhase {
+        do {
+            return try requiredProgramPhase(programID: programID, phaseID: phaseID)
+        } catch is TrainingRepositoryMutationError {
+            throw TrainingRepositoryIntegrityError.currentPhaseNotFound(
+                programID: programID,
+                phaseID: phaseID
+            )
+        }
     }
 
     private func requiredProgramState(programID: UUID) throws -> ProgramState {

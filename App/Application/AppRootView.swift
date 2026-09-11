@@ -5,6 +5,57 @@ import SettingsKit
 import SwiftUI
 import TrainingKit
 
+enum ProgressReportsLoadAction: Equatable {
+    case none
+    case ensureRouter
+    case ensureRouterAndRefreshReports
+    case refreshReports
+}
+
+struct ProgressReportsLoadPolicy: Equatable {
+    private(set) var hasSelectedProgress = false
+    private(set) var loadsReportsOnPresentation = true
+
+    mutating func transition(
+        from previousTab: AppTab,
+        to selectedTab: AppTab,
+        routerIsResolved: Bool
+    ) -> ProgressReportsLoadAction {
+        guard selectedTab == .progress else {
+            if previousTab == .progress {
+                loadsReportsOnPresentation = false
+            }
+            return .none
+        }
+        guard hasSelectedProgress else {
+            hasSelectedProgress = true
+            loadsReportsOnPresentation = true
+            return .ensureRouter
+        }
+        loadsReportsOnPresentation = false
+        return routerIsResolved
+            ? .refreshReports
+            : .ensureRouterAndRefreshReports
+    }
+}
+
+@MainActor
+final class TrackerEntryReportsRefreshPolicy {
+    private var presentationGeneration: UInt64 = 0
+    private var refreshedGeneration: UInt64 = 0
+
+    func beginPresentation() {
+        presentationGeneration &+= 1
+    }
+
+    func consumeSheetDismissal() -> Bool {
+        guard presentationGeneration != 0,
+              refreshedGeneration != presentationGeneration else { return false }
+        refreshedGeneration = presentationGeneration
+        return true
+    }
+}
+
 @MainActor
 struct AppRootView: View {
     let todayViewModel: TodayViewModel
@@ -70,9 +121,14 @@ struct AppRootView: View {
     @State private var nutritionQuickAddIntent: NutritionQuickAddIntent?
     @State private var trackerFeatureRouter: (any TrackerFeatureRouting)?
     @State private var trackerEntryRoute: TrackerEntryRoute?
+    @State private var progressReportsLoadPolicy = ProgressReportsLoadPolicy()
+    @State private var trackerEntryReportsRefreshPolicy =
+        TrackerEntryReportsRefreshPolicy()
     #if DEBUG
     @StateObject private var notificationAuthorizationEvidence =
         AppUITestLaunchConfiguration.notificationAuthorizationEvidence
+    @StateObject private var reportsDashboardFetchEvidence =
+        AppUITestLaunchConfiguration.reportsDashboardFetchEvidence
     #endif
 
     var body: some View {
@@ -113,6 +169,16 @@ struct AppRootView: View {
                     .allowsHitTesting(false)
             }
             if exposesTrackerFeatureRouterEvidence {
+                TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                    let count = reportsDashboardFetchEvidence.repositoryConstructionCount
+                    Text(String(count))
+                        .font(.system(size: 1))
+                        .foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .accessibilityIdentifier("m4.reports.repository-construction-count")
+                        .accessibilityValue(String(count))
+                        .allowsHitTesting(false)
+                }
                 Text(String(trackerFeatureRouterInstantiationCount()))
                     .font(.system(size: 1))
                     .foregroundStyle(.clear)
@@ -123,7 +189,18 @@ struct AppRootView: View {
                     )
                     .allowsHitTesting(false)
             }
-            if exposesTrackerFeatureRouterEvidence,
+            if exposesTrackerFeatureRouterEvidence || exposesM4ReportsEvidence {
+                Text(String(reportsDashboardFetchEvidence.fetchCount))
+                    .font(.system(size: 1))
+                    .foregroundStyle(.clear)
+                    .frame(width: 1, height: 1)
+                    .accessibilityIdentifier("m4.reports.dashboard-fetch-count")
+                    .accessibilityValue(
+                        String(reportsDashboardFetchEvidence.fetchCount)
+                    )
+                    .allowsHitTesting(false)
+            }
+            if exposesTrackerFeatureRouterEvidence || exposesM4ReportsEvidence,
                AppUITestLaunchConfiguration.resolve()?.fixedNow != nil {
                 let fixedNowEvidence = ISO8601DateFormatter().string(from: AppDomainContext.now())
                 Text(fixedNowEvidence)
@@ -133,6 +210,20 @@ struct AppRootView: View {
                     .accessibilityIdentifier("m3.fixed-now")
                     .accessibilityValue(fixedNowEvidence)
                     .allowsHitTesting(false)
+            }
+            if exposesM4ReportsEvidence {
+                TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                    let count = m4ExportWorkspaceCount
+                    Text(String(count))
+                        .font(.system(size: 1))
+                        .foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .accessibilityIdentifier(
+                            "m4.reports.export-workspace-count"
+                        )
+                        .accessibilityValue(String(count))
+                        .allowsHitTesting(false)
+                }
             }
             #endif
         }
@@ -166,20 +257,23 @@ struct AppRootView: View {
                 }
             )
         }
-        .sheet(item: $trackerEntryRoute) { route in
+        .sheet(
+            item: $trackerEntryRoute,
+            onDismiss: trackerEntrySheetDidDismiss
+        ) { route in
             if let trackerFeatureRouter {
                 switch route {
                 case .bodyMetric:
                     trackerFeatureRouter.makeBodyMetricEntryView(
-                        onClose: { trackerEntryRoute = nil }
+                        onClose: closeTrackerEntry
                     )
                 case .lifestyle:
                     trackerFeatureRouter.makeLifestyleEntryView(
-                        onClose: { trackerEntryRoute = nil }
+                        onClose: closeTrackerEntry
                     )
                 case .posture:
                     trackerFeatureRouter.makePostureEntryView(
-                        onClose: { trackerEntryRoute = nil }
+                        onClose: closeTrackerEntry
                     )
                 case .healthChecks:
                     trackerFeatureRouter.makeHealthCheckListView(
@@ -190,23 +284,39 @@ struct AppRootView: View {
                                 await todayViewModel.load()
                             }
                         },
-                        onClose: { trackerEntryRoute = nil }
+                        onClose: closeTrackerEntry
                     )
                 case .bloodwork:
                     trackerFeatureRouter.makeBloodworkListView(
                         onCommittedMutation: {},
-                        onClose: { trackerEntryRoute = nil }
+                        onClose: closeTrackerEntry
                     )
                 case .progressPhotos:
                     trackerFeatureRouter.makeProgressPhotoLifecycleView(
-                        onClose: { trackerEntryRoute = nil }
+                        onClose: closeTrackerEntry
                     )
                 }
             }
         }
-        .onChange(of: selectedTab) { _, selectedTab in
-            if selectedTab == .progress {
+        .onChange(of: trackerEntryRoute) { previousRoute, route in
+            guard previousRoute == nil, route != nil else { return }
+            trackerEntryReportsRefreshPolicy.beginPresentation()
+        }
+        .onChange(of: selectedTab) { previousTab, selectedTab in
+            switch progressReportsLoadPolicy.transition(
+                from: previousTab,
+                to: selectedTab,
+                routerIsResolved: trackerFeatureRouter != nil
+            ) {
+            case .none:
+                break
+            case .ensureRouter:
                 resolveTrackerFeatureBundle()
+            case .ensureRouterAndRefreshReports:
+                resolveTrackerFeatureBundle()
+                refreshReportsIfResolved()
+            case .refreshReports:
+                refreshReportsIfResolved()
             }
         }
     }
@@ -297,7 +407,8 @@ struct AppRootView: View {
                 onNutritionSnapshot: publishNutritionSnapshot
             )
         case .progress:
-            if let trackerFeatureRouter {
+            if progressReportsLoadPolicy.hasSelectedProgress,
+               let trackerFeatureRouter {
                 trackerFeatureRouter.makeProgressView(
                     onOpenBodyMetric: { trackerEntryRoute = .bodyMetric },
                     onOpenLifestyle: { trackerEntryRoute = .lifestyle },
@@ -308,7 +419,9 @@ struct AppRootView: View {
                     },
                     onOpenProgressPhotos: {
                         trackerEntryRoute = .progressPhotos
-                    }
+                    },
+                    loadsReportsOnPresentation:
+                        progressReportsLoadPolicy.loadsReportsOnPresentation
                 )
             } else {
                 ReportsFoundationView()
@@ -388,6 +501,21 @@ struct AppRootView: View {
         trackerFeatureRouter = makeTrackerFeatureRouter()
     }
 
+    private func closeTrackerEntry() {
+        trackerEntryRoute = nil
+    }
+
+    private func trackerEntrySheetDidDismiss() {
+        guard trackerEntryReportsRefreshPolicy.consumeSheetDismissal() else { return }
+        guard progressReportsLoadPolicy.hasSelectedProgress else { return }
+        refreshReportsIfResolved()
+    }
+
+    private func refreshReportsIfResolved() {
+        guard let trackerFeatureRouter else { return }
+        Task { await trackerFeatureRouter.refreshReports() }
+    }
+
     private func publishNutritionSnapshot(
         _ snapshot: NutritionDayEntriesSnapshot,
         _ targets: NutritionMacroTargets?
@@ -416,6 +544,31 @@ struct AppRootView: View {
         AppUITestLaunchConfiguration.resolve()?.scenario == .m3HealthChecks
         #else
         false
+        #endif
+    }
+
+    private var exposesM4ReportsEvidence: Bool {
+        #if DEBUG
+        AppUITestLaunchConfiguration.resolve()?.scenario == .m4Reports
+        #else
+        false
+        #endif
+    }
+
+    private var m4ExportWorkspaceCount: Int {
+        #if DEBUG
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FOHealthExports", isDirectory: true)
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsSubdirectoryDescendants]
+        ) else { return 0 }
+        return contents.filter { url in
+            (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        }.count
+        #else
+        return 0
         #endif
     }
 }

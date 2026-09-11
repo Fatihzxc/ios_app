@@ -16,12 +16,19 @@ m311_red_only=false
 m312_red_only=false
 
 usage() {
-    echo "Usage: $0 [--only-testing TestBundleName|--skip-testing TestIdentifier|--cloud-compile-only|--verify-bootstrap-idempotence|--m311-red-only|--m312-red-only]" >&2
+    echo "Usage: $0 [--only-testing TestBundleName|--focused-testing TestIdentifier|--skip-testing TestIdentifier|--cloud-compile-only|--verify-bootstrap-idempotence|--m311-red-only|--m312-red-only]" >&2
 }
 
 if (( $# > 0 )); then
     case "$1" in
         --only-testing)
+            if (( $# != 2 )) || [[ -z "$2" ]]; then
+                usage
+                exit 2
+            fi
+            xcodebuild_test_arguments+=("-only-testing:$2")
+            ;;
+        --focused-testing)
             if (( $# != 2 )) || [[ -z "$2" ]]; then
                 usage
                 exit 2
@@ -98,6 +105,8 @@ if [[ "$m311_red_only" != true ]]; then
         "$script_dir/verify-m3-acceptance.sh"
     fi
 fi
+"$script_dir/verify-m4-reports.sh" --self-test
+"$script_dir/verify-m4-reports.sh"
 
 if [[ "$bootstrap_idempotence_only" == true ]]; then
     "$script_dir/verify-bootstrap-idempotence.sh"
