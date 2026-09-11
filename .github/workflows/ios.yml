@@ -58,22 +58,6 @@ jobs:
           fi
           printf '%s\n' "$version_output"
 
-      - name: Targeted M4.9 report acceptance
-        timeout-minutes: 45
-        run: scripts/test-ios.sh --focused-testing HealthTrackingAppUITests/M4ReportsAcceptanceUITests
-
-      - name: Targeted M4.9 accessibility matrix
-        timeout-minutes: 60
-        run: scripts/test-ios.sh --focused-testing HealthTrackingAppUITests/M4ReportsAccessibilityUITests
-
-      - name: Targeted M4.9 export round trip
-        timeout-minutes: 30
-        run: scripts/test-ios.sh --focused-testing HealthTrackingAppTests/M4ExportRoundTripTests
-
-      - name: Targeted M4.9 large dataset audit
-        timeout-minutes: 30
-        run: scripts/test-ios.sh --focused-testing ReportsKitTests/ReportsLargeDatasetTests
-
       - name: Qualifying M3.11 behavior RED
         timeout-minutes: 20
         run: scripts/test-ios.sh --m311-red-only
@@ -779,6 +763,83 @@ jobs:
             .build/**/*.xcresult
             .build/gallery-screenshots/**
             .build/m4-export-evidence/**
+          include-hidden-files: true
+          if-no-files-found: warn
+
+  test-m4-acceptance:
+    if: ${{ github.event_name != 'push' || !startsWith(github.ref_name, 'test/m4.') || startsWith(github.ref_name, 'test/m4.9-') }}
+    runs-on: macos-15
+    timeout-minutes: 210
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tool versions
+        run: |
+          xcodebuild -version
+          if command -v xcodegen >/dev/null 2>&1; then
+            xcodegen --version
+          else
+            echo "xcodegen: not installed"
+          fi
+
+      - name: Install compatible XcodeGen
+        run: |
+          required_version="2.46.0"
+          version_at_least() {
+            local actual="$1"
+            local required="$2"
+            local actual_major actual_minor actual_patch required_major required_minor required_patch
+            IFS=. read -r actual_major actual_minor actual_patch <<< "$actual"
+            IFS=. read -r required_major required_minor required_patch <<< "$required"
+            actual_minor="${actual_minor:-0}"
+            actual_patch="${actual_patch:-0}"
+            required_minor="${required_minor:-0}"
+            required_patch="${required_patch:-0}"
+            (( actual_major > required_major )) ||
+              (( actual_major == required_major && actual_minor > required_minor )) ||
+              (( actual_major == required_major && actual_minor == required_minor && actual_patch >= required_patch ))
+          }
+
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          else
+            version_output="$(xcodegen --version)"
+            version="$(printf '%s\n' "$version_output" | grep -Eo '[0-9]+(\.[0-9]+){1,2}' | head -n 1)"
+            if [[ -z "$version" ]] || ! version_at_least "$version" "$required_version"; then
+              brew upgrade xcodegen
+            fi
+          fi
+
+          version_output="$(xcodegen --version)"
+          version="$(printf '%s\n' "$version_output" | grep -Eo '[0-9]+(\.[0-9]+){1,2}' | head -n 1)"
+          if [[ -z "$version" ]] || ! version_at_least "$version" "$required_version"; then
+            echo "xcodegen ${required_version} or newer is required; found: ${version_output}" >&2
+            exit 1
+          fi
+          printf '%s\n' "$version_output"
+
+      - name: Targeted M4.9 report acceptance
+        timeout-minutes: 45
+        run: scripts/test-ios.sh --focused-testing HealthTrackingAppUITests/M4ReportsAcceptanceUITests
+
+      - name: Targeted M4.9 accessibility matrix
+        timeout-minutes: 60
+        run: scripts/test-ios.sh --focused-testing HealthTrackingAppUITests/M4ReportsAccessibilityUITests
+
+      - name: Targeted M4.9 export round trip
+        timeout-minutes: 30
+        run: scripts/test-ios.sh --focused-testing HealthTrackingAppTests/M4ExportRoundTripTests
+
+      - name: Targeted M4.9 large dataset audit
+        timeout-minutes: 30
+        run: scripts/test-ios.sh --focused-testing ReportsKitTests/ReportsLargeDatasetTests
+
+      - name: Upload targeted M4 acceptance results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: M4-acceptance-xcresult
+          path: .build/**/*.xcresult
           include-hidden-files: true
           if-no-files-found: warn
 

@@ -267,9 +267,67 @@ def verify(root: Path) -> None:
     verify_focused_runner(runner)
 
 
+def task9_targeted_job(workflow: str) -> str:
+    job = job_block(workflow, "test-m4-acceptance")
+    keys = direct_mapping(job, 4, "M4.9 targeted audit job")
+    if keys != {
+        "if": FULL_JOB_GUARD, "runs-on": "macos-15",
+        "timeout-minutes": "210", "steps": "",
+    } or [line for line in job.split("    steps:\n", 1)[0].splitlines() if line.strip()] != [
+        f"    if: {FULL_JOB_GUARD}", "    runs-on: macos-15", "    timeout-minutes: 210",
+    ]:
+        raise ValueError("M4.9 targeted audit job must be independent and mandatory with a 210-minute budget")
+    parsed = steps(job)
+    full = job_block(workflow, "test")
+    setup = full.split("    steps:\n", 1)[1].split(
+        "      - name: Qualifying M3.11 behavior RED\n", 1
+    )[0]
+    expected_setup = steps("    steps:\n" + setup)
+    if len(parsed) != 8 or len(expected_setup) != 3:
+        raise ValueError("M4.9 targeted audit job must retain setup, four audits, and result upload")
+    for (values, body), (expected, expected_body) in zip(parsed[:3], expected_setup):
+        if values != expected or "if" in values or "continue-on-error" in values:
+            raise ValueError("M4.9 targeted audit job must retain unconditional full-job setup")
+        if [line for line in body if line.strip()] != [line for line in expected_body if line.strip()]:
+            raise ValueError("M4.9 targeted audit job must retain full-job setup commands")
+    for (values, body), (name, timeout, selector) in zip(parsed[3:7], (
+        (TASK9_ACCEPTANCE_STEP_NAME, 45, TASK9_ACCEPTANCE_SELECTOR),
+        (TASK9_ACCESSIBILITY_STEP_NAME, 60, TASK9_ACCESSIBILITY_SELECTOR),
+        (TASK9_ROUND_TRIP_STEP_NAME, 30, TASK9_ROUND_TRIP_SELECTOR),
+        (TASK9_LARGE_STEP_NAME, 30, TASK9_LARGE_SELECTOR),
+    )):
+        if values != {"name": name, "timeout-minutes": str(timeout), "run": selector} or [
+            line for line in body if line.strip()
+        ] != [
+            f"      - name: {name}", f"        timeout-minutes: {timeout}",
+            f"        run: {selector}",
+        ]:
+            if name == TASK9_ACCEPTANCE_STEP_NAME:
+                raise ValueError("M4.9 acceptance runtime budget must retain the exact fail-closed selector and 45-minute timeout")
+            raise ValueError("M4.9 audit routing must use every exact fail-closed selector")
+        if selector in full or workflow.count("        run: " + selector + "\n") != 1:
+            raise ValueError("M4.9 targeted audits must run once outside the full job's six-hour budget")
+    upload, body = parsed[7]
+    if upload != {
+        "name": "Upload targeted M4 acceptance results", "if": "always()",
+        "uses": "actions/upload-artifact@v4", "with": "",
+    } or direct_mapping("\n".join(body), 10, "M4.9 targeted result upload") != {
+        "name": "M4-acceptance-xcresult", "path": ".build/**/*.xcresult",
+        "include-hidden-files": "true", "if-no-files-found": "warn",
+    } or [line for line in body if line.strip()] != [
+        "      - name: Upload targeted M4 acceptance results",
+        "        if: always()", "        uses: actions/upload-artifact@v4",
+        "        with:", "          name: M4-acceptance-xcresult",
+        "          path: .build/**/*.xcresult", "          include-hidden-files: true",
+        "          if-no-files-found: warn",
+    ]:
+        raise ValueError("M4.9 targeted audit job must always upload its own result artifact")
+    return job
+
+
 def verify_task9_red_contract(root: Path) -> None:
     workflow = (root / ".github/workflows/ios.yml").read_text(encoding="utf-8")
-    full_job = job_block(workflow, "test")
+    full_job = task9_targeted_job(workflow)
     canonical_step = (
         f"      - name: {TASK9_ACCEPTANCE_STEP_NAME}\n"
         f"        timeout-minutes: {TASK9_ACCEPTANCE_TIMEOUT}\n"
@@ -410,6 +468,7 @@ def verify_task9_stage_a_contract(root: Path) -> None:
         raise ValueError("M4.9 full/focused routing must use the exact full-suite guards")
     if full_keys.get("timeout-minutes") != TASK9_FULL_JOB_TIMEOUT:
         raise ValueError("M4.9 full workflow job must retain the 360-minute budget")
+    targeted_job = task9_targeted_job(workflow)
     full_suite_step = (
         "      - name: Test iOS app\n"
         f"        timeout-minutes: {TASK9_FULL_SUITE_TIMEOUT}\n"
@@ -439,7 +498,7 @@ def verify_task9_stage_a_contract(root: Path) -> None:
             f"        timeout-minutes: {timeout}\n"
             f"        run: {selector}\n"
         )
-        if full_job.count(canonical) != 1 or full_job.count(f"      - name: {step_name}\n") != 1:
+        if targeted_job.count(canonical) != 1 or targeted_job.count(f"      - name: {step_name}\n") != 1:
             if step_name == TASK9_ACCEPTANCE_STEP_NAME:
                 raise ValueError(
                     "M4.9 acceptance runtime budget must use the exact 45-minute fail-closed selector"
@@ -1057,6 +1116,102 @@ def task9_stage_a_self_test(source_root: Path) -> None:
                 raise SystemExit(f"M4.9 privacy mutation failed incorrectly: {error}") from error
         else:
             raise SystemExit("M4.9 Stage-A payload logging mutation escaped")
+
+
+def task9_partition_self_test(source_root: Path) -> None:
+    """Exercise the verifier with independently partitioned and broken workflows.
+
+    Catch the observed six-hour serial-job regression without dropping a test,
+    changing a test timeout, or permitting an optional/soft-failing audit job.
+    """
+    with tempfile.TemporaryDirectory(prefix="m4-ci-partition-") as directory:
+        fixture = Path(directory)
+        for relative in (
+            (".github/workflows/ios.yml",)
+            + TASK9_STAGE_A_CONFIG_PATHS + TASK9_STAGE_A_SWIFT_PATHS
+        ):
+            target = fixture / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_root / relative, target)
+        path = fixture / ".github/workflows/ios.yml"
+        original = path.read_text(encoding="utf-8")
+        commands = (
+            ("Targeted M4.9 report acceptance", 45,
+             "scripts/test-ios.sh --focused-testing HealthTrackingAppUITests/M4ReportsAcceptanceUITests"),
+            ("Targeted M4.9 accessibility matrix", 60,
+             "scripts/test-ios.sh --focused-testing HealthTrackingAppUITests/M4ReportsAccessibilityUITests"),
+            ("Targeted M4.9 export round trip", 30,
+             "scripts/test-ios.sh --focused-testing HealthTrackingAppTests/M4ExportRoundTripTests"),
+            ("Targeted M4.9 large dataset audit", 30,
+             "scripts/test-ios.sh --focused-testing ReportsKitTests/ReportsLargeDatasetTests"),
+        )
+        audit_steps = "\n".join(
+            f"      - name: {name}\n        timeout-minutes: {minutes}\n        run: {command}\n"
+            for name, minutes, command in commands
+        )
+        if "  test-m4-acceptance:\n" not in original:
+            setup = job_block(original, "test").split("    steps:\n", 1)[1].split(
+                "      - name: Targeted M4.9 report acceptance\n", 1
+            )[0]
+            partitioned = original
+            for name, minutes, command in commands:
+                step = f"      - name: {name}\n        timeout-minutes: {minutes}\n        run: {command}\n"
+                if partitioned.count(step) != 1:
+                    raise ValueError("CI partition fixture must find each original audit step once")
+                partitioned = partitioned.replace(step, "", 1)
+            partitioned += (
+                "\n  test-m4-acceptance:\n"
+                f"    if: {FULL_JOB_GUARD}\n"
+                "    runs-on: macos-15\n    timeout-minutes: 210\n    steps:\n"
+                + setup + "\n" + audit_steps
+                + "\n      - name: Upload targeted M4 acceptance results\n"
+                "        if: always()\n        uses: actions/upload-artifact@v4\n"
+                "        with:\n          name: M4-acceptance-xcresult\n"
+                "          path: .build/**/*.xcresult\n"
+                "          include-hidden-files: true\n          if-no-files-found: warn\n"
+            )
+        else:
+            partitioned = original
+        path.write_text(partitioned, encoding="utf-8")
+        verify_task9_stage_a_contract(fixture)
+        verify_task9_red_contract(fixture)
+
+        target_block = job_block(partitioned, "test-m4-acceptance")
+        mutations = [
+            target_block.replace(f"    if: {FULL_JOB_GUARD}", "    if: false", 1),
+            target_block.replace(f"    if: {FULL_JOB_GUARD}\n", f"    if: {FULL_JOB_GUARD}\n      && false\n", 1),
+            target_block.replace("    steps:", "    continue-on-error: true\n    steps:", 1),
+            target_block.replace("    steps:", "    needs: test\n    steps:", 1),
+            target_block.replace("    timeout-minutes: 210", "    timeout-minutes: 30", 1),
+            target_block.replace("      - uses: actions/checkout@v4", "      - uses: actions/checkout@v4\n        if: false", 1),
+            target_block.replace("      - uses: actions/checkout@v4\n", "      - uses: actions/checkout@v4\n          invalid-suffix\n", 1),
+            target_block.replace("        if: always()", "        if: success()", 1),
+            target_block.replace("        if: always()\n", "        if: always()\n            && false\n", 1),
+            target_block.replace("          path: .build/**/*.xcresult\n", "          path: .build/**/*.xcresult\n            nonexistent-suffix\n", 1),
+        ]
+        for name, minutes, command in commands:
+            mutations.extend((
+                target_block.replace(f"        run: {command}", "        run: true", 1),
+                target_block.replace(f"        run: {command}", f"        run: {command} || true", 1),
+                target_block.replace(f"        run: {command}\n", f"        run: {command}\n          || true\n", 1),
+                target_block.replace(f"      - name: {name}\n", f"      - name: {name}\n        continue-on-error: true\n", 1),
+                target_block.replace(f"      - name: {name}\n", f"      - name: {name}\n        if: false\n", 1),
+            ))
+        invalid = [partitioned.replace(target_block, mutation, 1) for mutation in mutations]
+        invalid.append(partitioned.replace("  test-m4-acceptance:\n" + target_block.lstrip("\n"), "", 1))
+        invalid.append(partitioned.replace("      - name: Qualifying M3.11 behavior RED", audit_steps + "\n      - name: Qualifying M3.11 behavior RED", 1))
+        invalid.append(partitioned + "\n  test-m4-acceptance:\n" + target_block)
+        for index, workflow in enumerate(invalid):
+            if workflow == partitioned:
+                raise ValueError(f"CI partition mutation {index} made no change")
+            path.write_text(workflow, encoding="utf-8")
+            try:
+                verify_task9_stage_a_contract(fixture)
+            except ValueError:
+                pass
+            else:
+                raise ValueError(f"CI partition mutation {index} escaped the verifier")
+        print(f"M4 CI partition verifier behavioral self-tests passed ({len(invalid)} rejected workflows).")
 
 
 def target_dependencies(package: str, name: str) -> list[str]:
@@ -7791,6 +7946,7 @@ def self_test(source_root: Path) -> None:
 root = Path(sys.argv[1])
 mode = sys.argv[2]
 if mode == "--self-test":
+    task9_partition_self_test(root)
     task9_zip_attachment_self_test(root)
     self_test(root)
     task9_red_self_test(root)
