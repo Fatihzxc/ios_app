@@ -7943,9 +7943,154 @@ def self_test(source_root: Path) -> None:
             runner.write_text(original, encoding="utf-8")
 
 
+def verify_task9_evidence(root: Path) -> None:
+    path = root / "docs/evidence/M4/acceptance.md"
+    if not path.is_file():
+        raise ValueError("Missing M4 acceptance evidence: docs/evidence/M4/acceptance.md")
+    text = path.read_text(encoding="utf-8")
+    blocks = re.findall(r"^```json\n(.*?)^```$", text, re.MULTILINE | re.DOTALL)
+    if len(blocks) != 1:
+        raise ValueError("M4 evidence must contain exactly one JSON receipt")
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("M4 evidence receipt contains a duplicate JSON key")
+            result[key] = value
+        return result
+
+    def reject_constant(value):
+        raise ValueError("M4 evidence receipt contains a non-finite JSON number")
+
+    try:
+        receipt = json.loads(blocks[0], object_pairs_hook=unique_object,
+                             parse_constant=reject_constant)
+    except json.JSONDecodeError as error:
+        raise ValueError("M4 evidence receipt is not valid JSON") from error
+
+    # Historical qualified facts, not live status or an inferred current HEAD.
+    # Exact receipt comparison rejects extra/unverified claims and type changes
+    # (notably Python's True == 1), while allowing key order and whitespace.
+    expected = {
+        "schema": "m4-acceptance-v1",
+        "implementation_sha": "f3b69a8a94dd052d527752e8e7f12dea81053412",
+        "run": 34580238289, "attempt": 1, "conclusion": "success",
+        "jobs": {
+            "full": [103201852919, "success"],
+            "targeted_m4": [103201852997, "success"],
+            "cold": [103201852621, "success"],
+            "small": [103201852817, "success"],
+        },
+        "native_full": {"total": 1111, "success": 1108, "skipped": 3, "failure": 0, "warnings": 23},
+        "small_success": 3, "targeted_native_success": 3,
+        "artifact_ids": [10265060093, 10263997073, 10194309600, 10191864685, 10191506418],
+        "zip": {
+            "bytes": 60560,
+            "sha256": "6d0fc968e87e18afaeb9152738a14423e3275c8856748953809a002382c84788",
+            "manifest_sha256": "b41fa956e20de013e0a2abd18739e4f299fb6724f6315c56a8df302b9a10136c",
+            "entries": 10, "verified_payloads": 9, "includes_photos": False,
+        },
+        "m4_screenshots": 13, "cold_median_seconds": 0.13411,
+        "cold_raw_sha256": "f51b43660d73dbc134aacffb78eb59b22f8190c024d37cf5a1c42967e3788cc5",
+        "privacy_scan": "PASS",
+        "evidence_review": "internal GPT-6 Astra/high; no new scoped findings",
+        "physical": {key: "NOT RUN" for key in (
+            "signed_two_device_cloudkit", "real_notification_delivery",
+            "physical_photo_picker_share", "locked_device_file_protection",
+            "voiceover_audio_graphs", "physical_performance", "testflight_distribution",
+        )},
+        "prior_intermittent_root_causes": "UNRESOLVED",
+        "successor_sha_and_run": "EXTERNAL SDD AND M5 HANDOFF",
+    }
+    if json.dumps(receipt, sort_keys=True, allow_nan=False) != json.dumps(expected, sort_keys=True):
+        raise ValueError("M4 evidence receipt differs from qualified immutable implementation")
+
+
+def task9_evidence_self_test(source_root: Path) -> None:
+    # Exercise the actual no-argument CLI: deleting the acceptance artifact
+    # must fail production verification, even without --self-test.
+    with tempfile.TemporaryDirectory(prefix="m4-evidence-verifier-") as directory:
+        fixture = Path(directory)
+        for relative in (".github", "App", "Packages", "HealthTrackingAppTests",
+                         "HealthTrackingAppUITests", "scripts", "docs", "project.yml"):
+            source = source_root / relative
+            if source.is_dir():
+                shutil.copytree(source, fixture / relative,
+                                ignore=shutil.ignore_patterns(".build", "__pycache__"))
+            else:
+                shutil.copy2(source, fixture / relative)
+        evidence = fixture / "docs/evidence/M4/acceptance.md"
+        if evidence.exists():
+            evidence.unlink()
+        result = subprocess.run(["bash", str(fixture / "scripts/verify-m4-reports.sh")],
+                                capture_output=True, text=True, check=False)
+        if result.returncode == 0:
+            raise SystemExit("M4 evidence mutation escaped: missing acceptance document")
+        if "Missing M4 acceptance evidence: docs/evidence/M4/acceptance.md" not in result.stdout + result.stderr:
+            raise SystemExit(f"M4 missing evidence failed for wrong reason: {result.stdout}{result.stderr}")
+        original = (source_root / "docs/evidence/M4/acceptance.md").read_text(encoding="utf-8")
+        evidence.parent.mkdir(parents=True, exist_ok=True)
+        evidence.write_text(original, encoding="utf-8")
+        verify_task9_evidence(fixture)
+        blocks = re.findall(r"^```json\n(.*?)^```$", original, re.MULTILINE | re.DOTALL)
+        if len(blocks) != 1:
+            raise SystemExit("M4 evidence test fixture requires one JSON receipt")
+        receipt = json.loads(blocks[0])
+        mutations = [
+            ("empty document", ""),
+            ("missing receipt", original.replace("```json\n" + blocks[0] + "```", "")),
+            ("duplicate receipt", original + "\n```json\n" + blocks[0] + "```\n"),
+            ("invalid receipt JSON", original.replace(blocks[0], "{broken}\n")),
+            ("duplicate JSON key", original.replace('"attempt": 1,', '"attempt": 9, "attempt": 1,')),
+        ]
+        for field, value in (
+            ("schema", "m4-acceptance-v0"), ("implementation_sha", "0" * 40),
+            ("run", 34468155512), ("attempt", True), ("conclusion", "cancelled"),
+            ("jobs", {"full": [103201852919, "success"]}),
+            ("native_full", {"total": 1111, "success": 1111, "skipped": 0, "failure": 0, "warnings": 0}),
+            ("small_success", 0), ("targeted_native_success", 18),
+            ("artifact_ids", [10163515995]), ("zip", {"sha256": "0" * 64}),
+            ("m4_screenshots", 12), ("cold_median_seconds", float("nan")),
+            ("cold_raw_sha256", "0" * 64), ("privacy_scan", "NOT RUN"),
+            ("evidence_review", "external agent approved"),
+            ("physical", {"signed_two_device_cloudkit": "PASS"}),
+            ("prior_intermittent_root_causes", "FIXED"),
+            ("successor_sha_and_run", "SELF EMBEDDED"), ("unverified_extra_claim", "PASS"),
+        ):
+            changed = dict(receipt)
+            changed[field] = value
+            mutations.append((field, original.replace(blocks[0], json.dumps(changed) + "\n")))
+        missing = dict(receipt)
+        del missing["physical"]
+        mutations.append(("missing physical boundary", original.replace(blocks[0], json.dumps(missing) + "\n")))
+        escaped = []
+        for label, mutated in mutations:
+            evidence.write_text(mutated, encoding="utf-8")
+            try:
+                verify_task9_evidence(fixture)
+            except ValueError as error:
+                if "M4 evidence" not in str(error):
+                    raise SystemExit(f"M4 evidence {label} failed for wrong reason: {error}") from error
+            else:
+                escaped.append(label)
+        if escaped:
+            raise SystemExit("M4 evidence mutations escaped: " + ", ".join(escaped))
+        # Formatting/order are not facts: an equivalent receipt must pass.
+        evidence.write_text(original.replace(blocks[0], json.dumps(receipt, sort_keys=True) + "\n"), encoding="utf-8")
+        verify_task9_evidence(fixture)
+        print(f"M4 acceptance evidence self-tests passed ({len(mutations) + 1} rejected records).")
+
+
 root = Path(sys.argv[1])
 mode = sys.argv[2]
 if mode == "--self-test":
+    # Stage B acceptance contract: do not ship an unauditable milestone.
+    # The test-only revision must fail solely on this missing artifact,
+    # before the evidence document and its production verifier are added.
+    if not (root / "docs/evidence/M4/acceptance.md").is_file():
+        raise SystemExit("Missing M4 acceptance evidence: docs/evidence/M4/acceptance.md")
+    task9_evidence_self_test(root)
     task9_partition_self_test(root)
     task9_zip_attachment_self_test(root)
     self_test(root)
@@ -7959,6 +8104,7 @@ if mode == "--self-test":
     task7_real_asset_self_test(root)
     print("M4 focused CI verifier self-tests passed.")
 elif mode == "":
+    verify_task9_evidence(root)
     verify(root)
     verify_task9_red_contract(root)
     verify_task9_stage_a_contract(root)
