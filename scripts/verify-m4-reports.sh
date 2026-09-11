@@ -7946,6 +7946,11 @@ def self_test(source_root: Path) -> None:
 root = Path(sys.argv[1])
 mode = sys.argv[2]
 if mode == "--self-test":
+    # Stage B acceptance contract: do not ship an unauditable milestone.
+    # The test-only revision must fail solely on this missing artifact,
+    # before the evidence document and its production verifier are added.
+    if not (root / "docs/evidence/M4/acceptance.md").is_file():
+        raise SystemExit("Missing M4 acceptance evidence: docs/evidence/M4/acceptance.md")
     task9_partition_self_test(root)
     task9_zip_attachment_self_test(root)
     self_test(root)
